@@ -32,9 +32,10 @@ meDiary/
 | Sehr gutes, nicht „billiges" Design | Eigenes „Apotheken"-Designsystem, Light/Dark |
 | PC / iPad / Android, leicht & schnell | Responsives Touch-UI, Safe-Areas, Haptik, APK |
 
-Die 11 Tages-Skalen: **Schlafqualität, Müdigkeit/Erschöpfung, Stabilität,
-psychotische Symptomlast, Leistung/Funktion, Stimmung, innere Unruhe/Angst,
-Antrieb/Motivation, Reizoffenheit/Überstimulation, Suchtdruck/Craving, Schmerz.**
+Die 11 Tages-Skalen (Reihenfolge gemäß `import/konsum_tagebuch_skalen.md`):
+**Schlafqualität, Müdigkeit/Erschöpfung, Stabilität, Psychotisch/Realitätsferne,
+Stimmung, Leistung/Funktion im Alltag, Angst/innere Anspannung, Craving/Suchtdruck,
+Überstimulation/Getriebenheit, Sedierung/Benommenheit, Schmerz/körperliche Beschwerden.**
 
 ---
 
@@ -113,6 +114,53 @@ im selben `docker-compose.yml`, und `mediary` aus den `ports` nehmen (nur intern
 Egal ob Docker, systemd oder LAN: in der App **Einstellungen → Server** die
 Adresse eintragen — `http://<LAN-IP>:4000` im Heimnetz (Klartext ist erlaubt)
 bzw. `https://deine-domain.de` von außen.
+
+---
+
+## Daten importieren (`import/`-Ordner)
+
+Der Importer nutzt die **kuratierten Markdown-Logs als Hauptquelle** (sie sind sauberer
+als `entries.jsonl`: exakte Uhrzeiten, klare Substanznamen, Korrekturen bereits
+eingearbeitet) und füllt mit `entries.jsonl` nur die Lücken:
+
+| Quelle | liefert |
+|---|---|
+| `medikations_akutverlauf.md` | Akut-/Bedarfseinnahmen (primär, getimt) |
+| `medikationsplan_verlauf.md` | versionierter Plan (Voll-Snapshots + Deltas, chronologisch) |
+| `konsum_tagebuch_skalen.md` | Tagesbilder (11 Skalen; 10- oder 11-Werte-Zeilen) |
+| `entries.jsonl` | **Lückenfüller**: planmäßige Einnahmen + alles, was die Markdown-Logs nicht abdecken (z. B. der 09.06.); Korrekturen |
+
+Bei Überschneidung **gewinnt Markdown**: ein jsonl-Eintrag wird übersprungen, wenn
+dieselbe (Tag, Uhrzeit) bzw. – bei fehlender Uhrzeit – dasselbe (Tag, Substanz) bereits
+aus Markdown vorliegt. Tagessummen/Kontextzeilen und fehlgeloggte Klartext-Korrekturen
+werden gefiltert. **Idempotent** über `source_event_id`; **Dry-Run ist Standard** —
+es wird erst mit `--commit` geschrieben.
+
+**Lokal / systemd:**
+```bash
+npm --prefix server run import                 # Dry-Run: zeigt nur, was käme
+npm --prefix server run import -- --commit     # tatsächlich schreiben
+# sauberer Neu-Import: --commit --reset-imported
+```
+
+**Docker (Live-System):** den Ordner in einen Einmal-Container mounten — schreibt in
+dieselbe DB (`/data`-Volume). Vorher Image bauen (`docker compose build`).
+```bash
+# Dry-Run:
+docker compose run --rm -v "$PWD/import:/import:ro" -e IMPORT_DIR=/import \
+  mediary node dist/import.js
+# Schreiben (Server kurz stoppen vermeidet DB-Lock):
+docker compose stop mediary
+docker compose run --rm -v "$PWD/import:/import:ro" -e IMPORT_DIR=/import \
+  mediary node dist/import.js --commit
+docker compose start mediary
+```
+
+> Hinweis: Substanznamen werden bestmöglich gekürzt, der **vollständige Originaltext
+> steht jeweils in der Notiz**. Die 11 App-Skalen entsprechen jetzt exakt der
+> `konsum_tagebuch_skalen.md`. Der 09.06. liegt in `entries.jsonl` unsauber vor
+> (finale Timeline + ältere Korrektur-Nachrichten als Einnahmen) — kurz im Verlauf
+> gegenlesen.
 
 ---
 

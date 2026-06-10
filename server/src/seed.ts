@@ -126,7 +126,7 @@ const curves: Record<string, number[]> = {
   functioning: [4, 5, 6, 6, 7, 7],
   mood: [4, 4, 5, 6, 6, 7],
   anxiety: [6, 5, 5, 4, 3, 3],
-  drive: [3, 4, 5, 5, 6, 6],
+  sedation: [5, 5, 4, 4, 3, 3],
   overstimulation: [6, 5, 5, 4, 4, 3],
   craving: [3, 3, 2, 2, 2, 1],
   pain: [3, 3, 2, 2, 2, 2],

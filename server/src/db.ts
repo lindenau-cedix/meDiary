@@ -69,6 +69,18 @@ CREATE TABLE IF NOT EXISTS daily_assessments (
 );
 `);
 
+// Migration: Spalte für Import-Idempotenz (verknüpft Zeilen mit import event_id)
+function ensureColumn(table: string, column: string, type: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (!cols.some((c) => c.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+  }
+}
+ensureColumn('intakes', 'source_event_id', 'TEXT');
+ensureColumn('plan_versions', 'source_event_id', 'TEXT');
+db.exec(`CREATE INDEX IF NOT EXISTS idx_intakes_source ON intakes(source_event_id);
+         CREATE INDEX IF NOT EXISTS idx_plan_versions_source ON plan_versions(source_event_id);`);
+
 // ---------- Typen ----------
 
 export interface SubstanceRow {

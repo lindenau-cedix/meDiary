@@ -5,6 +5,7 @@ web/android
 web/ios
 server/data
 data
+import
 .git
 .gitignore
 *.log
