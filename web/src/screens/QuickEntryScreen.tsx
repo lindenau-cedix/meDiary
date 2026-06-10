@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Settings2, Plus, Check, Clock3, Moon, ChevronRight, WifiOff } from 'lucide-react';
+import { Settings2, Plus, Check, Clock3, Moon, ChevronRight, WifiOff, AlertCircle } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -14,7 +14,7 @@ import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { greeting, nowLocalInput, todayStr, formatFull, formatTime } from '../lib/format';
-import { useSubstances, useIntakes, useIntakeMutations, useDefaults } from '../lib/queries';
+import { useSubstances, useIntakes, useIntakeMutations, useDefaults, useCompliance } from '../lib/queries';
 import { ApiError } from '../lib/api';
 import type { Substance } from '../lib/types';
 
@@ -22,9 +22,21 @@ export function QuickEntryScreen() {
   const toast = useToast();
   const { data: substances = [], error } = useSubstances();
   const { data: defaults } = useDefaults();
+  const { data: compliance } = useCompliance();
   const today = todayStr();
   const { data: todayIntakes = [] } = useIntakes({ from: today, limit: 50 });
   const { create, remove } = useIntakeMutations();
+
+  // Substanz-Namen, für die DEFAULTS.md keinen Eintrag hat. Case-insensitive
+  // Schlüsselvergleich spiegelt das Server-Verhalten.
+  const missingDefaults = useMemo(() => {
+    const set = new Set<string>();
+    if (compliance?.missing) {
+      for (const m of compliance.missing) set.add(m.name.toLowerCase());
+    }
+    return set;
+  }, [compliance]);
+  const hasAnyMissing = missingDefaults.size > 0;
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [takenAt, setTakenAt] = useState(nowLocalInput());
@@ -115,6 +127,29 @@ export function QuickEntryScreen() {
         </Card>
       )}
 
+      {/* DEFAULTS-Compliance-Hinweis */}
+      {hasAnyMissing && (
+        <Card className="mb-4 p-4 flex items-start gap-3 ring-warn/40">
+          <AlertCircle size={20} className="text-warn shrink-0 mt-0.5" />
+          <div className="flex-1 text-sm">
+            <p className="font-medium text-ink">
+              {missingDefaults.size === 1
+                ? '1 Substanz ohne DEFAULTS-Eintrag'
+                : `${missingDefaults.size} Substanzen ohne DEFAULTS-Eintrag`}
+            </p>
+            <p className="text-ink-muted text-xs leading-snug mt-0.5">
+              Diese Stoffe bekommen beim Eintragen aktuell keine Standard-Notiz/-Menge. In den
+              Einstellungen unter „Standard-Notizen" ergänzen.
+            </p>
+          </div>
+          <Link to="/einstellungen">
+            <Button size="sm" variant="soft">
+              Pflegen
+            </Button>
+          </Link>
+        </Card>
+      )}
+
       {/* Composer */}
       <Card className="p-4 space-y-3">
         <div className="flex items-center gap-2">
@@ -179,6 +214,7 @@ export function QuickEntryScreen() {
             key={s.id}
             sub={s}
             selected={selectedId === s.id}
+            missingDefault={missingDefaults.has(s.name.toLowerCase())}
             onSelect={() => {
               haptics.select();
               setSelectedId((id) => (id === s.id ? null : s.id));
@@ -278,11 +314,13 @@ export function QuickEntryScreen() {
 function SubstanceTile({
   sub,
   selected,
+  missingDefault,
   onSelect,
   onInstant,
 }: {
   sub: Substance;
   selected: boolean;
+  missingDefault?: boolean;
   onSelect: () => void;
   onInstant: () => void;
 }) {
@@ -312,6 +350,7 @@ function SubstanceTile({
       }}
       onPointerLeave={clear}
       onPointerCancel={clear}
+      title={missingDefault ? 'Kein DEFAULTS-Eintrag – in Einstellungen ergänzen' : undefined}
       className={cx(
         'press relative min-h-[5.5rem] rounded-3xl p-3 text-left ring-1 transition-all duration-150 overflow-hidden',
         selected ? 'ring-2 bg-surface shadow-raised' : 'ring-line bg-surface hover:bg-surface2',
@@ -322,6 +361,15 @@ function SubstanceTile({
         className="absolute right-3 top-3 size-2.5 rounded-full"
         style={{ backgroundColor: sub.color ?? '#5B7A60' }}
       />
+      {missingDefault && (
+        <span
+          className="absolute left-3 top-3 grid place-items-center size-4 rounded-full text-white"
+          style={{ backgroundColor: 'var(--warn, #C9A14A)' }}
+          aria-label="Kein DEFAULTS-Eintrag"
+        >
+          <AlertCircle size={11} strokeWidth={2.5} />
+        </span>
+      )}
       <SubstanceSeal name={sub.name} color={sub.color} />
       <p className="mt-2 font-medium text-[15px] text-ink leading-tight pr-3 flex items-center gap-1">
         <span className="truncate">{sub.name}</span>

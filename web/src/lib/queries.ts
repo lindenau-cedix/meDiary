@@ -11,6 +11,7 @@ export const qk = {
   assessments: (from?: string, to?: string) => ['assessments', from, to] as const,
   assessment: (date: string) => ['assessment', date] as const,
   defaults: () => ['defaults'] as const,
+  compliance: () => ['defaults', 'check'] as const,
   metrics: () => ['metrics'] as const,
 };
 
@@ -104,8 +105,15 @@ export function useSaveDefaults() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (content: string) => api.defaults.save(content),
-    onSuccess: () => qc.invalidateQueries({ queryKey: qk.defaults() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.defaults() });
+      qc.invalidateQueries({ queryKey: qk.compliance() });
+    },
   });
+}
+/** DEFAULTS-Compliance: welche Substanzen haben (k)einen Eintrag in DEFAULTS.md. */
+export function useCompliance(enabled = true) {
+  return useQuery({ queryKey: qk.compliance(), queryFn: () => api.defaults.check(), enabled });
 }
 export function useMetrics() {
   return useQuery({ queryKey: qk.metrics(), queryFn: () => api.metrics(), staleTime: Infinity });

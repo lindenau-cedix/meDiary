@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db, type IntakeRow, type SubstanceRow } from '../db.js';
 import { nowLocalISO, normalizeDateTime, consumptionDay } from '../lib/time.js';
 import { defaultsFor } from '../lib/defaults.js';
+import { findOrCreateSubstance } from '../lib/substances.js';
 import { serializeIntake } from '../lib/serialize.js';
 
 export const intakesRouter = Router();
@@ -48,15 +49,22 @@ intakesRouter.post('/', (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const d = parsed.data;
 
-  // Substanz auflösen: per ID, sonst per Name
+  // Substanz auflösen: per ID, sonst per Name. Wird der Name nicht gefunden,
+  // wird er als QuickPick (= Substanz-Kachel) automatisch angelegt, damit
+  // jeder jemals eingetragene Stoff beim nächsten Mal tippbar ist.
   let substance: SubstanceRow | undefined;
+  let createdSubstance = false;
   if (d.substanceId != null) {
     substance = db.prepare(`SELECT * FROM substances WHERE id = ?`).get(d.substanceId) as SubstanceRow | undefined;
     if (!substance) return res.status(400).json({ error: 'Substanz nicht gefunden' });
   } else if (d.substanceName) {
-    substance = db
-      .prepare(`SELECT * FROM substances WHERE lower(name) = lower(?) AND archived_at IS NULL ORDER BY id LIMIT 1`)
-      .get(d.substanceName) as SubstanceRow | undefined;
+    const before = db
+      .prepare(`SELECT id, name FROM substances`)
+      .all() as { id: number; name: string }[];
+    const wanted = d.substanceName.trim().toLocaleLowerCase('de');
+    const existing = before.find((s) => s.name.trim().toLocaleLowerCase('de') === wanted);
+    substance = findOrCreateSubstance(d.substanceName);
+    createdSubstance = !existing;
   }
 
   const substanceName = substance?.name ?? d.substanceName;
@@ -94,6 +102,7 @@ intakesRouter.post('/', (req, res) => {
     nightMed: isNightMed,
     assessmentDate,
     assessmentExists,
+    createdSubstance,
   });
 });
 

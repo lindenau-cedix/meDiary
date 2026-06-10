@@ -98,3 +98,19 @@ export interface DefaultsPayload {
   defaults: Record<string, SubstanceDefault>;
   raw: string;
 }
+
+export interface SubstanceCompliance {
+  name: string;
+  intakeCount: number;
+  inSubstances: boolean;
+  hasDefault: boolean;
+  matchedKey: string | null;
+}
+
+export interface ComplianceReport {
+  checkedAt: string;
+  defaultsAvailable: boolean;
+  total: number;
+  compliant: SubstanceCompliance[];
+  missing: SubstanceCompliance[];
+}

@@ -190,6 +190,35 @@ Die Datei liegt im **Projekt-Wurzelverzeichnis** (`DEFAULTS.md`) und ist auch in
 > `server/src/lib/time.ts` (`DAY_BOUNDARY`) und bestimmt, welchem Tag das Tagesbild
 > einer Nachtmedikation zugeordnet wird (Einnahmen 00:00–03:29 → Vortag).
 
+### Automatische Substanz-QuickPicks
+
+Jede Substanz, die jemals per `POST /api/intakes` mit `substanceName` erfasst
+wurde (z. B. aus dem WhatsApp-Importer oder einer externen App), wird
+**automatisch als Kachel** in der Substanz-Liste angelegt. Dafür sorgt
+`server/src/lib/substances.ts → findOrCreateSubstance()`. Beim **Serverstart**
+läuft zusätzlich `backfillSubstancesFromIntakes()`, das bestehende Einnahmen
+ohne `substance_id` rückwirkend verknüpft; der Importer macht das nach
+`--commit` ebenfalls in einem Schritt. Das Matching ist Unicode-aware
+(`toLocaleLowerCase('de')`), damit `CBD-Öl` und `cbd-öl` zusammenfinden.
+
+### DEFAULTS-Compliance-Check
+
+`GET /api/defaults/check` vergleicht **jede Substanz** (aus `substances` und
+aus `intakes`) gegen die Einträge in `DEFAULTS.md` und liefert eine Aufteilung
+in `compliant` (hat Eintrag) und `missing` (kein Eintrag). Das Frontend
+nutzt das auf zwei Arten:
+
+- Auf dem **Heute-Bildschirm** zeigt eine Warnkarte oben an, wie viele
+  Substanzen ohne DEFAULTS-Eintrag sind; betroffene Kacheln bekommen ein
+  kleines Warn-Icon.
+- In den **Einstellungen → Prüfung: DEFAULTS.md** gibt es eine Liste aller
+  „missing"-Substanzen mit Einnahme-Zähler und einem **„Eintrag"-Button**,
+  der im DEFAULTS-Editor sofort einen neuen Abschnitt `## <Name>` mit
+  leerer `Notiz:`-Zeile anlegt und den Cursor dorthin springen lässt.
+
+So wird das Pflegen von `DEFAULTS.md` zum Bestandteil des üblichen
+Eintragens, statt eine separate Pflicht-Übung zu sein.
+
 ---
 
 ## API-Referenz (Auszug)
@@ -210,6 +239,7 @@ Die Datei liegt im **Projekt-Wurzelverzeichnis** (`DEFAULTS.md`) und ist auch in
 | `GET` | `/api/assessments?from=&to=` | Tagesbilder (für Trends) |
 | `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
+|| `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht (alle Substanzen mit/ohne Eintrag) |
 
 `POST /api/intakes` liefert zusätzlich `{ nightMed, assessmentDate, assessmentExists }` —
 darüber öffnet das Frontend bei Nachtmedikation automatisch das Tagesbild.

@@ -8,6 +8,7 @@ import type {
   Assessment,
   Metric,
   DefaultsPayload,
+  ComplianceReport,
 } from './types';
 
 const API_BASE_KEY = 'mediary.apiBase';
@@ -129,5 +130,6 @@ export const api = {
     get: () => request<DefaultsPayload>('/api/defaults'),
     save: (content: string) =>
       request<DefaultsPayload>('/api/defaults', { method: 'PUT', body: JSON.stringify({ content }) }),
+    check: () => request<ComplianceReport>('/api/defaults/check'),
   },
 };

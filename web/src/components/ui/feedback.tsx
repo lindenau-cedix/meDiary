@@ -57,7 +57,7 @@ export function Badge({
   className,
 }: {
   children: ReactNode;
-  tone?: 'neutral' | 'primary' | 'accent' | 'good' | 'bad';
+  tone?: 'neutral' | 'primary' | 'accent' | 'good' | 'bad' | 'warn';
   className?: string;
 }) {
   const tones: Record<string, string> = {
@@ -66,6 +66,7 @@ export function Badge({
     accent: 'bg-accent-soft text-accent',
     good: 'bg-good/15 text-good',
     bad: 'bg-bad/15 text-bad',
+    warn: 'bg-warn/15 text-warn',
   };
   return (
     <span

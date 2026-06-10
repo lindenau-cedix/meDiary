@@ -20,6 +20,16 @@ const SWATCHES = [
   '#9C5C8A', '#5FA8A0', '#B5727A', '#6E8C6A', '#C2705A',
 ];
 
+/**
+ * Case-insensitive Key für Substanz-Namen. SQLite's eingebautes `lower()`
+ * ist ASCII-only und lässt z. B. "Ö" unverändert – für deutsche Namen wie
+ * "CBD-Öl" wäre "CBD-Öl" != "cbd-öl" ein falsches Match. Daher normalisieren
+ * wir in JS per `toLocaleLowerCase('de')`.
+ */
+export function nameKey(name: string): string {
+  return name.trim().toLocaleLowerCase('de');
+}
+
 /** Deterministische, gut gestreute Farbe anhand der bisherigen Anzahl. */
 function nextColor(): string {
   const n = (db.prepare(`SELECT COUNT(*) AS c FROM substances`).get() as { c: number }).c;
@@ -39,18 +49,21 @@ export function createSubstance(name: string): SubstanceRow {
 }
 
 /**
- * Findet eine Substanz per Name (case-insensitive) – aktive bevorzugt vor
- * archivierter – oder legt sie neu an. Eine archivierte Substanz wird bewusst
- * NICHT reaktiviert: so bleibt eine vom Nutzer entfernte Kachel entfernt.
+ * Findet eine Substanz per Name (case-insensitive, Unicode-aware) – aktive
+ * bevorzugt vor archivierter – oder legt sie neu an. Eine archivierte Substanz
+ * wird bewusst NICHT reaktiviert: so bleibt eine vom Nutzer entfernte Kachel
+ * entfernt.
  */
 export function findOrCreateSubstance(name: string): SubstanceRow {
-  const existing = db
-    .prepare(
-      `SELECT * FROM substances WHERE lower(name) = lower(?)
-       ORDER BY (archived_at IS NULL) DESC, id LIMIT 1`,
-    )
-    .get(name.trim()) as SubstanceRow | undefined;
-  return existing ?? createSubstance(name);
+  const trimmed = name.trim();
+  const key = nameKey(trimmed);
+  // JS-seitiger Scan, weil SQLite's `lower()` keine Umlaute faltet.
+  const candidates = db
+    .prepare(`SELECT * FROM substances ORDER BY id`)
+    .all() as SubstanceRow[];
+  const existing = candidates.find((s) => nameKey(s.name) === key);
+  if (existing) return existing;
+  return createSubstance(trimmed);
 }
 
 /**
@@ -73,17 +86,28 @@ export const backfillSubstancesFromIntakes = db.transaction((): { created: numbe
     )
     .all() as { name: string }[];
 
-  const link = db.prepare(
-    `UPDATE intakes SET substance_id = @id
-      WHERE substance_id IS NULL AND lower(substance_name) = lower(@name)`,
-  );
+  // SQLite's `lower()` ist ASCII-only – wir koppeln intake→substance daher
+  // in JS über `nameKey`, damit Umlaute (z. B. "CBD-Öl" == "cbd-öl") korrekt
+  // zugeordnet werden.
+  const orphanIntakes = db
+    .prepare(
+      `SELECT id, substance_name FROM intakes
+        WHERE substance_id IS NULL
+        ORDER BY id`,
+    )
+    .all() as { id: number; substance_name: string }[];
+  const updateLink = db.prepare(`UPDATE intakes SET substance_id = ? WHERE id = ?`);
 
   let created = 0;
   let linked = 0;
   for (const { name } of orphanNames) {
     const sub = createSubstance(name);
     created++;
-    linked += link.run({ id: sub.id, name }).changes;
+    const wanted = nameKey(name);
+    for (const row of orphanIntakes) {
+      if (nameKey(row.substance_name) !== wanted) continue;
+      if (updateLink.run(sub.id, row.id).changes) linked++;
+    }
   }
   return { created, linked };
 });

@@ -1,18 +1,33 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { Sun, Moon, Monitor, Server, FlaskConical, Pill, FileText, Check, Loader2, Github } from 'lucide-react';
+import {
+  Sun,
+  Moon,
+  Monitor,
+  Server,
+  FlaskConical,
+  Pill,
+  FileText,
+  Check,
+  Loader2,
+  Github,
+  AlertCircle,
+  Plus,
+  ShieldCheck,
+  RefreshCw,
+} from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { TextInput, TextArea } from '../components/ui/inputs';
-import { SectionLabel } from '../components/ui/feedback';
+import { SectionLabel, Badge } from '../components/ui/feedback';
 import { SubstanceManager } from '../components/SubstanceManager';
 import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { getApiBase, setApiBase, api } from '../lib/api';
-import { useDefaults, useSaveDefaults } from '../lib/queries';
+import { useDefaults, useSaveDefaults, useCompliance } from '../lib/queries';
 
 const THEME_OPTIONS: { value: ThemePref; label: string; Icon: typeof Sun }[] = [
   { value: 'system', label: 'System', Icon: Monitor },
@@ -31,6 +46,7 @@ export function SettingsScreen() {
 
   const { data: defaults } = useDefaults();
   const saveDefaults = useSaveDefaults();
+  const { data: compliance, isFetching: complianceLoading, refetch: refetchCompliance } = useCompliance();
   const [defaultsText, setDefaultsText] = useState<string | null>(null);
   const defaultsValue = defaultsText ?? defaults?.raw ?? '';
 
@@ -56,6 +72,29 @@ export function SettingsScreen() {
     haptics.success();
     toast.show({ message: 'Standard-Notizen gespeichert' });
   };
+
+  /**
+   * Fügt einen neuen DEFAULTS-Abschnitt für eine Substanz ein, die bisher
+   * keinen Eintrag hatte. Schnell-Pflege, damit der Compliance-Bericht
+   * nicht ständig rot leuchtet.
+   */
+  const addMissingDefault = (name: string) => {
+    const heading = `## ${name}`;
+    const block = `\n${heading}\nNotiz: \n`;
+    // Wenn am Ende kein Newline steht, einen setzen.
+    const base = defaultsValue.endsWith('\n') || defaultsValue === '' ? defaultsValue : `${defaultsValue}\n`;
+    const next = `${base}${block}`;
+    setDefaultsText(next);
+    haptics.light();
+    // Scrollt den Editor ins Sichtfeld, damit der User direkt weiter pflegen kann.
+    requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Standard-Notizen (Markdown)"], textarea[placeholder*="## Substanzname"]');
+      el?.focus();
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    });
+  };
+
+  const missing = compliance?.missing ?? [];
 
   return (
     <>
@@ -147,6 +186,72 @@ export function SettingsScreen() {
               {testing === 'ok' && <span className="text-sm text-good">verbunden</span>}
               {testing === 'fail' && <span className="text-sm text-bad">nicht erreichbar</span>}
             </div>
+          </Card>
+        </section>
+
+        {/* DEFAULTS-Compliance */}
+        <section>
+          <SectionLabel className="px-1 mb-2.5">Prüfung: DEFAULTS.md</SectionLabel>
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center gap-2.5 text-ink-muted">
+              <ShieldCheck size={18} />
+              <p className="text-sm">Hat jede Substanz einen Eintrag in DEFAULTS.md?</p>
+              <div className="flex-1" />
+              <button
+                onClick={() => refetchCompliance()}
+                className="press grid place-items-center size-8 rounded-xl text-ink-faint hover:text-ink-muted hover:bg-surface2"
+                aria-label="Erneut prüfen"
+                title="Erneut prüfen"
+              >
+                <RefreshCw size={15} className={complianceLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+
+            {compliance ? (
+              <>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <Badge tone="good">{compliance.compliant.length} mit Eintrag</Badge>
+                  {missing.length > 0 ? (
+                    <Badge tone="warn">{missing.length} ohne Eintrag</Badge>
+                  ) : (
+                    <Badge tone="good">Alles abgedeckt</Badge>
+                  )}
+                  <span className="text-ink-faint">· {compliance.total} unterschiedliche Substanzen</span>
+                </div>
+
+                {missing.length > 0 && (
+                  <div className="rounded-2xl ring-1 ring-line overflow-hidden">
+                    <p className="px-3 py-2 text-xs font-semibold text-ink-muted bg-surface2/60">
+                      Ohne DEFAULTS-Eintrag
+                    </p>
+                    <ul className="divide-y divide-hairline">
+                      {missing.map((m) => (
+                        <li key={m.name} className="flex items-center gap-3 px-3 py-2.5">
+                          <AlertCircle size={16} className="text-warn shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-ink truncate">{m.name}</p>
+                            <p className="text-xs text-ink-faint">
+                              {m.intakeCount} Einnahme{m.intakeCount === 1 ? '' : 'n'}
+                              {m.inSubstances ? '' : ' · noch keine Kachel'}
+                            </p>
+                          </div>
+                          <Button
+                            size="sm"
+                            variant="soft"
+                            icon={<Plus size={14} />}
+                            onClick={() => addMissingDefault(m.name)}
+                          >
+                            Eintrag
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-ink-faint">Lade Compliance-Bericht …</p>
+            )}
           </Card>
         </section>
 

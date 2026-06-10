@@ -26,6 +26,7 @@ import { db } from './db.js';
 import { config } from './config.js';
 import { nowLocalISO } from './lib/time.js';
 import { parseAkut, parsePlanVerlauf, extractSubstance, type MdIntake } from './lib/import_md.js';
+import { backfillSubstancesFromIntakes } from './lib/substances.js';
 
 const COMMIT = process.argv.includes('--commit');
 const RESET = process.argv.includes('--reset-imported');
@@ -312,6 +313,14 @@ const writeAll = db.transaction(() => {
   for (const a of assessments) insAssess.run({ date: a.date, scores: JSON.stringify(a.scores), now });
 
   console.log(`[import] geschrieben: ${newIntakes.length} Einnahmen, ${newVersions.length} Plan-Versionen, ${applied} Korrekturen, ${assessments.length} Tagesbilder`);
+
+  // Substanz-Kacheln für frisch importierte Einnahmen anlegen (QuickPick).
+  try {
+    const { created, linked } = backfillSubstancesFromIntakes();
+    if (created || linked) console.log(`[import] Substanzen: ${created} neu, ${linked} Einnahmen verknüpft.`);
+  } catch (e) {
+    console.warn('[import] Substanz-Backfill fehlgeschlagen:', e);
+  }
 });
 
 writeAll();
