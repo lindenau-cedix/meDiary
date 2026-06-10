@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+.env
+
+# Daten / SQLite
+server/data/
+
+# Capacitor / Android
+web/android/
+web/ios/

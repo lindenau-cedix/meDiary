@@ -1,0 +1,19 @@
+{
+  "name": "mediary",
+  "version": "1.0.0",
+  "private": true,
+  "description": "meDiary — Medikations-Tagebuch (HTTP-API + SQLite + Web/iPad/Android-Frontend)",
+  "scripts": {
+    "install:all": "npm --prefix server install && npm --prefix web install",
+    "dev": "concurrently -n api,web -c green,cyan \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "npm --prefix server run dev",
+    "dev:web": "npm --prefix web run dev",
+    "seed": "npm --prefix server run seed",
+    "build:web": "npm --prefix web run build",
+    "start": "npm --prefix server run start",
+    "cap:android": "npm --prefix web run cap:android"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
