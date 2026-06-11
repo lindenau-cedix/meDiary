@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
-import { db, type IntakeRow, type SubstanceRow } from '../db.js';
+import { db, type IntakeRow, type SubstanceRow, allNightMedsTaken } from '../db.js';
 import { nowLocalISO, normalizeDateTime, consumptionDay } from '../lib/time.js';
 import { defaultsFor } from '../lib/defaults.js';
 import { findOrCreateSubstance, nameKey } from '../lib/substances.js';
@@ -202,20 +202,16 @@ intakesRouter.post('/', (req, res) => {
   });
   const { row, companions } = createIntakes();
 
-  // Nachtmedikations-Erkennung -> Tages-Assessment anbieten (auch wenn die
-  // Nachtmedikation als Begleitsubstanz miterfasst wurde)
-  const isNightMed = !!substance?.is_night_med || companions.some((c) => !!c.substance.is_night_med);
-  let assessmentDate: string | null = null;
-  let assessmentExists = false;
-  if (isNightMed) {
-    assessmentDate = consumptionDay(takenAt);
-    assessmentExists =
-      !!db.prepare(`SELECT 1 FROM daily_assessments WHERE date = ?`).get(assessmentDate);
-  }
+  // Erst wenn ALLE Nacht-Medis des aktuellen Plans für den Konsumtag
+  // eingenommen wurden, wird das Tages-Assessment angeboten.
+  const assessmentDate = allNightMedsTaken(consumptionDay(takenAt));
+  const assessmentExists = assessmentDate
+    ? !!db.prepare(`SELECT 1 FROM daily_assessments WHERE date = ?`).get(assessmentDate)
+    : false;
 
   res.status(201).json({
     intake: serializeIntake(row),
-    nightMed: isNightMed,
+    nightMed: assessmentDate !== null,
     assessmentDate,
     assessmentExists,
     createdSubstance,

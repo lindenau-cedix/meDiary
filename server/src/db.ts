@@ -7,6 +7,11 @@ import { dateOf, nowLocalISO } from './lib/time.js';
 // Datenverzeichnis sicherstellen
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
 
+/** Normalisiert einen Substanznamen für den Vergleich (wie lib/substances.ts → nameKey). */
+function nameKey(name: string): string {
+  return name.trim().toLocaleLowerCase('de');
+}
+
 export const db = new Database(config.dbPath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
@@ -175,6 +180,62 @@ export function planItemsFor(versionId: number): PlanItemRow[] {
   return db
     .prepare(`SELECT * FROM plan_items WHERE version_id = ? ORDER BY sort_order, id`)
     .all(versionId) as PlanItemRow[];
+}
+
+/**
+ * Alle今夜-Medis-Namen aus dem am gegebenen Tag wirksamen Plan.
+ * Ein Plan hat genau die Substanzen, die in plan_items stehen.
+ * Ein Intake zählt als „genommen", wenn substance_id oder substance_name
+ * (nach Normalisierung über nameKey) übereinstimmt.
+ */
+export function nightMedicationsFromPlan(day: string): string[] {
+  const version = planVersionAt(day);
+  if (!version) return [];
+  const items = planItemsFor(version.id);
+  return items
+    .filter((item) => item.night != null)
+    .map((item) => item.substance_name);
+}
+
+/**
+ * Prüft, ob ALLE今夜-Medis des am gegebenen Tag wirksamen Plans
+ * heute bereits eingenommen wurden. Gibt den Tagesbild-Konsumtag zurück,
+ * wenn ja, sonst null.
+ */
+export function allNightMedsTaken(day: string): string | null {
+  const planned = nightMedicationsFromPlan(day);
+  if (planned.length === 0) return null;
+
+  // Einnahmen an diesem Konsumtag (mit Tagesgrenzen-Berücksichtigung)
+  const start = `${day}T00:00:00`;
+  const end = `${day}T23:59:59`;
+  const taken = db
+    .prepare(
+      `SELECT substance_id, substance_name FROM intakes
+       WHERE taken_at >= ? AND taken_at <= ?`,
+    )
+    .all(start, end) as { substance_id: number | null; substance_name: string }[];
+
+  // Substanz-IDs mit今夜-Med-Flag für今天的 Plan (normalisierte Namen)
+  const plannedLower = new Set(planned.map((n) => nameKey(n)));
+
+  // Eine Einnahme gilt als今夜-Med, wenn:
+  //   - substance_id auf eine Substanz mit is_night_med=1 zeigt, ODER
+  //   - substance_name nach nameKey-Normalisierung in plannedLower liegt
+  const nightMedIds = new Set<number>();
+  for (const item of planned) {
+    const row = db
+      .prepare(`SELECT id FROM substances WHERE name = ?`)
+      .get(item) as { id: number } | undefined;
+    if (row) nightMedIds.add(row.id);
+  }
+
+  const takenNightMeds = taken.filter((r) => {
+    if (r.substance_id != null && nightMedIds.has(r.substance_id)) return true;
+    return plannedLower.has(nameKey(r.substance_name));
+  });
+
+  return takenNightMeds.length >= planned.length ? day : null;
 }
 
 export interface NewPlanItem {

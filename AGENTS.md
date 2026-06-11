@@ -366,6 +366,16 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
   gewollt (Aufforderung, sie zu pflegen).
 - **`is_night_med` triggert das Tagesbild** — `consumptionDay(takenAt)`
   rechnet 00:00–03:29 in den Vortag. Das passiert hier, nicht im Frontend.
+- **Tagesbild-Trigger: alle Nacht-Medis des aktuellen Plans** — Das
+  Tagesbild wird NICHT mehr ausgelöst, wenn eine Substanz mit
+  `is_night_med=1` erfasst wird. Stattdessen prüft `POST /api/intakes`
+  nach jeder Erfassung, ob ALLE Nacht-Medis (`night`-Slot) des aktuell
+  gültigen Plans für den Konsumtag bereits eingenommen sind
+  (`allNightMedsTaken(day)` in `db.ts`). Erst wenn alle vorhanden sind,
+  wird `nightMed=true` und `assessmentDate` in der Response gesetzt.
+  Gilt für JEDE Substanz-Erfassung, sobald der Plan-Complete-State
+  erreicht ist — auch Nicht-Nacht-Med-Substanzen lösen dann das
+  Tagesbild aus.
 - **Import `entries.jsonl` deckt nur Lücken** — Markdown hat Vorrang; ein
   jsonl-Eintrag wird übersprungen, wenn (Tag, Zeit) bzw. (Tag, Substanz)
   bereits aus Markdown vorliegt.
@@ -379,3 +389,41 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
   Für „gilt seit X Tagen bis heute" muss das Wirkungsdatum nach dem der
   bisherigen aktuellen Version liegen (der Normalfall). Bei gleichem
   Wirkungsdatum gewinnt die höhere `id`.
+
+
+## Letzte Tasks
+
+- **2026-06-10 14:57** [hermes] les transformed, 416 kB JS gzip 130 kB).
+    - End-to-End-Smoke-Test mit seed-DB: Autovivifikation legt Mirtazapin und CBD-Öl korrekt an, Backfill nach Restart verknüpft orphan-Einnahmen, DEFAULTS werden case-insensitive (auch Unicode) gematcht, Compliance-Report listet 50 Substanzen (4 compliant, 46 missing nach Import).
+    - import.ts --commit läuft sauber und legt 42 Substanzen für 169 importierte Einnahmen an.
+    
+    Geänderte Dateien: 13 (12 modified, 1 new AGENTS.md). Kein Push/Commit — wie verlangt.
+╰──────────────────────────────────────────────────────────────────────────────╯
+- **2026-06-10 16:26** [hermes] {
+      "checkedAt": "2026-06-10T...",
+      "defaultsAvailable": true,
+      "total": 9,
+      "compliant": [...],
+      "missing": [...]
+    }
+    
+    
+    Im Frontend geht's auch: Einstellungen → „Prüfung: DEFAULTS.md" — dort siehst du Badges und pro fehlendem Eintrag einen „Eintrag"-Button, der direkt in den DEFAULTS-Editor springt.
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+## Letzte Tasks
+
+- **2026-06-11 23:xx** Tagesbild-Trigger geändert: Nicht mehr `is_night_med`-Flag
+  pro Substanz, sondern Plan-basiert — `POST /api/intakes` prüft jetzt nach jeder
+  Erfassung, ob ALLE Nacht-Medis (`night`-Slot) des aktuell gültigen Plans für
+  den Konsumtag bereits eingenommen sind (`allNightMedsTaken(day)` in `db.ts`).
+  Erst wenn alle vorhanden sind, wird `nightMed=true` und `assessmentDate`
+  gesetzt. Auch Nicht-Nacht-Med-Substanzen lösen das Tagesbild aus, sobald
+  der Plan-Complete-State erreicht ist.
+  - `db.ts`: neue Funktionen `nightMedicationsFromPlan(day)` und
+    `allNightMedsTaken(day)`; lokale `nameKey()`-Kopie (Zirkular-Import-Gefahr
+    über `lib/substances.ts`).
+  - `intakes.ts`: alter `is_night_med`-Flag-Check entfernt, ersetzt durch
+    `allNightMedsTaken(consumptionDay(takenAt))`. `nightMed` in der Response
+    wird jetzt aus `assessmentDate !== null` abgeleitet.
+  - E2E-Smoke: Erstes Nacht-Med → kein Assessment, zweites → Assessment ✓
