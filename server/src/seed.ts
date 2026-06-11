@@ -53,7 +53,9 @@ console.log(`[seed] ${subs.length} Substanzen angelegt.`);
 
 // ---------- Medikationsplan (zwei Versionen für den Verlauf/Diff) ----------
 function insertVersion(createdAt: string, note: string | null, items: any[]) {
-  const v = db.prepare(`INSERT INTO plan_versions (created_at, note) VALUES (?, ?)`).run(createdAt, note);
+  const v = db
+    .prepare(`INSERT INTO plan_versions (created_at, effective_from, note) VALUES (?, ?, ?)`)
+    .run(createdAt, createdAt.slice(0, 10), note);
   const vid = Number(v.lastInsertRowid);
   const ins = db.prepare(
     `INSERT INTO plan_items (version_id, substance_id, substance_name, strength, morning, noon, evening, night, unit, reason, notes, sort_order)

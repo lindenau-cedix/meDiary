@@ -55,11 +55,12 @@ export function formatFull(date: string): string {
   return fullFmt.format(parseLocal(date));
 }
 
-/** "vor 5 Tagen", "gestern", "heute" */
+/** "vor 5 Tagen", "gestern", "heute", "morgen", "in 5 Tagen" */
 export function relativeDays(date: string): string {
   const today = todayStr();
   if (date === today) return 'heute';
   if (date === dateNDaysAgo(1)) return 'gestern';
+  if (date === dateNDaysAgo(-1)) return 'morgen';
   const diff = Math.round((parseLocal(today).getTime() - parseLocal(date).getTime()) / 86400000);
   if (diff > 0) return `vor ${diff} Tagen`;
   return `in ${-diff} Tagen`;

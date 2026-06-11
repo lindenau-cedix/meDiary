@@ -44,19 +44,34 @@ export interface PlanItem {
   sortOrder?: number;
 }
 
+export interface UpcomingPlanVersion {
+  versionId: number;
+  effectiveFrom: string;
+  note: string | null;
+  itemCount: number;
+}
+
 export interface Plan {
   versionId: number | null;
   createdAt: string | null;
+  /** Wirkungsdatum ("gültig ab", YYYY-MM-DD) der Version. */
+  effectiveFrom: string | null;
   note: string | null;
   items: PlanItem[];
+  /** Nur bei GET /api/plan: Versionen mit Wirkungsdatum in der Zukunft. */
+  upcoming?: UpcomingPlanVersion[];
 }
 
 export interface PlanVersionSummary {
   versionId: number;
   createdAt: string;
+  effectiveFrom: string;
+  /** = effectiveFrom (Wirkungsdatum, für Anzeige/Snapshots). */
   date: string;
   note: string | null;
   itemCount: number;
+  active: boolean;
+  upcoming: boolean;
 }
 
 export interface PlanDiff {

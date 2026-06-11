@@ -5,6 +5,7 @@ import {
   planVersionAt,
   planItemsFor,
   createPlanVersion,
+  upcomingPlanVersions,
   type PlanVersionRow,
   type NewPlanItem,
 } from '../db.js';
@@ -16,7 +17,13 @@ export const planRouter = Router();
 const COMPARE_FIELDS = ['strength', 'morning', 'noon', 'evening', 'night', 'unit', 'reason', 'notes'] as const;
 
 function emptyPlan() {
-  return { versionId: null, createdAt: null, note: null, items: [] as SerializedPlanItem[] };
+  return {
+    versionId: null,
+    createdAt: null,
+    effectiveFrom: null,
+    note: null,
+    items: [] as SerializedPlanItem[],
+  };
 }
 
 function planPayloadAt(date: string | null) {
@@ -25,28 +32,39 @@ function planPayloadAt(date: string | null) {
   return serializePlanVersion(version, planItemsFor(version.id));
 }
 
-/** Aktueller Plan (neueste Version). */
+/** Aktueller Plan (heute wirksame Version) + bereits geplante zukünftige Versionen. */
 planRouter.get('/', (_req, res) => {
-  res.json(planPayloadAt(null));
+  const upcoming = upcomingPlanVersions().map((v) => ({
+    versionId: v.id,
+    effectiveFrom: v.effective_from,
+    note: v.note,
+    itemCount: planItemsFor(v.id).length,
+  }));
+  res.json({ ...planPayloadAt(null), upcoming });
 });
 
-/** Liste aller Versionen (Verlauf). */
+/** Liste aller Versionen (Verlauf, nach Wirkungsdatum). */
 planRouter.get('/versions', (_req, res) => {
   const versions = db
-    .prepare(`SELECT * FROM plan_versions ORDER BY created_at DESC, id DESC`)
+    .prepare(`SELECT * FROM plan_versions ORDER BY effective_from DESC, id DESC`)
     .all() as PlanVersionRow[];
   const counts = db.prepare(`SELECT version_id AS v, COUNT(*) AS c FROM plan_items GROUP BY version_id`).all() as {
     v: number;
     c: number;
   }[];
   const countMap = new Map(counts.map((r) => [r.v, r.c]));
+  const today = dateOf(toLocalISO(new Date()));
+  const activeId = planVersionAt(null)?.id ?? null;
   res.json(
     versions.map((v) => ({
       versionId: v.id,
       createdAt: v.created_at,
-      date: dateOf(v.created_at),
+      effectiveFrom: v.effective_from,
+      date: v.effective_from,
       note: v.note,
       itemCount: countMap.get(v.id) ?? 0,
+      active: v.id === activeId,
+      upcoming: v.effective_from > today,
     })),
   );
 });
@@ -142,10 +160,23 @@ const itemSchema = z.object({
   notes: z.string().trim().nullish(),
 });
 
-/** Neue Plan-Version speichern (vollständiger Snapshot). */
+/**
+ * Neue Plan-Version speichern (vollständiger Snapshot).
+ * `effectiveFrom` (YYYY-MM-DD, optional) legt fest, ab wann die Version
+ * gilt — rückwirkend ("seit X Tagen ist schon Y anders") oder in der
+ * Zukunft ("in X Tagen wird Y anders"). Ohne Angabe: heute.
+ */
 planRouter.put('/', (req, res) => {
   const parsed = z
-    .object({ items: z.array(itemSchema), note: z.string().trim().nullish() })
+    .object({
+      items: z.array(itemSchema),
+      note: z.string().trim().nullish(),
+      effectiveFrom: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/, 'effectiveFrom muss YYYY-MM-DD sein')
+        .refine((d) => !Number.isNaN(new Date(`${d}T12:00:00`).getTime()), 'Ungültiges Datum')
+        .nullish(),
+    })
     .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
@@ -162,6 +193,6 @@ planRouter.put('/', (req, res) => {
     notes: i.notes ?? null,
   }));
 
-  const version = createPlanVersion(items, parsed.data.note ?? null);
+  const version = createPlanVersion(items, parsed.data.note ?? null, parsed.data.effectiveFrom ?? null);
   res.status(201).json(serializePlanVersion(version, planItemsFor(version.id)));
 });

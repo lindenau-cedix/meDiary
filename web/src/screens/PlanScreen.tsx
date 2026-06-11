@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Pencil, Plus, Trash2, Check, ClipboardList, ArrowRight, FileClock } from 'lucide-react';
+import { Pencil, Plus, Trash2, Check, ClipboardList, ArrowRight, FileClock, CalendarClock } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -12,7 +12,7 @@ import { SubstanceSeal } from '../components/SubstanceSeal';
 import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
-import { relativeDays, formatFull, formatDayShort } from '../lib/format';
+import { relativeDays, formatFull, formatDayShort, todayStr } from '../lib/format';
 import { DAYPARTS, FIELD_LABELS, hasAnyDosing } from '../lib/plan';
 import { usePlan, usePlanDiff, usePlanVersions, useSavePlan, useSubstances } from '../lib/queries';
 import { api } from '../lib/api';
@@ -39,13 +39,42 @@ export function PlanScreen() {
     <>
       <PageHeader
         title="Plan"
-        eyebrow={plan?.createdAt ? `Stand ${relativeDays(plan.createdAt.slice(0, 10))}` : 'Medikationsplan'}
+        eyebrow={
+          plan?.effectiveFrom
+            ? `Gültig seit ${relativeDays(plan.effectiveFrom) === 'heute' ? 'heute' : formatDayShort(plan.effectiveFrom)}`
+            : 'Medikationsplan'
+        }
         action={
           <Button size="sm" variant="soft" icon={<Pencil size={16} />} onClick={() => setEditorOpen(true)}>
             Bearbeiten
           </Button>
         }
       />
+
+      {/* Geplante (zukünftige) Änderungen */}
+      {(plan?.upcoming?.length ?? 0) > 0 && (
+        <Card className="mb-4 p-3.5 ring-1 ring-accent/30 bg-accent/5">
+          <div className="flex items-center gap-2 mb-1.5">
+            <CalendarClock size={16} className="text-accent" />
+            <p className="text-sm font-semibold text-ink">Geplante Änderung</p>
+          </div>
+          <div className="space-y-1">
+            {plan!.upcoming!.map((u) => (
+              <button
+                key={u.versionId}
+                onClick={() => {
+                  haptics.light();
+                  setSnapshot(u.versionId);
+                }}
+                className="w-full text-left text-[13px] text-ink-muted hover:text-ink transition-colors"
+              >
+                Ab <span className="font-medium text-ink">{formatDayShort(u.effectiveFrom)}</span> (
+                {relativeDays(u.effectiveFrom)}){u.note ? `: ${u.note}` : ` · ${u.itemCount} Einträge`}
+              </button>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {items.length === 0 ? (
         <EmptyState
@@ -65,6 +94,7 @@ export function PlanScreen() {
               Letzte Änderung: <span className="text-ink">{plan.note}</span>
             </p>
           )}
+
           <div className="space-y-2.5">
             {items.map((item, i) => (
               <PlanItemCard key={i} item={item} color={colorFor(item.substanceName)} />
@@ -101,7 +131,7 @@ export function PlanScreen() {
             <div className="mt-8">
               <SectionLabel className="px-1 mb-2.5">Verlauf der Versionen</SectionLabel>
               <Card className="overflow-hidden divide-y divide-hairline">
-                {versions.map((v, i) => (
+                {versions.map((v) => (
                   <button
                     key={v.versionId}
                     onClick={() => {
@@ -111,17 +141,19 @@ export function PlanScreen() {
                     className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface2 transition-colors"
                   >
                     <span className="grid place-items-center size-9 rounded-xl bg-surface2 text-ink-muted shrink-0">
-                      <FileClock size={17} />
+                      {v.upcoming ? <CalendarClock size={17} /> : <FileClock size={17} />}
                     </span>
                     <div className="flex-1 min-w-0">
                       <p className="font-medium text-ink truncate">
-                        {v.note || (i === 0 ? 'Aktuelle Version' : 'Plananpassung')}
+                        {v.note || (v.active ? 'Aktuelle Version' : 'Plananpassung')}
                       </p>
                       <p className="text-xs text-ink-muted tabular">
-                        {formatDayShort(v.date)} · {v.itemCount} Einträge · {relativeDays(v.date)}
+                        gültig ab {formatDayShort(v.effectiveFrom)} · {v.itemCount} Einträge ·{' '}
+                        {relativeDays(v.effectiveFrom)}
                       </p>
                     </div>
-                    {i === 0 && <Badge tone="primary">aktuell</Badge>}
+                    {v.active && <Badge tone="primary">aktuell</Badge>}
+                    {v.upcoming && <Badge tone="accent">geplant</Badge>}
                   </button>
                 ))}
               </Card>
@@ -240,11 +272,11 @@ function DiffPanel({ days, colorFor }: { days: number; colorFor: (n: string) => 
 }
 
 // ---------- Snapshot (read-only) ----------
-function usePlanAtDate(date?: string) {
+function usePlanVersion(versionId: number | null) {
   return useQuery({
-    queryKey: ['plan', 'at', date],
-    queryFn: () => api.plan.at({ date }),
-    enabled: !!date,
+    queryKey: ['plan', 'version', versionId],
+    queryFn: () => api.plan.version(versionId!),
+    enabled: versionId != null,
   });
 }
 
@@ -257,16 +289,14 @@ function SnapshotSheet({
   onClose: () => void;
   colorFor: (n: string) => string | undefined;
 }) {
-  const { data: versions = [] } = usePlanVersions();
-  const v = versions.find((x) => x.versionId === versionId);
-  const { data } = usePlanAtDate(v?.date);
+  const { data } = usePlanVersion(versionId);
 
   return (
     <Sheet
       open={versionId != null}
       onClose={onClose}
-      title={v?.note || 'Planversion'}
-      subtitle={v ? formatFull(v.date) : undefined}
+      title={data?.note || 'Planversion'}
+      subtitle={data?.effectiveFrom ? `Gültig ab ${formatFull(data.effectiveFrom)}` : undefined}
     >
       {!data ? (
         <div className="py-8 text-sm text-ink-faint text-center">Lädt …</div>
@@ -338,13 +368,23 @@ function PlanEditorSheet({
   const save = useSavePlan();
   const [rows, setRows] = useState<EditRow[]>([]);
   const [note, setNote] = useState('');
+  const [effectiveFrom, setEffectiveFrom] = useState(todayStr());
 
   useEffect(() => {
     if (open) {
       setRows(plan?.items.length ? plan.items.map(toRow) : [blankRow]);
       setNote('');
+      setEffectiveFrom(todayStr());
     }
   }, [open, plan]);
+
+  const today = todayStr();
+  const effectiveHint =
+    effectiveFrom === today
+      ? 'Gilt ab heute.'
+      : effectiveFrom < today
+        ? `Rückwirkend — gilt bereits seit ${formatDayShort(effectiveFrom)} (${relativeDays(effectiveFrom)}).`
+        : `Geplant — wird erst ${relativeDays(effectiveFrom)} wirksam; bis dahin bleibt der bisherige Plan aktuell.`;
 
   const update = (i: number, patch: Partial<EditRow>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -373,9 +413,12 @@ function PlanEditorSheet({
           notes: n(r.notes),
         };
       });
-    await save.mutateAsync({ items, note: note.trim() || null });
+    await save.mutateAsync({ items, note: note.trim() || null, effectiveFrom });
     haptics.success();
-    toast.show({ message: 'Plan gespeichert', detail: `${items.length} Einträge · neue Version` });
+    toast.show({
+      message: 'Plan gespeichert',
+      detail: `${items.length} Einträge · gültig ab ${effectiveFrom === today ? 'heute' : formatDayShort(effectiveFrom)}`,
+    });
     onClose();
   };
 
@@ -385,7 +428,7 @@ function PlanEditorSheet({
       onClose={onClose}
       size="full"
       title="Plan bearbeiten"
-      subtitle="Wird als neue Version mit Datum gespeichert"
+      subtitle="Neue Version — rückwirkend, ab heute oder mit Datum in der Zukunft"
       footer={
         <div className="flex items-center gap-3">
           <Button variant="soft" icon={<Plus size={17} />} onClick={addRow}>
@@ -462,7 +505,24 @@ function PlanEditorSheet({
         ))}
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 space-y-4">
+        <Field label="Gültig ab">
+          <input
+            type="date"
+            value={effectiveFrom}
+            onChange={(e) => e.target.value && setEffectiveFrom(e.target.value)}
+            className="w-full bg-surface rounded-xl ring-1 ring-line h-11 px-3.5 text-sm tabular focus:outline-none focus:ring-2 focus:ring-primary/55"
+          />
+          <p
+            className={cx(
+              'mt-1.5 text-xs',
+              effectiveFrom === today ? 'text-ink-faint' : 'text-accent font-medium',
+            )}
+          >
+            {effectiveHint}
+          </p>
+        </Field>
+
         <Field label="Änderungsnotiz">
           <TextArea
             value={note}

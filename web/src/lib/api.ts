@@ -114,8 +114,8 @@ export const api = {
     version: (id: number) => request<Plan>(`/api/plan/version/${id}`),
     diff: (params: { days?: number; fromDate?: string; toDate?: string }) =>
       request<PlanDiff>(`/api/plan/diff${qs(params)}`),
-    save: (items: Plan['items'], note?: string | null) =>
-      request<Plan>('/api/plan', { method: 'PUT', body: JSON.stringify({ items, note }) }),
+    save: (items: Plan['items'], note?: string | null, effectiveFrom?: string | null) =>
+      request<Plan>('/api/plan', { method: 'PUT', body: JSON.stringify({ items, note, effectiveFrom }) }),
   },
 
   assessments: {
