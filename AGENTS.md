@@ -53,12 +53,20 @@ npm run cap:android              # Capacitor: android/ anlegen + syncen (in web/
 ```
 
 Server-Konfiguration über Env/`.env` (`server/src/config.ts`): `PORT` (4000),
-`DB_PATH` (Default `server/data/mediary.db`, relativ zu `server/`),
-`DEFAULTS_PATH` (Default `../DEFAULTS.md`), `WEB_DIST` (optional: gebautes
-Frontend statisch mit ausliefern).
+`DB_PATH`, `DEFAULTS_PATH`, `WEB_DIST`. Defaults (wenn keine Env gesetzt):
+- `DB_PATH` → `~/.local/share/mediary/data/mediary.db`
+- `DEFAULTS_PATH` → `~/.local/share/mediary/DEFAULTS.md`
+- `WEB_DIST` → wird nicht gesetzt (API läuft solo)
 
-Docker: `docker compose up -d --build` (siehe `docker-compose.yml`) — die DB
-liegt dann im Volume `./data` im **Projekt-Root** (Live-Daten!).
+**systemd-Deployment** (kein Docker):
+```bash
+npm run deploy        # baut + installiert nach ~/mediary + startet systemd service
+npm run build         # nur bauen (~/mediary/build/)
+```
+
+Die DB liegt **außerhalb des Installationsverzeichnisses** in
+`~/.local/share/mediary/` — ein Update des Codes via `npm run deploy`
+berührt die Daten nicht.
 
 ## Wichtige Architektur-Punkte
 
@@ -425,47 +433,115 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
   Wirkungsdatum gewinnt die höhere `id`.
 
 
+## Deployment (systemd, kein Docker)
+
+### Produktiv-Deployment auf dem Host
+
+```bash
+npm run deploy        # baut + installiert nach ~/mediary + startet systemd service
+```
+
+Ablauf von `deploy.sh`:
+1. `build.sh` → Frontend + Backend kompilieren → `build/`-Verzeichnis
+2. Bestehenden Service stoppen (falls aktiv)
+3. `build/` → `~/mediary` spiegeln
+4. `mediary.service` → `~/.config/systemd/user/`
+5. `systemctl --user daemon-reload && enable --now mediary`
+
+**Daten** (liegen immer in `~/.local/share/mediary/`, nicht im Repo):
+- `~/.local/share/mediary/data/mediary.db` — SQLite-DB
+- `~/.local/share/mediary/DEFAULTS.md` — DEFAULTS-Datei
+
+**Logs:** `journalctl --user-unit=mediary -f`
+**Stoppen:** `systemctl --user stop mediary`
+**Neu starten:** `systemctl --user restart mediary`
+
+### Server-Konfiguration (Env-Variablen)
+
+| Variable | Default | Beschreibung |
+|---|---|---|
+| `PORT` | `4000` | HTTP-Port |
+| `DB_PATH` | `~/.local/share/mediary/data/mediary.db` | SQLite-Pfad |
+| `DEFAULTS_PATH` | `~/.local/share/mediary/DEFAULTS.md` | DEFAULTS.md-Pfad |
+| `WEB_DIST` | — | Optional: gebautes Web-Frontend für statische Auslieferung |
+
+### iPad-App (Capacitor)
+
+```bash
+# Einmalig: Android-Plattform anlegen
+npm --prefix web run cap:add-android
+
+# Nach jedem Frontend-Update: sync + APK bauen
+npm --prefix web run cap:sync
+cd web/android && ANDROID_HOME=/path/to/sdk ./gradlew assembleDebug
+```
+
+Das APK liegt in `web/android/app/build/outputs/apk/debug/app-debug.apk`.
+App-ID: `app.mediary`, App-Name: `meDiary`.
+
+Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
+
+### Update流程
+
+1. `npm run deploy` im Repo → baut neuen Stand, spiegelt nach `~/mediary`, restart
+2. DB in `~/.local/share/mediary/` bleibt unberührt
+3. DEFAULTS.md: wird von `start.sh` beim ersten Start nach `~/.local/share/mediary/` kopiert; danach live editierbar über die Web-UI
+
+## Offene Punkte / Next Steps
+
+- [ ] iOS-Build (erfordert macOS + Xcode): `npx cap add ios`
+- [ ] Release-APK statt Debug: `assembleRelease` + Signatur
+- [ ] Unit-Tests für `lib/defaults.ts` (Parser) und `lib/substances.ts`
+      (`nameKey`, `findOrCreateSubstance`, `backfill…`).
+- [ ] `Hash`-basierte Erkennung echter Konflikte: aktuell unterscheidet
+      der Compliance-Check nicht „absichtlich ohne Default" von
+      „noch nicht gepflegt".
+- [ ] `IntakeEditSheet` zeigt beim Editieren keinen DEFAULTS-Preview an.
+- [ ] Die `nameKey`-Migration für bestehende Dubletten (z. B. „CBD-Öl" +
+      „cbd-öl" aus alten Importen) ist nicht automatisch.
+- [ ] Geplante (zukünftige) Plan-Versionen lassen sich nicht löschen oder
+      nachträglich bearbeiten.
+- [ ] Der Plan-Editor bearbeitet immer den **heute aktiven** Stand als
+      Ausgangsbasis.
+
+## Bekannte Stolperfallen
+
+- **SQLite `lower()` ist ASCII-only** — `lower('Ö')` bleibt `Ö`. Für
+  korrektes Umlaut-Matching ist `nameKey()` in JS Pflicht.
+- **DEFAULTS.md wird live eingelesen** — keine Notwendigkeit, den Server
+  nach einer Änderung neu zu starten.
+- **`Mit:`-Begleitsubstanzen gelten nur für `POST /api/intakes`** — Importer,
+  XLSX-Replace und PATCH legen bewusst keine Begleit-Einnahmen an.
+- **`plan-batch` erfasst genau die Plan-Substanzen des Slots** — keine
+  `Mit:`-Begleitsubstanzen (sonst Doppelungen).
+- **Tagesbild-Trigger: alle Nacht-Medis des aktuellen Plans** — Das
+  Tagesbild wird ausgelöst, wenn ALLE Nacht-Medis des wirksamen Plans
+  für den Konsumtag eingenommen sind (`allNightMedsTaken`).
+- **Soft-Archive:** `DELETE /api/substances/:id` ohne `?hard=true` setzt
+  nur `archived_at`. `findOrCreateSubstance` reaktiviert keine archivierten
+  Substanzen.
+- **`effective_from` vs. `created_at`:** Maßgeblich für „welcher Plan galt
+  wann" ist ausschließlich `effective_from`.
+
+
 ## Letzte Tasks
 
-- **2026-06-11 16:36** [claude] Alles erledigt und verifiziert. Hier die Zusammenfassung:
-
- Ergebnis
-
-Plan-Änderungen können jetzt rückwirkend („seit X Tagen ist schon Y anders“) und mit Wirkung in der Zukunft („in X Tagen wird Y anders“) erfasst werden. Kern ist ein neues Wirkungsdatum `effective_from` pro Plan-Version, das unabhängig vom Erfassungszeitpunkt `created_at` ist.
-
-Server (`server/src/`):
-- `db.ts`: neue Spalte `plan_versions.effective_from` (idempotente Migration, Backfill aus `created_at`, eigener Index). `planVersionAt(date)` löst jetzt über das Wirkungsdatum auf — `null` bedeutet „heute“, eine Zukunfts-Version wird also erst ab ihrem Stichtag zum aktuellen Plan. Bei gleichem Datum gewinnt die höhere `id`. Neu: `upcomingPlanVersions()`.
-- `routes/plan.ts`: `PUT /api/plan` akzeptiert optional `effectiveFrom: "YYYY-MM-DD"` (Vergangenheit oder Zukunft, Default heute, mit Validierung). `GET /api/plan` liefert zusätzlich `upcoming[]` (geplante Versionen), `GET /api/plan/versions` sortiert nach Wirkungsdatum und liefert `effectiveFrom`/`active`/`upcoming`-Flags.
-- `seed.ts` und `import.ts` setzen das Wirkungsdatum auf den Tag von `created_at`.
-
-Frontend (`web/src/`):
-- Plan-Editor hat ein „Gültig ab“-Datumsfeld mit Hinweistext, der die Wirkung erklärt („Rückwirkend — gilt bereits seit …“, „Gilt ab heute.“, „Geplant — wird erst in X Tagen wirksam …“).
-- Über dem Plan erscheint eine Karte „Geplante Änderung“, wenn eine Zukunfts-Version existiert (antippbar → Snapshot).
-- Versions-Verlauf zeigt „gültig ab …“ und Badges „aktuell“ (heute wirksam) bzw. „geplant“ (Zukunft); Snapshots laden jetzt direkt über `GET /api/plan/version/:id`.
-- `relativeDays()` kennt zusätzlich „morgen“.
-
-Verifiziert: Beide Typchecks und der Vite-Build laufen sauber durch. Im E2E-Smoke gegen einen frischen Seed: rückwirkende Version (gültig ab vor 3 Tagen) wird sofort zum aktuellen Plan und gilt am Stichtag korrekt (06-07 → alte Version, 06-08 → neue); eine Zukunfts-Version (ab 15.06.) bleibt aus dem aktuellen Plan und dem Diff draußen, erscheint in `upcoming` und greift am Stichtag; ungültiges Datumsformat wird mit 400 abgelehnt.
-
-`AGENTS.md` ist aktualisiert (Architektur, API-Tabelle, Schema, Smoke-Rezept, Stolperfalle zur `effective_from`-Semantik und neue offene Punkte, z. B. „geplante Version verwerfen“ als möglicher nächster Schritt). Committet/gepusht habe ich wie vorgegeben nicht.
-- **2026-06-11 20:58** [hermes] server/src/routes/substances.ts
-    - normalizeAmount() eingefügt
-    - Angewendet bei POST /api/substances (defaultDose) und PATCH /api/substances/:id (defaultDose)
-    
-    Verifikation:
-    - TypeScript: tsc --noEmit ✓
-    - E2E-Smoke: 100ml → "100 ml", PATCH 50ml → "50 ml", DEFAULTS-Fallback mit korrekter Normalisierung ✓
-    - Frontend-Build: vite build ✓
-    
-    Ergänzt in AGENTS.md: neue Sektion unter „Letzte Änderungen" dokumentiert die Normalisierung mitsamt Regex und allen betroffenen Stellen.
+- **2026-06-11 22:XX** [hermes] Deployment: Docker → systemd, DB nach ~/.local/share/mediary
+    - `server/src/config.ts`: Defaults für DB/DEFAULTS nach `~/.local/share/mediary/`
+    - `mediary.service`: systemd user service nach `~/.config/systemd/user/`
+    - `build.sh`: Produktiv-Build (Frontend + Backend + node_modules)
+    - `start.sh`: Datenverzeichnis anlegen, DEFAULTS stubben, `node dist/index.js`
+    - `deploy.sh`: baut, spiegelt nach `~/mediary`, startet systemd service
+    - `package.json`: neue Scripts `build` + `deploy`
+    - `docker-compose.yml` + `Dockerfile` entfernt
+    - APK gebaut: `web/android/app/build/outputs/apk/debug/app-debug.apk`
+    - AGENTS.md: Deployment-Sektion, DB-Default, Offene Punkte aktualisiert
 ╰──────────────────────────────────────────────────────────────────────────────╯
-- **2026-06-11 21:09** [hermes] - Alter Flag-Check (is_night_med pro Substanz) entfernt
-    - allNightMedsTaken(consumptionDay(takenAt)) ersetzt ihn
-    - nightMed: assessmentDate !== null — jetzt abgeleitet statt direkt berechnet
-    
-    Verifikation:
-    - Server TS ✓, Frontend TS ✓, Vite-Build ✓
-    - E2E-Smoke: Quetiapin (1/2 Nacht-Medis) → kein Assessment; Lithium (2/2) → Assessment ✓
-    - Auch: Elvanse nach Complet → Assessment ✓ (jede Substanz löst aus, wenn der Plan complet ist)
-    
-    Kein Commit/Push — wie verlangt.
-╰──────────────────────────────────────────────────────────────────────────────╯
+- **2026-06-11 21:16** [codex] error: unexpected argument '--ask-for-approval' found
+
+  tip: to pass '--ask-for-approval' as a value, use '-- --ask-for-approval'
+
+Usage: codex exec [OPTIONS] [PROMPT]
+       codex exec [OPTIONS] <COMMAND> [ARGS]
+
+For more information, try '--help'.

@@ -11,7 +11,9 @@
     "seed": "npm --prefix server run seed",
     "build:web": "npm --prefix web run build",
     "start": "npm --prefix server run start",
-    "cap:android": "npm --prefix web run cap:android"
+    "cap:android": "npm --prefix web run cap:android",
+    "build": "./build.sh",
+    "deploy": "./deploy.sh"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"
