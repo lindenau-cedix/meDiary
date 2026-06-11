@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { config } from './config.js';
-import { nowLocalISO } from './lib/time.js';
+import { dateOf, nowLocalISO } from './lib/time.js';
 
 // Datenverzeichnis sicherstellen
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
@@ -81,6 +81,13 @@ ensureColumn('plan_versions', 'source_event_id', 'TEXT');
 db.exec(`CREATE INDEX IF NOT EXISTS idx_intakes_source ON intakes(source_event_id);
          CREATE INDEX IF NOT EXISTS idx_plan_versions_source ON plan_versions(source_event_id);`);
 
+// Migration: Wirkungsdatum einer Plan-Version ("gültig ab", YYYY-MM-DD).
+// Erlaubt rückwirkende und zukünftige Plan-Änderungen unabhängig vom
+// Erfassungszeitpunkt. Bestehende Versionen: Wirkungsdatum = Erfassungstag.
+ensureColumn('plan_versions', 'effective_from', 'TEXT');
+db.exec(`UPDATE plan_versions SET effective_from = substr(created_at, 1, 10) WHERE effective_from IS NULL;
+         CREATE INDEX IF NOT EXISTS idx_plan_versions_effective ON plan_versions(effective_from);`);
+
 // ---------- Typen ----------
 
 export interface SubstanceRow {
@@ -108,6 +115,7 @@ export interface IntakeRow {
 export interface PlanVersionRow {
   id: number;
   created_at: string;
+  effective_from: string;
   note: string | null;
 }
 
@@ -137,22 +145,29 @@ export interface AssessmentRow {
 
 // ---------- Plan-Helfer ----------
 
-/** Liefert die zum Stichtag aktive Plan-Version (oder null). */
+/**
+ * Liefert die zum Stichtag aktive Plan-Version (oder null).
+ * Maßgeblich ist das Wirkungsdatum `effective_from` — eine Version mit
+ * Wirkungsdatum in der Zukunft ist heute noch nicht aktiv. `date = null`
+ * bedeutet "heute".
+ */
 export function planVersionAt(date: string | null): PlanVersionRow | null {
-  if (date) {
-    return (
-      (db
-        .prepare(
-          `SELECT * FROM plan_versions WHERE created_at <= ? ORDER BY created_at DESC, id DESC LIMIT 1`,
-        )
-        .get(`${date}T23:59:59`) as PlanVersionRow | undefined) ?? null
-    );
-  }
+  const day = date ?? dateOf(nowLocalISO());
   return (
     (db
-      .prepare(`SELECT * FROM plan_versions ORDER BY created_at DESC, id DESC LIMIT 1`)
-      .get() as PlanVersionRow | undefined) ?? null
+      .prepare(
+        `SELECT * FROM plan_versions WHERE effective_from <= ? ORDER BY effective_from DESC, id DESC LIMIT 1`,
+      )
+      .get(day) as PlanVersionRow | undefined) ?? null
   );
+}
+
+/** Versionen, deren Wirkungsdatum noch in der Zukunft liegt (früheste zuerst). */
+export function upcomingPlanVersions(): PlanVersionRow[] {
+  const today = dateOf(nowLocalISO());
+  return db
+    .prepare(`SELECT * FROM plan_versions WHERE effective_from > ? ORDER BY effective_from ASC, id ASC`)
+    .all(today) as PlanVersionRow[];
 }
 
 export function planItemsFor(versionId: number): PlanItemRow[] {
@@ -174,13 +189,17 @@ export interface NewPlanItem {
   notes?: string | null;
 }
 
-/** Erstellt eine neue Plan-Version (Snapshot) und gibt sie zurück. */
+/**
+ * Erstellt eine neue Plan-Version (Snapshot) und gibt sie zurück.
+ * `effectiveFrom` (YYYY-MM-DD) darf in der Vergangenheit oder Zukunft
+ * liegen; ohne Angabe gilt die Version ab heute.
+ */
 export const createPlanVersion = db.transaction(
-  (items: NewPlanItem[], note: string | null): PlanVersionRow => {
+  (items: NewPlanItem[], note: string | null, effectiveFrom?: string | null): PlanVersionRow => {
     const now = nowLocalISO();
     const info = db
-      .prepare(`INSERT INTO plan_versions (created_at, note) VALUES (?, ?)`)
-      .run(now, note);
+      .prepare(`INSERT INTO plan_versions (created_at, effective_from, note) VALUES (?, ?, ?)`)
+      .run(now, effectiveFrom ?? dateOf(now), note);
     const versionId = Number(info.lastInsertRowid);
     const insert = db.prepare(
       `INSERT INTO plan_items

@@ -58,6 +58,7 @@ export function serializePlanVersion(v: PlanVersionRow, items: PlanItemRow[]) {
   return {
     versionId: v.id,
     createdAt: v.created_at,
+    effectiveFrom: v.effective_from,
     note: v.note,
     items: items.map(serializePlanItem),
   };

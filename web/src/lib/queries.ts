@@ -85,7 +85,8 @@ export function usePlanDiff(params: { days?: number; fromDate?: string; toDate?:
 export function useSavePlan() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ items, note }: { items: PlanItem[]; note?: string | null }) => api.plan.save(items, note),
+    mutationFn: ({ items, note, effectiveFrom }: { items: PlanItem[]; note?: string | null; effectiveFrom?: string | null }) =>
+      api.plan.save(items, note, effectiveFrom),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['plan'] }),
   });
 }

@@ -278,13 +278,15 @@ const writeAll = db.transaction(() => {
     idByEvent.set(base, arr);
   }
 
-  const insVersion = db.prepare(`INSERT INTO plan_versions (created_at, note, source_event_id) VALUES (?, ?, ?)`);
+  const insVersion = db.prepare(
+    `INSERT INTO plan_versions (created_at, effective_from, note, source_event_id) VALUES (?, ?, ?, ?)`,
+  );
   const insItem = db.prepare(
     `INSERT INTO plan_items (version_id, substance_id, substance_name, strength, morning, noon, evening, night, unit, reason, notes, sort_order)
      VALUES (@vid, NULL, @substanceName, @strength, @morning, @noon, @evening, @night, NULL, NULL, @notes, @sort)`,
   );
   for (const v of newVersions) {
-    const info = insVersion.run(v.createdAt, v.note, v.sourceId);
+    const info = insVersion.run(v.createdAt, v.createdAt.slice(0, 10), v.note, v.sourceId);
     const vid = Number(info.lastInsertRowid);
     v.items.forEach((it: any, i: number) =>
       insItem.run({ vid, sort: i, substanceName: it.substanceName, strength: it.strength ?? null, morning: it.morning ?? null, noon: it.noon ?? null, evening: it.evening ?? null, night: it.night ?? null, notes: it.notes ?? null }),

@@ -63,6 +63,15 @@ Docker: `docker compose up -d --build` (siehe `docker-compose.yml`).
   bei Nachtmedikation.
 - **Plan-Versionierung** ist ein vollständiger Snapshot pro Version. Der
   `plan_items`-Datensatz hat `version_id` und `substance_id` (NULL = freier Name).
+- **Wirkungsdatum `effective_from`** (`plan_versions`, YYYY-MM-DD): Plan-Änderungen
+  können **rückwirkend** („seit X Tagen ist schon Y anders") oder **in der Zukunft**
+  („in X Tagen wird Y anders") erfasst werden — unabhängig vom Erfassungszeitpunkt
+  `created_at`. `planVersionAt(date)` in `server/src/db.ts` löst über
+  `effective_from <= Stichtag` auf (Tie-Break: höhere `id` gewinnt bei gleichem
+  Datum); `date = null` heißt „heute", d. h. eine Zukunfts-Version ist erst ab
+  ihrem Wirkungsdatum der „aktuelle Plan". `upcomingPlanVersions()` liefert die
+  geplanten (zukünftigen) Versionen. Migration: idempotent in `db.ts`
+  (`ensureColumn` + Backfill `effective_from = substr(created_at,1,10)`).
 
 ## API-Referenz (Auszug)
 
@@ -74,11 +83,11 @@ Docker: `docker compose up -d --build` (siehe `docker-compose.yml`).
 | `PATCH/DELETE` | `/api/substances/:id` | ändern / archivieren (`?hard=true` löscht) |
 | `GET/POST` | `/api/intakes` | Einnahmen (DEFAULTS-Logik, Autovivifikation) |
 | `PATCH/DELETE` | `/api/intakes/:id` | ändern / löschen |
-| `GET` | `/api/plan` | aktueller Plan |
-| `GET` | `/api/plan/at?date=…` \| `?days=N` | Plan zum Stichtag |
+| `GET` | `/api/plan` | heute wirksamer Plan + `upcoming` (geplante Zukunfts-Versionen) |
+| `GET` | `/api/plan/at?date=…` \| `?days=N` | Plan zum Stichtag (via `effective_from`) |
 | `GET` | `/api/plan/diff?days=N` | Plan-Diff |
-| `GET` | `/api/plan/versions` | Versions-Verlauf |
-| `PUT` | `/api/plan` | neue Plan-Version |
+| `GET` | `/api/plan/versions` | Versions-Verlauf (sortiert nach Wirkungsdatum, mit `active`/`upcoming`-Flags) |
+| `PUT` | `/api/plan` | neue Plan-Version; optional `effectiveFrom: "YYYY-MM-DD"` (rückwirkend/zukünftig, Default heute) |
 | `GET` | `/api/assessments?from=&to=` | Tagesbilder (Trends) |
 | `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
@@ -120,12 +129,12 @@ Frontend-UI:
 |---|---|
 | `substances` | antippbare Liste (Farbe, Standarddosis, `is_night_med`, Soft-Archive via `archived_at`) |
 | `intakes` | Einnahmen (Zeitpunkt, Substanz-Snapshot mit `substance_id` + `substance_name`, Menge, Notizen) |
-| `plan_versions` | Plan-Snapshots |
+| `plan_versions` | Plan-Snapshots (`created_at` = erfasst, `effective_from` = gültig ab) |
 | `plan_items` | Plan-Zeilen (Morgens/Mittags/Abends/Nachts) je Version |
 | `daily_assessments` | Tagesbild (11 Skalen als JSON, Primärschlüssel `date`) |
 
 Indices: `idx_intakes_taken_at`, `idx_intakes_source` (Import-Idempotenz),
-`idx_plan_items_version`, `idx_plan_versions_source`.
+`idx_plan_items_version`, `idx_plan_versions_source`, `idx_plan_versions_effective`.
 
 ## Frontend-Struktur
 
@@ -178,13 +187,34 @@ curl -sS -X POST http://localhost:4011/api/intakes -H 'Content-Type: application
   -d '{"substanceId":<id-von-cbd-öl>}'
 # → notes wird aus DEFAULTS.md übernommen
 
+# Rückwirkende/zukünftige Plan-Version:
+curl -sS -X PUT http://localhost:4011/api/plan -H 'Content-Type: application/json' \
+  -d '{"effectiveFrom":"<gestern>","note":"rückwirkend","items":[{"substanceName":"Lithium","strength":"600 mg"}]}'
+# → sofort aktueller Plan; mit effectiveFrom in der Zukunft stattdessen:
+#   GET /api/plan → alte Version + upcoming[], GET /api/plan/at?date=<zukunft> → neue Version
+
 # 3. Frontend-Bau
 cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 ```
 
 ## Letzte Änderungen (jüngste zuerst)
 
-- **Automatische Substanz-QuickPicks + DEFAULTS-Compliance** (aktueller Task):
+- **Rückwirkende / zukünftige Plan-Änderungen** (aktueller Task):
+  - Neue Spalte `plan_versions.effective_from` (Wirkungsdatum, YYYY-MM-DD) mit
+    idempotenter Migration + Backfill aus `created_at` in `db.ts`.
+  - `planVersionAt()` löst jetzt über das Wirkungsdatum auf; „aktueller Plan"
+    = heute wirksame Version (Zukunfts-Versionen zählen noch nicht).
+  - `PUT /api/plan` akzeptiert optional `effectiveFrom` (Vergangenheit oder
+    Zukunft); `GET /api/plan` liefert zusätzlich `upcoming[]`;
+    `GET /api/plan/versions` sortiert nach Wirkungsdatum und liefert
+    `effectiveFrom`/`active`/`upcoming` (Feld `date` = Wirkungsdatum).
+  - Seed und Importer setzen `effective_from = Tag von created_at`.
+  - **Frontend (`PlanScreen.tsx`):** „Gültig ab"-Datumsfeld im Plan-Editor mit
+    Hinweistext (rückwirkend / heute / geplant); Karte „Geplante Änderung" über
+    dem Plan; Versions-Verlauf zeigt „gültig ab" + Badges „aktuell"/„geplant";
+    `SnapshotSheet` lädt jetzt direkt per `GET /api/plan/version/:id` (statt
+    Stichtags-Umweg). `relativeDays()` kennt zusätzlich „morgen".
+- **Automatische Substanz-QuickPicks + DEFAULTS-Compliance**:
   - `POST /api/intakes` legt unbekannte Namen als QuickPick an
     (`findOrCreateSubstance`, `createdSubstance`-Flag in der Antwort).
   - `backfillSubstancesFromIntakes()` läuft beim Serverstart und nach
@@ -214,6 +244,14 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
       „cbd-öl" aus alten Importen) ist nicht automatisch — die DB bleibt
       ggf. mit zwei Substanzen. Bei Bedarf manuell mergen via
       SubstanceManager oder direkt in der DB.
+- [ ] Geplante (zukünftige) Plan-Versionen lassen sich nicht löschen oder
+      nachträglich bearbeiten (kein `DELETE /api/plan/version/:id`) — wer
+      sich vertan hat, muss eine weitere Version mit gleichem Wirkungsdatum
+      speichern (höhere `id` gewinnt). UI-Aktion „geplante Version
+      verwerfen" wäre ein sinnvoller nächster Schritt.
+- [ ] Der Plan-Editor bearbeitet immer den **heute aktiven** Stand als
+      Ausgangsbasis — beim Anlegen einer Zukunfts-Version wäre die jüngste
+      geplante Version als Vorlage ggf. praktischer.
 
 ## Bekannte Stolperfallen
 
@@ -231,3 +269,10 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 - **Soft-Archive:** `DELETE /api/substances/:id` ohne `?hard=true` setzt
   nur `archived_at`. `findOrCreateSubstance` reaktiviert keine archivierten
   Substanzen — bewusst, damit entfernte Kacheln entfernt bleiben.
+- **`effective_from` vs. `created_at`:** Für „welcher Plan galt wann" zählt
+  ausschließlich `effective_from`. Eine rückwirkende Version überdeckt
+  ältere Versionen nur bis zum nächsthöheren Wirkungsdatum — Beispiel:
+  v2 gilt ab 06-06, eine neue v3 „ab 06-01" gilt dann nur 06-01 bis 06-05.
+  Für „gilt seit X Tagen bis heute" muss das Wirkungsdatum nach dem der
+  bisherigen aktuellen Version liegen (der Normalfall). Bei gleichem
+  Wirkungsdatum gewinnt die höhere `id`.
