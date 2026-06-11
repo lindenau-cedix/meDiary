@@ -55,8 +55,20 @@ export function formatFull(date: string): string {
   return fullFmt.format(parseLocal(date));
 }
 
-/** "vor 5 Tagen", "gestern", "heute", "morgen", "in 5 Tagen" */
+/** "HH:MM" aus einem Wirkungsdatum mit Uhrzeit ("YYYY-MM-DDTHH:mm"), sonst null. */
+export function effectiveTimeOf(effective: string): string | null {
+  return effective.length > 10 ? effective.slice(11, 16) : null;
+}
+
+/** "9. Juni" bzw. "9. Juni, 14:00 Uhr" — Wirkungsdatum mit optionaler Uhrzeit. */
+export function formatEffective(effective: string): string {
+  const t = effectiveTimeOf(effective);
+  return t ? `${formatDayShort(effective)}, ${t} Uhr` : formatDayShort(effective);
+}
+
+/** "vor 5 Tagen", "gestern", "heute", "morgen", "in 5 Tagen" — akzeptiert auch Datetime-Strings. */
 export function relativeDays(date: string): string {
+  date = date.slice(0, 10);
   const today = todayStr();
   if (date === today) return 'heute';
   if (date === dateNDaysAgo(1)) return 'gestern';

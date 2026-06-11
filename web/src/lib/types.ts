@@ -61,7 +61,7 @@ export interface UpcomingPlanVersion {
 export interface Plan {
   versionId: number | null;
   createdAt: string | null;
-  /** Wirkungsdatum ("gültig ab", YYYY-MM-DD) der Version. */
+  /** Wirkungszeitpunkt ("gültig ab", YYYY-MM-DD oder YYYY-MM-DDTHH:mm) der Version. */
   effectiveFrom: string | null;
   note: string | null;
   items: PlanItem[];

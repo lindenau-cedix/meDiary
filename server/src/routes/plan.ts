@@ -53,7 +53,7 @@ planRouter.get('/versions', (_req, res) => {
     c: number;
   }[];
   const countMap = new Map(counts.map((r) => [r.v, r.c]));
-  const today = dateOf(toLocalISO(new Date()));
+  const now = toLocalISO(new Date());
   const activeId = planVersionAt(null)?.id ?? null;
   res.json(
     versions.map((v) => ({
@@ -64,16 +64,18 @@ planRouter.get('/versions', (_req, res) => {
       note: v.note,
       itemCount: countMap.get(v.id) ?? 0,
       active: v.id === activeId,
-      upcoming: v.effective_from > today,
+      upcoming: v.effective_from > now,
     })),
   );
 });
 
-/** Plan zu einem Stichtag ("vor x Tagen"). ?date=YYYY-MM-DD oder ?days=N */
+/** Plan zu einem Stichtag/Zeitpunkt. ?date=YYYY-MM-DD[THH:mm] oder ?days=N */
 planRouter.get('/at', (req, res) => {
   let date: string | null = null;
   if (typeof req.query.date === 'string') {
-    date = req.query.date.slice(0, 10);
+    date = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(req.query.date)
+      ? req.query.date.slice(0, 16)
+      : req.query.date.slice(0, 10);
   } else if (typeof req.query.days === 'string') {
     const d = new Date();
     d.setDate(d.getDate() - (Number(req.query.days) || 0));
@@ -162,9 +164,10 @@ const itemSchema = z.object({
 
 /**
  * Neue Plan-Version speichern (vollständiger Snapshot).
- * `effectiveFrom` (YYYY-MM-DD, optional) legt fest, ab wann die Version
- * gilt — rückwirkend ("seit X Tagen ist schon Y anders") oder in der
- * Zukunft ("in X Tagen wird Y anders"). Ohne Angabe: heute.
+ * `effectiveFrom` (YYYY-MM-DD oder YYYY-MM-DDTHH:mm, optional) legt fest,
+ * ab wann die Version gilt — rückwirkend ("seit X Tagen ist schon Y anders")
+ * oder in der Zukunft ("in X Tagen wird Y anders"). Ohne Uhrzeit gilt sie
+ * ab Tagesbeginn; ohne Angabe: heute.
  */
 planRouter.put('/', (req, res) => {
   const parsed = z
@@ -173,8 +176,11 @@ planRouter.put('/', (req, res) => {
       note: z.string().trim().nullish(),
       effectiveFrom: z
         .string()
-        .regex(/^\d{4}-\d{2}-\d{2}$/, 'effectiveFrom muss YYYY-MM-DD sein')
-        .refine((d) => !Number.isNaN(new Date(`${d}T12:00:00`).getTime()), 'Ungültiges Datum')
+        .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/, 'effectiveFrom muss YYYY-MM-DD oder YYYY-MM-DDTHH:mm sein')
+        .refine(
+          (d) => !Number.isNaN(new Date(d.length === 10 ? `${d}T12:00:00` : d).getTime()),
+          'Ungültiges Datum',
+        )
         .nullish(),
     })
     .safeParse(req.body);

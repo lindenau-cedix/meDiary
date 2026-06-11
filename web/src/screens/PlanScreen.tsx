@@ -12,7 +12,15 @@ import { SubstanceSeal } from '../components/SubstanceSeal';
 import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
-import { relativeDays, formatFull, formatDayShort, todayStr } from '../lib/format';
+import {
+  relativeDays,
+  formatFull,
+  formatDayShort,
+  formatEffective,
+  effectiveTimeOf,
+  nowLocalInput,
+  todayStr,
+} from '../lib/format';
 import { DAYPARTS, FIELD_LABELS, hasAnyDosing } from '../lib/plan';
 import { usePlan, usePlanDiff, usePlanVersions, useSavePlan, useSubstances } from '../lib/queries';
 import { api } from '../lib/api';
@@ -41,7 +49,13 @@ export function PlanScreen() {
         title="Plan"
         eyebrow={
           plan?.effectiveFrom
-            ? `Gültig seit ${relativeDays(plan.effectiveFrom) === 'heute' ? 'heute' : formatDayShort(plan.effectiveFrom)}`
+            ? `Gültig seit ${
+                relativeDays(plan.effectiveFrom) === 'heute'
+                  ? effectiveTimeOf(plan.effectiveFrom)
+                    ? `heute, ${effectiveTimeOf(plan.effectiveFrom)} Uhr`
+                    : 'heute'
+                  : formatEffective(plan.effectiveFrom)
+              }`
             : 'Medikationsplan'
         }
         action={
@@ -68,7 +82,7 @@ export function PlanScreen() {
                 }}
                 className="w-full text-left text-[13px] text-ink-muted hover:text-ink transition-colors"
               >
-                Ab <span className="font-medium text-ink">{formatDayShort(u.effectiveFrom)}</span> (
+                Ab <span className="font-medium text-ink">{formatEffective(u.effectiveFrom)}</span> (
                 {relativeDays(u.effectiveFrom)}){u.note ? `: ${u.note}` : ` · ${u.itemCount} Einträge`}
               </button>
             ))}
@@ -148,7 +162,7 @@ export function PlanScreen() {
                         {v.note || (v.active ? 'Aktuelle Version' : 'Plananpassung')}
                       </p>
                       <p className="text-xs text-ink-muted tabular">
-                        gültig ab {formatDayShort(v.effectiveFrom)} · {v.itemCount} Einträge ·{' '}
+                        gültig ab {formatEffective(v.effectiveFrom)} · {v.itemCount} Einträge ·{' '}
                         {relativeDays(v.effectiveFrom)}
                       </p>
                     </div>
@@ -296,7 +310,13 @@ function SnapshotSheet({
       open={versionId != null}
       onClose={onClose}
       title={data?.note || 'Planversion'}
-      subtitle={data?.effectiveFrom ? `Gültig ab ${formatFull(data.effectiveFrom)}` : undefined}
+      subtitle={
+        data?.effectiveFrom
+          ? `Gültig ab ${formatFull(data.effectiveFrom)}${
+              effectiveTimeOf(data.effectiveFrom) ? `, ${effectiveTimeOf(data.effectiveFrom)} Uhr` : ''
+            }`
+          : undefined
+      }
     >
       {!data ? (
         <div className="py-8 text-sm text-ink-faint text-center">Lädt …</div>
@@ -369,22 +389,29 @@ function PlanEditorSheet({
   const [rows, setRows] = useState<EditRow[]>([]);
   const [note, setNote] = useState('');
   const [effectiveFrom, setEffectiveFrom] = useState(todayStr());
+  const [effectiveAt, setEffectiveAt] = useState(''); // optionale Uhrzeit "HH:mm"
 
   useEffect(() => {
     if (open) {
       setRows(plan?.items.length ? plan.items.map(toRow) : [blankRow]);
       setNote('');
       setEffectiveFrom(todayStr());
+      setEffectiveAt('');
     }
   }, [open, plan]);
 
   const today = todayStr();
-  const effectiveHint =
-    effectiveFrom === today
-      ? 'Gilt ab heute.'
-      : effectiveFrom < today
-        ? `Rückwirkend — gilt bereits seit ${formatDayShort(effectiveFrom)} (${relativeDays(effectiveFrom)}).`
-        : `Geplant — wird erst ${relativeDays(effectiveFrom)} wirksam; bis dahin bleibt der bisherige Plan aktuell.`;
+  const effective = effectiveAt ? `${effectiveFrom}T${effectiveAt}` : effectiveFrom;
+  // Ohne Uhrzeit zählt der ganze Tag als "heute"; mit Uhrzeit entscheidet die Minute.
+  const isPast = effectiveAt ? effective < nowLocalInput() : effectiveFrom < today;
+  const isFuture = effectiveAt ? effective > nowLocalInput() : effectiveFrom > today;
+  const effectiveHint = isPast
+    ? `Rückwirkend — gilt bereits seit ${formatEffective(effective)} (${relativeDays(effective)}).`
+    : isFuture
+      ? `Geplant — wird erst ${relativeDays(effective)}${effectiveAt ? ` um ${effectiveAt} Uhr` : ''} wirksam; bis dahin bleibt der bisherige Plan aktuell.`
+      : effectiveAt
+        ? `Gilt ab heute, ${effectiveAt} Uhr.`
+        : 'Gilt ab heute.';
 
   const update = (i: number, patch: Partial<EditRow>) =>
     setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
@@ -413,11 +440,11 @@ function PlanEditorSheet({
           notes: n(r.notes),
         };
       });
-    await save.mutateAsync({ items, note: note.trim() || null, effectiveFrom });
+    await save.mutateAsync({ items, note: note.trim() || null, effectiveFrom: effective });
     haptics.success();
     toast.show({
       message: 'Plan gespeichert',
-      detail: `${items.length} Einträge · gültig ab ${effectiveFrom === today ? 'heute' : formatDayShort(effectiveFrom)}`,
+      detail: `${items.length} Einträge · gültig ab ${effective === today ? 'heute' : formatEffective(effective)}`,
     });
     onClose();
   };
@@ -507,19 +534,28 @@ function PlanEditorSheet({
 
       <div className="mt-4 space-y-4">
         <Field label="Gültig ab">
-          <input
-            type="date"
-            value={effectiveFrom}
-            onChange={(e) => e.target.value && setEffectiveFrom(e.target.value)}
-            className="w-full bg-surface rounded-xl ring-1 ring-line h-11 px-3.5 text-sm tabular focus:outline-none focus:ring-2 focus:ring-primary/55"
-          />
+          <div className="flex gap-2">
+            <input
+              type="date"
+              value={effectiveFrom}
+              onChange={(e) => e.target.value && setEffectiveFrom(e.target.value)}
+              className="flex-1 bg-surface rounded-xl ring-1 ring-line h-11 px-3.5 text-sm tabular focus:outline-none focus:ring-2 focus:ring-primary/55"
+            />
+            <input
+              type="time"
+              value={effectiveAt}
+              onChange={(e) => setEffectiveAt(e.target.value)}
+              aria-label="Uhrzeit (optional)"
+              className="w-28 bg-surface rounded-xl ring-1 ring-line h-11 px-3 text-sm tabular focus:outline-none focus:ring-2 focus:ring-primary/55"
+            />
+          </div>
           <p
             className={cx(
               'mt-1.5 text-xs',
-              effectiveFrom === today ? 'text-ink-faint' : 'text-accent font-medium',
+              isPast || isFuture ? 'text-accent font-medium' : 'text-ink-faint',
             )}
           >
-            {effectiveHint}
+            {effectiveHint} {effectiveAt ? '' : 'Uhrzeit optional — ohne Angabe gilt der Plan ab Tagesbeginn.'}
           </p>
         </Field>
 

@@ -146,28 +146,29 @@ export interface AssessmentRow {
 // ---------- Plan-Helfer ----------
 
 /**
- * Liefert die zum Stichtag aktive Plan-Version (oder null).
- * Maßgeblich ist das Wirkungsdatum `effective_from` — eine Version mit
- * Wirkungsdatum in der Zukunft ist heute noch nicht aktiv. `date = null`
- * bedeutet "heute".
+ * Liefert die zum Stichtag/Zeitpunkt aktive Plan-Version (oder null).
+ * Maßgeblich ist `effective_from` ("YYYY-MM-DD" oder "YYYY-MM-DDTHH:mm");
+ * ein reines Datum gilt ab 00:00, der String-Vergleich ordnet beide Formate
+ * korrekt. `at = null` bedeutet "jetzt"; ein reines Datum als Stichtag wird
+ * als Tagesende interpretiert ("welcher Plan galt an diesem Tag").
  */
-export function planVersionAt(date: string | null): PlanVersionRow | null {
-  const day = date ?? dateOf(nowLocalISO());
+export function planVersionAt(at: string | null): PlanVersionRow | null {
+  const moment = at == null ? nowLocalISO() : at.length === 10 ? `${at}T23:59:59` : at;
   return (
     (db
       .prepare(
         `SELECT * FROM plan_versions WHERE effective_from <= ? ORDER BY effective_from DESC, id DESC LIMIT 1`,
       )
-      .get(day) as PlanVersionRow | undefined) ?? null
+      .get(moment) as PlanVersionRow | undefined) ?? null
   );
 }
 
-/** Versionen, deren Wirkungsdatum noch in der Zukunft liegt (früheste zuerst). */
+/** Versionen, deren Wirkungszeitpunkt noch in der Zukunft liegt (früheste zuerst). */
 export function upcomingPlanVersions(): PlanVersionRow[] {
-  const today = dateOf(nowLocalISO());
+  const now = nowLocalISO();
   return db
     .prepare(`SELECT * FROM plan_versions WHERE effective_from > ? ORDER BY effective_from ASC, id ASC`)
-    .all(today) as PlanVersionRow[];
+    .all(now) as PlanVersionRow[];
 }
 
 export function planItemsFor(versionId: number): PlanItemRow[] {
@@ -191,8 +192,8 @@ export interface NewPlanItem {
 
 /**
  * Erstellt eine neue Plan-Version (Snapshot) und gibt sie zurück.
- * `effectiveFrom` (YYYY-MM-DD) darf in der Vergangenheit oder Zukunft
- * liegen; ohne Angabe gilt die Version ab heute.
+ * `effectiveFrom` ("YYYY-MM-DD" oder "YYYY-MM-DDTHH:mm") darf in der
+ * Vergangenheit oder Zukunft liegen; ohne Angabe gilt die Version ab heute.
  */
 export const createPlanVersion = db.transaction(
   (items: NewPlanItem[], note: string | null, effectiveFrom?: string | null): PlanVersionRow => {

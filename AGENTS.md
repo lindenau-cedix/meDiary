@@ -63,15 +63,18 @@ Docker: `docker compose up -d --build` (siehe `docker-compose.yml`).
   bei Nachtmedikation.
 - **Plan-Versionierung** ist ein vollständiger Snapshot pro Version. Der
   `plan_items`-Datensatz hat `version_id` und `substance_id` (NULL = freier Name).
-- **Wirkungsdatum `effective_from`** (`plan_versions`, YYYY-MM-DD): Plan-Änderungen
-  können **rückwirkend** („seit X Tagen ist schon Y anders") oder **in der Zukunft**
-  („in X Tagen wird Y anders") erfasst werden — unabhängig vom Erfassungszeitpunkt
-  `created_at`. `planVersionAt(date)` in `server/src/db.ts` löst über
-  `effective_from <= Stichtag` auf (Tie-Break: höhere `id` gewinnt bei gleichem
-  Datum); `date = null` heißt „heute", d. h. eine Zukunfts-Version ist erst ab
-  ihrem Wirkungsdatum der „aktuelle Plan". `upcomingPlanVersions()` liefert die
-  geplanten (zukünftigen) Versionen. Migration: idempotent in `db.ts`
-  (`ensureColumn` + Backfill `effective_from = substr(created_at,1,10)`).
+- **Wirkungszeitpunkt `effective_from`** (`plan_versions`, `YYYY-MM-DD` oder
+  `YYYY-MM-DDTHH:mm`): Plan-Änderungen können **rückwirkend** („seit X Tagen ist
+  schon Y anders") oder **in der Zukunft** („in X Tagen wird Y anders") erfasst
+  werden — unabhängig vom Erfassungszeitpunkt `created_at`. Ein reines Datum gilt
+  ab 00:00; der lexikografische String-Vergleich ordnet beide Formate korrekt
+  (`"2026-06-11" < "2026-06-11T08:00"`). `planVersionAt(at)` in `server/src/db.ts`
+  löst über `effective_from <= Zeitpunkt` auf (Tie-Break: höhere `id` gewinnt
+  bei gleichem Wert); `at = null` heißt „jetzt" (volle aktuelle Zeit), ein reines
+  Datum als Stichtag wird als **Tagesende** interpretiert („welcher Plan galt an
+  diesem Tag"). `upcomingPlanVersions()` vergleicht gegen die aktuelle Zeit —
+  eine Version „heute 23:50" bleibt bis dahin `upcoming`. Migration: idempotent
+  in `db.ts` (`ensureColumn` + Backfill `effective_from = substr(created_at,1,10)`).
 
 ## API-Referenz (Auszug)
 
@@ -84,10 +87,10 @@ Docker: `docker compose up -d --build` (siehe `docker-compose.yml`).
 | `GET/POST` | `/api/intakes` | Einnahmen (DEFAULTS-Logik, Autovivifikation) |
 | `PATCH/DELETE` | `/api/intakes/:id` | ändern / löschen |
 | `GET` | `/api/plan` | heute wirksamer Plan + `upcoming` (geplante Zukunfts-Versionen) |
-| `GET` | `/api/plan/at?date=…` \| `?days=N` | Plan zum Stichtag (via `effective_from`) |
+| `GET` | `/api/plan/at?date=…` \| `?days=N` | Plan zum Stichtag/Zeitpunkt (`date` auch `YYYY-MM-DDTHH:mm`) |
 | `GET` | `/api/plan/diff?days=N` | Plan-Diff |
 | `GET` | `/api/plan/versions` | Versions-Verlauf (sortiert nach Wirkungsdatum, mit `active`/`upcoming`-Flags) |
-| `PUT` | `/api/plan` | neue Plan-Version; optional `effectiveFrom: "YYYY-MM-DD"` (rückwirkend/zukünftig, Default heute) |
+| `PUT` | `/api/plan` | neue Plan-Version; optional `effectiveFrom: "YYYY-MM-DD"` oder `"YYYY-MM-DDTHH:mm"` (rückwirkend/zukünftig, Default heute) |
 | `GET` | `/api/assessments?from=&to=` | Tagesbilder (Trends) |
 | `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
@@ -199,7 +202,23 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Änderungen (jüngste zuerst)
 
-- **Rückwirkende / zukünftige Plan-Änderungen** (aktueller Task):
+- **`effective_from` mit optionaler Uhrzeit** (aktueller Task):
+  - `effective_from` akzeptiert jetzt auch `YYYY-MM-DDTHH:mm`; reines Datum
+    gilt weiter ab Tagesbeginn (keine Migration nötig, String-Vergleich ordnet
+    beide Formate korrekt).
+  - `planVersionAt(at)` vergleicht zeitpunktgenau: `null` = „jetzt", reines
+    Datum = Tagesende des Stichtags. `upcomingPlanVersions()` und das
+    `upcoming`-Flag in `/api/plan/versions` vergleichen gegen die aktuelle
+    Zeit statt nur den Tag.
+  - `PUT /api/plan` validiert `effectiveFrom` als Datum oder Datetime;
+    `GET /api/plan/at?date=` akzeptiert auch `YYYY-MM-DDTHH:mm`.
+  - **Frontend (`PlanScreen.tsx`):** optionales Uhrzeit-Feld neben „Gültig ab"
+    (leer = Tagesbeginn); Hinweistext rechnet minutengenau (rückwirkend /
+    heute um HH:MM / geplant). Neue Helfer `formatEffective()` und
+    `effectiveTimeOf()` in `lib/format.ts`; `relativeDays()` toleriert
+    Datetime-Strings. Anzeige der Uhrzeit in Header, „Geplante Änderung",
+    Versions-Verlauf und Snapshot-Sheet.
+- **Rückwirkende / zukünftige Plan-Änderungen**:
   - Neue Spalte `plan_versions.effective_from` (Wirkungsdatum, YYYY-MM-DD) mit
     idempotenter Migration + Backfill aus `created_at` in `db.ts`.
   - `planVersionAt()` löst jetzt über das Wirkungsdatum auf; „aktueller Plan"
