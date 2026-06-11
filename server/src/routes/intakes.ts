@@ -9,6 +9,15 @@ import { XLSX_MIME, buildIntakesWorkbook, parseIntakesWorkbook, type IntakeXlsxR
 
 export const intakesRouter = Router();
 
+/** Fügt zwischen Zahl und Buchstabe ein Leerzeichen ein: "100ml" → "100 ml" */
+function normalizeAmount(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // Zwischen Ziffer und Buchstabe (Einheiten wie ml, mg, µg etc.)
+  return trimmed.replace(/(\d)([a-zA-ZäöüÄÖÜßµ])/g, '$1 $2');
+}
+
 const createSchema = z.object({
   substanceId: z.number().int().nullish(),
   substanceName: z.string().trim().min(1).optional(),
@@ -142,7 +151,7 @@ intakesRouter.post('/', (req, res) => {
   // DEFAULTS.md wird bei jedem Schreibvorgang frisch gelesen (Notiz + Menge).
   // Vorrang: explizite Angabe > Substanz-Standarddosis > DEFAULTS.md.
   const def = defaultsFor(substanceName);
-  const amount = d.amount?.trim() || substance?.default_dose || def.amount || null;
+  const amount = normalizeAmount(d.amount) || substance?.default_dose || def.amount || null;
   const notes = d.notes?.trim() || def.note || null;
 
   const insertIntake = db.prepare(
@@ -177,7 +186,7 @@ intakesRouter.post('/', (req, res) => {
         .some((s) => nameKey(s.name) === key);
       const compSub = findOrCreateSubstance(comp.name);
       const compDef = defaultsFor(compSub.name);
-      const compAmount = comp.amount || compSub.default_dose || compDef.amount || null;
+      const compAmount = normalizeAmount(comp.amount) || normalizeAmount(compSub.default_dose) || normalizeAmount(compDef.amount) || null;
       const compNotes = comp.note || compDef.note || null;
       const compInfo = insertIntake.run(
         compSub.id, compSub.name, takenAt, compAmount, compNotes, nowLocalISO(),
@@ -243,7 +252,7 @@ intakesRouter.patch('/:id', (req, res) => {
   ).run({
     id,
     takenAt: d.takenAt ? normalizeDateTime(d.takenAt) : existing.taken_at,
-    amount: d.amount === undefined ? existing.amount : d.amount?.trim() || null,
+    amount: d.amount === undefined ? existing.amount : normalizeAmount(d.amount) || null,
     notes: d.notes === undefined ? existing.notes : d.notes?.trim() || null,
     substanceName: d.substanceName ?? existing.substance_name,
   });

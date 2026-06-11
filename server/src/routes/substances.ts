@@ -6,6 +6,14 @@ import { serializeSubstance } from '../lib/serialize.js';
 
 export const substancesRouter = Router();
 
+/** Fügt zwischen Zahl und Buchstabe ein Leerzeichen ein: "100ml" → "100 ml" */
+function normalizeAmount(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/(\d)([a-zA-ZäöüÄÖÜßµ])/g, '$1 $2');
+}
+
 const baseSchema = z.object({
   name: z.string().trim().min(1, 'Name erforderlich'),
   defaultDose: z.string().trim().nullish(),
@@ -42,7 +50,7 @@ substancesRouter.post('/', (req, res) => {
     )
     .run(
       d.name,
-      d.defaultDose ?? null,
+      normalizeAmount(d.defaultDose) ?? null,
       d.unit ?? null,
       d.color ?? null,
       d.isNightMed ? 1 : 0,
@@ -75,7 +83,7 @@ substancesRouter.patch('/:id', (req, res) => {
   ).run({
     id,
     name: d.name ?? null,
-    defaultDose: d.defaultDose ?? null,
+    defaultDose: d.defaultDose !== undefined ? normalizeAmount(d.defaultDose) ?? null : undefined,
     unit: d.unit ?? null,
     color: d.color ?? null,
     isNightMed: d.isNightMed === undefined ? null : d.isNightMed ? 1 : 0,

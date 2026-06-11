@@ -3,6 +3,14 @@ import { config } from '../config.js';
 import { db, type SubstanceRow } from '../db.js';
 import { nameKey } from './substances.js';
 
+/** Fügt zwischen Zahl und Buchstabe ein Leerzeichen ein: "100ml" → "100 ml" */
+function normalizeAmount(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return trimmed.replace(/(\d)([a-zA-ZäöüÄÖÜßµ])/g, '$1 $2');
+}
+
 /**
  * DEFAULTS.md liefert Standard-Notizen und Standard-Mengen pro Substanz.
  * Format – je Substanz ein Abschnitt der Ebene 2 (oder tiefer):
@@ -52,7 +60,7 @@ function parseCompanion(raw: string): CompanionDefault | null {
   if (!name) return null;
   return {
     name,
-    amount: parts[1] || null,
+    amount: normalizeAmount(parts[1]),
     note: parts.slice(2).join(' | ').trim() || null,
   };
 }
@@ -93,7 +101,7 @@ function parse(content: string): Map<string, SubstanceDefault> {
 
     const a = line.match(AMOUNT_RE);
     if (a) {
-      amount = a[1].trim();
+      amount = normalizeAmount(a[1]);
       continue;
     }
     const n = line.match(NOTE_RE);

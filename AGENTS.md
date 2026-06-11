@@ -234,6 +234,13 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **Menge-Normalisierung: Zahl + Buchstabe bekommt Leerzeichen**:
+  - `normalizeAmount()` fügt automatisch ein Leerzeichen zwischen Ziffer
+    und Buchstabe ein (`100ml` → `100 ml`, `50mg` → `50 mg`).
+  - Wirkt an allen Stellen, wo `amount` entsteht: `POST /api/intakes`,
+    `PATCH /api/intakes/:id`, `POST /api/substances`, `PATCH /api/substances/:id`,
+    DEFAULTS.md-Parser (`Menge:` + `Mit:`), Begleitsubstanzen.
+  - Regex: `(\d)([a-zA-ZäöüÄÖÜßµ])` → `$1 $2` — deckt mg, ml, µg etc. ab.
 - **Kachel-Reihenfolge im „Heute"-Tab sortierbar** (aktueller Task):
   - Backend war bereits vollständig vorhanden (`sort_order`-Spalte,
     `POST /api/substances/reorder`, `ORDER BY sort_order, name`, API-Client
