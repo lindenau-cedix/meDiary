@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState, type ChangeEvent } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Sun,
@@ -15,6 +15,10 @@ import {
   Plus,
   ShieldCheck,
   RefreshCw,
+  Download,
+  Upload,
+  FileSpreadsheet,
+  AlertTriangle,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -27,7 +31,7 @@ import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { getApiBase, setApiBase, api } from '../lib/api';
-import { useDefaults, useSaveDefaults, useCompliance } from '../lib/queries';
+import { useDefaults, useSaveDefaults, useCompliance, useImportIntakes } from '../lib/queries';
 
 const THEME_OPTIONS: { value: ThemePref; label: string; Icon: typeof Sun }[] = [
   { value: 'system', label: 'System', Icon: Monitor },
@@ -43,9 +47,12 @@ export function SettingsScreen() {
   const [serverUrl, setServerUrl] = useState(getApiBase());
   const [testing, setTesting] = useState<'idle' | 'ok' | 'fail' | 'loading'>('idle');
   const [manageOpen, setManageOpen] = useState(false);
+  const [exportingIntakes, setExportingIntakes] = useState(false);
+  const intakeImportRef = useRef<HTMLInputElement>(null);
 
   const { data: defaults } = useDefaults();
   const saveDefaults = useSaveDefaults();
+  const importIntakes = useImportIntakes();
   const { data: compliance, isFetching: complianceLoading, refetch: refetchCompliance } = useCompliance();
   const [defaultsText, setDefaultsText] = useState<string | null>(null);
   const defaultsValue = defaultsText ?? defaults?.raw ?? '';
@@ -71,6 +78,51 @@ export function SettingsScreen() {
     setDefaultsText(null);
     haptics.success();
     toast.show({ message: 'Standard-Notizen gespeichert' });
+  };
+
+  const exportIntakes = async () => {
+    setExportingIntakes(true);
+    try {
+      const blob = await api.intakes.exportXlsx();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `meDiary-konsumvorgaenge-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      haptics.success();
+      toast.show({ message: 'Export erstellt', detail: 'XLSX-Datei mit Einnahmen' });
+    } catch (e) {
+      haptics.warning();
+      toast.show({ tone: 'warning', message: 'Export fehlgeschlagen', detail: (e as Error).message });
+    } finally {
+      setExportingIntakes(false);
+    }
+  };
+
+  const importIntakeFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const confirmed = window.confirm(
+      'Dieser Import löscht alle vorhandenen Einnahmen und ersetzt sie durch die XLSX-Datei. Fortfahren?',
+    );
+    if (!confirmed) return;
+
+    try {
+      const result = await importIntakes.mutateAsync(file);
+      haptics.success();
+      toast.show({
+        message: 'Import abgeschlossen',
+        detail: `${result.imported} importiert, ${result.replaced} ersetzt`,
+      });
+    } catch (e) {
+      haptics.warning();
+      toast.show({ tone: 'warning', message: 'Import fehlgeschlagen', detail: (e as Error).message });
+    }
   };
 
   /**
@@ -140,6 +192,55 @@ export function SettingsScreen() {
                 <span className="block text-xs text-ink-muted">Liste zum Antippen, Farben, Nachtmedikation</span>
               </span>
             </button>
+          </Card>
+        </section>
+
+        {/* Import/Export */}
+        <section>
+          <SectionLabel className="px-1 mb-2.5">Import/Export</SectionLabel>
+          <Card className="p-4 space-y-3">
+            <div className="flex items-center gap-2.5 text-ink-muted">
+              <FileSpreadsheet size={18} />
+              <div className="min-w-0">
+                <p className="text-sm">Konsumvorgänge als XLSX</p>
+                <p className="text-xs text-ink-faint">
+                  Medikationsplan und Plan-Verlauf bleiben unverändert.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5 rounded-2xl bg-warn/10 px-3 py-2.5 text-warn">
+              <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+              <p className="text-xs leading-relaxed">
+                Import ersetzt alle vorhandenen Einnahmen durch den Inhalt der Datei.
+              </p>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button
+                variant="soft"
+                icon={<Download size={17} />}
+                onClick={exportIntakes}
+                loading={exportingIntakes}
+              >
+                Exportieren
+              </Button>
+              <Button
+                variant="danger"
+                icon={<Upload size={17} />}
+                onClick={() => intakeImportRef.current?.click()}
+                loading={importIntakes.isPending}
+              >
+                Importieren
+              </Button>
+            </div>
+            <input
+              ref={intakeImportRef}
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              className="hidden"
+              onChange={importIntakeFile}
+            />
           </Card>
         </section>
 

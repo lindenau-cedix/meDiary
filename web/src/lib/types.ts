@@ -27,6 +27,13 @@ export interface IntakeCreateResult {
   nightMed: boolean;
   assessmentDate: string | null;
   assessmentExists: boolean;
+  createdSubstance?: boolean;
+}
+
+export interface IntakeImportResult {
+  imported: number;
+  replaced: number;
+  createdSubstances: number;
 }
 
 export interface PlanItem {

@@ -60,6 +60,18 @@ export function useIntakeMutations() {
   };
 }
 
+export function useImportIntakes() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => api.intakes.importXlsx(file),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['intakes'] });
+      qc.invalidateQueries({ queryKey: ['substances'] });
+      qc.invalidateQueries({ queryKey: qk.compliance() });
+    },
+  });
+}
+
 // ---------- Plan ----------
 export function usePlan() {
   return useQuery({ queryKey: qk.plan(), queryFn: () => api.plan.current() });

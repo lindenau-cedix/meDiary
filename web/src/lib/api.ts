@@ -9,6 +9,7 @@ import type {
   Metric,
   DefaultsPayload,
   ComplianceReport,
+  IntakeImportResult,
 } from './types';
 
 const API_BASE_KEY = 'mediary.apiBase';
@@ -42,11 +43,38 @@ function qs(params?: Record<string, string | number | boolean | undefined | null
   return '?' + entries.map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`).join('&');
 }
 
+function apiUrl(path: string): string {
+  return `${getApiBase()}${path}`;
+}
+
+function errorMessage(data: unknown, status: number): string {
+  if (typeof data === 'string' && data.trim()) return data.trim();
+  if (data && typeof data === 'object' && 'error' in data) {
+    const err = (data as { error?: unknown }).error;
+    if (typeof err === 'string') return err;
+    if (err && typeof err === 'object') {
+      const details = err as { formErrors?: unknown[]; message?: unknown };
+      if (typeof details.formErrors?.[0] === 'string') return details.formErrors[0];
+      if (typeof details.message === 'string') return details.message;
+    }
+  }
+  return `Fehler ${status}`;
+}
+
+async function parseResponseText(res: Response): Promise<unknown> {
+  const text = await res.text();
+  if (!text) return undefined;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const base = getApiBase();
   let res: Response;
   try {
-    res = await fetch(`${base}${path}`, {
+    res = await fetch(apiUrl(path), {
       ...options,
       headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
     });
@@ -54,12 +82,43 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new ApiError(0, 'Server nicht erreichbar. Verbindung & Server-Adresse prüfen.', e);
   }
   if (res.status === 204) return undefined as T;
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : undefined;
+  const data = await parseResponseText(res);
   if (!res.ok) {
-    const msg = (data && (data.error?.formErrors?.[0] || data.error?.message || data.error)) || `Fehler ${res.status}`;
-    throw new ApiError(res.status, typeof msg === 'string' ? msg : `Fehler ${res.status}`, data);
+    throw new ApiError(res.status, errorMessage(data, res.status), data);
   }
+  return data as T;
+}
+
+async function requestBlob(path: string): Promise<Blob> {
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path));
+  } catch (e) {
+    throw new ApiError(0, 'Server nicht erreichbar. Verbindung & Server-Adresse prüfen.', e);
+  }
+  if (!res.ok) {
+    const data = await parseResponseText(res);
+    throw new ApiError(res.status, errorMessage(data, res.status), data);
+  }
+  return res.blob();
+}
+
+async function uploadFile<T>(path: string, file: File): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(apiUrl(path), {
+      method: 'POST',
+      headers: {
+        'Content-Type':
+          file.type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      },
+      body: file,
+    });
+  } catch (e) {
+    throw new ApiError(0, 'Server nicht erreichbar. Verbindung & Server-Adresse prüfen.', e);
+  }
+  const data = await parseResponseText(res);
+  if (!res.ok) throw new ApiError(res.status, errorMessage(data, res.status), data);
   return data as T;
 }
 
@@ -100,6 +159,8 @@ export const api = {
   intakes: {
     list: (params?: { from?: string; to?: string; substanceId?: number; limit?: number }) =>
       request<Intake[]>(`/api/intakes${qs(params)}`),
+    exportXlsx: () => requestBlob('/api/intakes/export.xlsx'),
+    importXlsx: (file: File) => uploadFile<IntakeImportResult>('/api/intakes/import', file),
     create: (body: IntakeInput) =>
       request<IntakeCreateResult>('/api/intakes', { method: 'POST', body: JSON.stringify(body) }),
     update: (id: number, body: Partial<IntakeInput>) =>

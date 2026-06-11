@@ -1,10 +1,11 @@
-import { Router } from 'express';
+import express, { Router } from 'express';
 import { z } from 'zod';
 import { db, type IntakeRow, type SubstanceRow } from '../db.js';
 import { nowLocalISO, normalizeDateTime, consumptionDay } from '../lib/time.js';
 import { defaultsFor } from '../lib/defaults.js';
 import { findOrCreateSubstance } from '../lib/substances.js';
 import { serializeIntake } from '../lib/serialize.js';
+import { XLSX_MIME, buildIntakesWorkbook, parseIntakesWorkbook, type IntakeXlsxRow } from '../lib/intakes_xlsx.js';
 
 export const intakesRouter = Router();
 
@@ -42,6 +43,71 @@ intakesRouter.get('/', (req, res) => {
     )
     .all(params) as IntakeRow[];
   res.json(rows.map(serializeIntake));
+});
+
+intakesRouter.get('/export.xlsx', (_req, res) => {
+  const rows = db
+    .prepare(
+      `SELECT taken_at AS takenAt,
+              substance_name AS substanceName,
+              amount,
+              notes,
+              created_at AS createdAt
+         FROM intakes
+        ORDER BY taken_at ASC, id ASC`,
+    )
+    .all() as IntakeXlsxRow[];
+  const workbook = buildIntakesWorkbook(rows);
+  const date = nowLocalISO().slice(0, 10);
+  res.setHeader('Content-Type', XLSX_MIME);
+  res.setHeader('Content-Disposition', `attachment; filename="meDiary-konsumvorgaenge-${date}.xlsx"`);
+  res.send(workbook);
+});
+
+const importRaw = express.raw({
+  type: [XLSX_MIME, 'application/octet-stream', 'application/zip'],
+  limit: '15mb',
+});
+
+const replaceIntakesFromXlsx = db.transaction((rows: IntakeXlsxRow[]) => {
+  const replaced = (db.prepare(`SELECT COUNT(*) AS c FROM intakes`).get() as { c: number }).c;
+  const substancesBefore = (db.prepare(`SELECT COUNT(*) AS c FROM substances`).get() as { c: number }).c;
+  db.prepare(`DELETE FROM intakes`).run();
+
+  const insert = db.prepare(
+    `INSERT INTO intakes (substance_id, substance_name, taken_at, amount, notes, created_at)
+     VALUES (@substanceId, @substanceName, @takenAt, @amount, @notes, @createdAt)`,
+  );
+  for (const row of rows) {
+    const substance = findOrCreateSubstance(row.substanceName);
+    insert.run({
+      substanceId: substance.id,
+      substanceName: row.substanceName,
+      takenAt: row.takenAt,
+      amount: row.amount,
+      notes: row.notes,
+      createdAt: row.createdAt,
+    });
+  }
+
+  const substancesAfter = (db.prepare(`SELECT COUNT(*) AS c FROM substances`).get() as { c: number }).c;
+  return { imported: rows.length, replaced, createdSubstances: substancesAfter - substancesBefore };
+});
+
+intakesRouter.post('/import', importRaw, (req, res) => {
+  if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
+    return res.status(400).json({ error: 'Keine XLSX-Datei empfangen' });
+  }
+
+  let rows: IntakeXlsxRow[];
+  try {
+    rows = parseIntakesWorkbook(req.body);
+  } catch (e) {
+    return res.status(400).json({ error: (e as Error).message });
+  }
+
+  const result = replaceIntakesFromXlsx(rows);
+  res.json(result);
 });
 
 intakesRouter.post('/', (req, res) => {
