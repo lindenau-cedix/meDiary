@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type IntakeInput, type SubstanceInput } from './api';
-import type { Plan, PlanItem } from './types';
+import type { Plan, PlanItem, PlanSlot } from './types';
 
 export const qk = {
   substances: (archived = false) => ['substances', archived] as const,
@@ -67,6 +67,18 @@ export function useIntakeMutations() {
       onSuccess: invalidate,
     }),
     remove: useMutation({ mutationFn: (id: number) => api.intakes.remove(id), onSuccess: invalidate }),
+    // Sammel-Eintrag aller Plan-Substanzen eines Slots ("Morgendmedis"/"Nachtmedis").
+    planBatch: useMutation({
+      mutationFn: (b: { slot: PlanSlot; takenAt?: string }) => api.intakes.planBatch(b),
+      onSuccess: (res) => {
+        invalidate();
+        // Eine Plan-Substanz ohne eigene Kachel kann neu angelegt worden sein.
+        if (res.entries.some((e) => e.createdSubstance)) {
+          qc.invalidateQueries({ queryKey: ['substances'] });
+          qc.invalidateQueries({ queryKey: qk.compliance() });
+        }
+      },
+    }),
   };
 }
 

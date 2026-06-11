@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion, Reorder, useDragControls } from 'framer-motion';
-import { Settings2, Plus, Check, Clock3, Moon, ChevronRight, WifiOff, AlertCircle, GripVertical, ArrowUpDown } from 'lucide-react';
+import { Settings2, Plus, Check, Clock3, Moon, Sunrise, ChevronRight, WifiOff, AlertCircle, GripVertical, ArrowUpDown } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -14,9 +14,9 @@ import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { greeting, nowLocalInput, todayStr, formatFull, formatTime } from '../lib/format';
-import { useSubstances, useIntakes, useIntakeMutations, useSubstanceMutations, useDefaults, useCompliance } from '../lib/queries';
+import { useSubstances, useIntakes, useIntakeMutations, useSubstanceMutations, useDefaults, useCompliance, usePlan } from '../lib/queries';
 import { ApiError } from '../lib/api';
-import type { Substance } from '../lib/types';
+import type { Substance, PlanSlot } from '../lib/types';
 
 export function QuickEntryScreen() {
   const toast = useToast();
@@ -25,7 +25,14 @@ export function QuickEntryScreen() {
   const { data: compliance } = useCompliance();
   const today = todayStr();
   const { data: todayIntakes = [] } = useIntakes({ from: today, limit: 50 });
-  const { create, remove } = useIntakeMutations();
+  const { data: plan } = usePlan();
+  const { create, remove, planBatch } = useIntakeMutations();
+
+  // Sammel-Einträge "Morgendmedis"/"Nachtmedis": tragen mit einem Tipp alle
+  // Substanzen des aktuell wirksamen Plans für den jeweiligen Slot ein. Nur
+  // sichtbar, wenn der Plan für den Slot überhaupt etwas vorsieht.
+  const morningCount = useMemo(() => (plan?.items ?? []).filter((i) => i.morning?.trim()).length, [plan]);
+  const nightCount = useMemo(() => (plan?.items ?? []).filter((i) => i.night?.trim()).length, [plan]);
 
   // Substanz-Namen, für die DEFAULTS.md keinen Eintrag hat. Case-insensitive
   // Schlüsselvergleich spiegelt das Server-Verhalten.
@@ -147,6 +154,47 @@ export function QuickEntryScreen() {
       if (res.nightMed && !res.assessmentExists && res.assessmentDate) {
         // kurze Verzögerung, damit der Toast sichtbar ist, dann Tagesbild
         setTimeout(() => setAssessment({ open: true, date: res.assessmentDate! }), opts?.instant ? 280 : 180);
+      }
+    } catch (e) {
+      haptics.warning();
+      toast.show({ tone: 'warning', message: 'Eintrag fehlgeschlagen', detail: (e as Error).message });
+    }
+  };
+
+  // Sammel-Eintrag aller Plan-Substanzen eines Slots zum gewählten Zeitpunkt.
+  const submitBatch = async (slot: PlanSlot, label: string) => {
+    if (planBatch.isPending) return;
+    setSelectedId(null);
+    try {
+      const res = await planBatch.mutateAsync({ slot, takenAt });
+      if (res.entries.length === 0) {
+        haptics.warning();
+        toast.show({
+          tone: 'warning',
+          message: `${label}: nichts eingetragen`,
+          detail: 'Für diesen Slot ist im aktuellen Plan nichts hinterlegt.',
+        });
+        return;
+      }
+      haptics.success();
+      const ids = res.entries.map((e) => e.intake.id);
+      const names = res.entries.map((e) => e.intake.substanceName);
+      toast.show({
+        message: `${label} eingetragen`,
+        detail: [`${res.entries.length}×`, names.join(', '), formatTime(res.entries[0].intake.takenAt)]
+          .filter(Boolean)
+          .join(' · '),
+        action: {
+          label: 'Rückgängig',
+          onClick: () => {
+            for (const id of ids) remove.mutate(id);
+          },
+        },
+      });
+      resetComposer();
+      if (res.nightMed && !res.assessmentExists && res.assessmentDate) {
+        // kurze Verzögerung, damit der Toast sichtbar ist, dann Tagesbild
+        setTimeout(() => setAssessment({ open: true, date: res.assessmentDate! }), 280);
       }
     } catch (e) {
       haptics.warning();
@@ -301,6 +349,26 @@ export function QuickEntryScreen() {
         </Reorder.Group>
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+          {morningCount > 0 && (
+            <PlanBatchTile
+              label="Morgendmedis"
+              count={morningCount}
+              icon={<Sunrise size={20} strokeWidth={2.2} />}
+              color="#E0944A"
+              pending={planBatch.isPending}
+              onPress={() => submitBatch('morning', 'Morgendmedis')}
+            />
+          )}
+          {nightCount > 0 && (
+            <PlanBatchTile
+              label="Nachtmedis"
+              count={nightCount}
+              icon={<Moon size={20} strokeWidth={2.2} />}
+              color="#6E62B6"
+              pending={planBatch.isPending}
+              onPress={() => submitBatch('night', 'Nachtmedis')}
+            />
+          )}
           {substances.map((s) => (
             <SubstanceTile
               key={s.id}
@@ -487,6 +555,51 @@ function SubstanceTile({
           </motion.span>
         )}
       </AnimatePresence>
+    </button>
+  );
+}
+
+/**
+ * Sammel-Kachel "Morgendmedis"/"Nachtmedis": ein Tipp trägt alle
+ * Plan-Substanzen des jeweiligen Slots zum gewählten Zeitpunkt ein. Bewusst
+ * keine Auswahl/Bestätigungsleiste wie bei einer Substanz — es ist eine
+ * Sofort-Aktion (Rückgängig per Toast).
+ */
+function PlanBatchTile({
+  label,
+  count,
+  icon,
+  color,
+  pending,
+  onPress,
+}: {
+  label: string;
+  count: number;
+  icon: ReactNode;
+  color: string;
+  pending?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <button
+      onClick={() => {
+        haptics.medium();
+        onPress();
+      }}
+      disabled={pending}
+      title={`Alle ${count} Plan-Einträge auf einmal erfassen`}
+      className={cx(
+        'press relative min-h-[5.5rem] rounded-3xl p-3 text-left ring-1 transition-all duration-150 overflow-hidden flex flex-col',
+        'ring-line bg-surface2 hover:bg-surface disabled:opacity-60',
+      )}
+    >
+      <span className="grid place-items-center size-9 rounded-2xl text-white shrink-0" style={{ backgroundColor: color }}>
+        {icon}
+      </span>
+      <p className="mt-2 font-medium text-[15px] text-ink leading-tight truncate">{label}</p>
+      <p className="text-xs text-ink-muted">
+        {count} {count === 1 ? 'Eintrag' : 'Einträge'}
+      </p>
     </button>
   );
 }

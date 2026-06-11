@@ -116,6 +116,7 @@ liegt dann im Volume `./data` im **Projekt-Root** (Live-Daten!).
 | `PATCH/DELETE` | `/api/substances/:id` | ändern / archivieren (`?hard=true` löscht) |
 | `POST` | `/api/substances/reorder` | Kachel-Reihenfolge setzen (`{ ids: number[] }` → `sort_order = Index`) |
 | `GET/POST` | `/api/intakes` | Einnahmen (DEFAULTS-Logik, Autovivifikation) |
+| `POST` | `/api/intakes/plan-batch` | alle Plan-Substanzen eines Slots auf einmal eintragen („Morgendmedis"/„Nachtmedis", `{ slot, takenAt? }`) |
 | `PATCH/DELETE` | `/api/intakes/:id` | ändern / löschen |
 | `GET` | `/api/plan` | heute wirksamer Plan + `upcoming` (geplante Zukunfts-Versionen) |
 | `GET` | `/api/plan/at?date=…` \| `?days=N` | Plan zum Stichtag/Zeitpunkt (`date` auch `YYYY-MM-DDTHH:mm`) |
@@ -128,6 +129,8 @@ liegt dann im Volume `./data` im **Projekt-Root** (Live-Daten!).
 | `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht |
 
 `POST /api/intakes` liefert `{ intake, nightMed, assessmentDate, assessmentExists, createdSubstance, companions }` — `createdSubstance: true` heißt, der Name war neu und wurde als QuickPick angelegt; `companions` (`{ intake, createdSubstance }[]`) sind die automatisch miterfassten Begleit-Einnahmen aus `Mit:`-Defaults (leer, wenn keine).
+
+`POST /api/intakes/plan-batch` (`{ slot: "morning"|"noon"|"evening"|"night", takenAt? }`) trägt **alle** Substanzen des zum `takenAt` wirksamen Plans ein, die im jeweiligen Slot eine Dosis haben — die Sammel-Einträge „Morgendmedis" (morning) und „Nachtmedis" (night) im Heute-Tab. Pro Substanz gilt dieselbe Auflösung wie bei `POST /` (Menge: Standarddosis > DEFAULTS > Plan-`strength`; Notiz aus DEFAULTS), Autovivifikation inklusive (`source_event_id = planbatch:<slot>`). Begleitsubstanzen (`Mit:`) werden hier bewusst NICHT miterfasst (der Plan ist die maßgebliche Liste; sonst Doppelungen). Antwort: `{ slot, count, entries: { intake, createdSubstance }[], nightMed, assessmentDate, assessmentExists }`. Wie bei `POST /` löst auch hier das Komplettieren aller Nacht-Medis das Tagesbild aus.
 
 ## DEFAULTS-Compliance — Checker & UI
 
@@ -234,6 +237,31 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **Sammel-Einträge „Morgendmedis" / „Nachtmedis"** (aktueller Task):
+  - Neuer Endpunkt `POST /api/intakes/plan-batch` (`server/src/routes/intakes.ts`):
+    trägt mit einem Aufruf alle Substanzen des zum `takenAt` wirksamen Plans
+    ein, die im gewünschten Slot (`morning`/`noon`/`evening`/`night`) eine Dosis
+    haben — in einer Transaktion, gleicher Zeitpunkt. Menge/Notiz pro Substanz
+    wie bei `POST /` (Standarddosis > DEFAULTS > Plan-`strength`; Notiz aus
+    DEFAULTS). Autovivifikation pro Plan-Substanz (`createdSubstance`-Flag je
+    Eintrag), `source_event_id = planbatch:<slot>`. **Keine** `Mit:`-Begleit­
+    substanzen (Plan ist die maßgebliche Liste, sonst Doppelungen). Dedup
+    gleicher Namen innerhalb eines Slots via `nameKey`. Nach dem Eintragen
+    greift `allNightMedsTaken(consumptionDay(takenAt))` → `nightMed`/
+    `assessmentDate` lösen das Tagesbild aus (so öffnet sich nach „Nachtmedis"
+    der Abfragedialog). Antwort: `{ slot, count, entries: { intake,
+    createdSubstance }[], nightMed, assessmentDate, assessmentExists }`.
+  - **Frontend (`web/src/screens/QuickEntryScreen.tsx`):** zwei Sammel-Kacheln
+    `PlanBatchTile` („Morgendmedis"/„Nachtmedis") am Anfang des Substanz-Rasters
+    — nur sichtbar, wenn der aktuelle Plan (`usePlan()`) für den Slot überhaupt
+    Substanzen hat (`morningCount`/`nightCount`). Ein Tipp ist eine Sofort-
+    Aktion (keine Auswahl-/Bestätigungsleiste): trägt alles zum Composer-
+    `takenAt` ein, Toast mit Substanz-Liste + „Rückgängig" (löscht alle
+    erzeugten Einnahmen). Nach „Nachtmedis" öffnet sich bei
+    `nightMed && !assessmentExists` das Tagesbild. Neue Mutation
+    `useIntakeMutations().planBatch` (invalidiert `substances`/Compliance, wenn
+    eine Plan-Substanz neu angelegt wurde); API-Client `api.intakes.planBatch`;
+    Typen `PlanSlot`/`PlanBatchEntry`/`PlanBatchResult` (`lib/types.ts`).
 - **Menge-Normalisierung: Zahl + Buchstabe bekommt Leerzeichen**:
   - `normalizeAmount()` fügt automatisch ein Leerzeichen zwischen Ziffer
     und Buchstabe ein (`100ml` → `100 ml`, `50mg` → `50 mg`).
@@ -364,6 +392,12 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
   per `Mit:` referenzierte Substanz ohne eigenen `## …`-Abschnitt taucht
   nach dem ersten Auto-Eintrag im Compliance-Check als `missing` auf —
   gewollt (Aufforderung, sie zu pflegen).
+- **`plan-batch` erfasst genau die Plan-Substanzen des Slots** — keine
+  `Mit:`-Begleitsubstanzen (sonst Doppelungen, wenn eine Begleitsubstanz
+  ohnehin im Plan steht). Maßgeblich ist der zum `takenAt` wirksame Plan; eine
+  Substanz, die morgens UND nachts dosiert ist (z. B. Lithium), wird von beiden
+  Sammel-Einträgen je einmal erfasst (zwei Einnahmen, gewollt). Im Frontend
+  erscheinen die Kacheln nur, wenn der Plan für den Slot etwas vorsieht.
 - **`is_night_med` triggert das Tagesbild** — `consumptionDay(takenAt)`
   rechnet 00:00–03:29 in den Vortag. Das passiert hier, nicht im Frontend.
 - **Tagesbild-Trigger: alle Nacht-Medis des aktuellen Plans** — Das
@@ -393,37 +427,45 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Tasks
 
-- **2026-06-10 14:57** [hermes] les transformed, 416 kB JS gzip 130 kB).
-    - End-to-End-Smoke-Test mit seed-DB: Autovivifikation legt Mirtazapin und CBD-Öl korrekt an, Backfill nach Restart verknüpft orphan-Einnahmen, DEFAULTS werden case-insensitive (auch Unicode) gematcht, Compliance-Report listet 50 Substanzen (4 compliant, 46 missing nach Import).
-    - import.ts --commit läuft sauber und legt 42 Substanzen für 169 importierte Einnahmen an.
-    
-    Geänderte Dateien: 13 (12 modified, 1 new AGENTS.md). Kein Push/Commit — wie verlangt.
-╰──────────────────────────────────────────────────────────────────────────────╯
-- **2026-06-10 16:26** [hermes] {
-      "checkedAt": "2026-06-10T...",
-      "defaultsAvailable": true,
-      "total": 9,
-      "compliant": [...],
-      "missing": [...]
-    }
-    
-    
-    Im Frontend geht's auch: Einstellungen → „Prüfung: DEFAULTS.md" — dort siehst du Badges und pro fehlendem Eintrag einen „Eintrag"-Button, der direkt in den DEFAULTS-Editor springt.
-╰──────────────────────────────────────────────────────────────────────────────╯
+- **2026-06-11 16:36** [claude] Alles erledigt und verifiziert. Hier die Zusammenfassung:
 
-## Letzte Tasks
+ Ergebnis
 
-- **2026-06-11 23:xx** Tagesbild-Trigger geändert: Nicht mehr `is_night_med`-Flag
-  pro Substanz, sondern Plan-basiert — `POST /api/intakes` prüft jetzt nach jeder
-  Erfassung, ob ALLE Nacht-Medis (`night`-Slot) des aktuell gültigen Plans für
-  den Konsumtag bereits eingenommen sind (`allNightMedsTaken(day)` in `db.ts`).
-  Erst wenn alle vorhanden sind, wird `nightMed=true` und `assessmentDate`
-  gesetzt. Auch Nicht-Nacht-Med-Substanzen lösen das Tagesbild aus, sobald
-  der Plan-Complete-State erreicht ist.
-  - `db.ts`: neue Funktionen `nightMedicationsFromPlan(day)` und
-    `allNightMedsTaken(day)`; lokale `nameKey()`-Kopie (Zirkular-Import-Gefahr
-    über `lib/substances.ts`).
-  - `intakes.ts`: alter `is_night_med`-Flag-Check entfernt, ersetzt durch
-    `allNightMedsTaken(consumptionDay(takenAt))`. `nightMed` in der Response
-    wird jetzt aus `assessmentDate !== null` abgeleitet.
-  - E2E-Smoke: Erstes Nacht-Med → kein Assessment, zweites → Assessment ✓
+Plan-Änderungen können jetzt rückwirkend („seit X Tagen ist schon Y anders“) und mit Wirkung in der Zukunft („in X Tagen wird Y anders“) erfasst werden. Kern ist ein neues Wirkungsdatum `effective_from` pro Plan-Version, das unabhängig vom Erfassungszeitpunkt `created_at` ist.
+
+Server (`server/src/`):
+- `db.ts`: neue Spalte `plan_versions.effective_from` (idempotente Migration, Backfill aus `created_at`, eigener Index). `planVersionAt(date)` löst jetzt über das Wirkungsdatum auf — `null` bedeutet „heute“, eine Zukunfts-Version wird also erst ab ihrem Stichtag zum aktuellen Plan. Bei gleichem Datum gewinnt die höhere `id`. Neu: `upcomingPlanVersions()`.
+- `routes/plan.ts`: `PUT /api/plan` akzeptiert optional `effectiveFrom: "YYYY-MM-DD"` (Vergangenheit oder Zukunft, Default heute, mit Validierung). `GET /api/plan` liefert zusätzlich `upcoming[]` (geplante Versionen), `GET /api/plan/versions` sortiert nach Wirkungsdatum und liefert `effectiveFrom`/`active`/`upcoming`-Flags.
+- `seed.ts` und `import.ts` setzen das Wirkungsdatum auf den Tag von `created_at`.
+
+Frontend (`web/src/`):
+- Plan-Editor hat ein „Gültig ab“-Datumsfeld mit Hinweistext, der die Wirkung erklärt („Rückwirkend — gilt bereits seit …“, „Gilt ab heute.“, „Geplant — wird erst in X Tagen wirksam …“).
+- Über dem Plan erscheint eine Karte „Geplante Änderung“, wenn eine Zukunfts-Version existiert (antippbar → Snapshot).
+- Versions-Verlauf zeigt „gültig ab …“ und Badges „aktuell“ (heute wirksam) bzw. „geplant“ (Zukunft); Snapshots laden jetzt direkt über `GET /api/plan/version/:id`.
+- `relativeDays()` kennt zusätzlich „morgen“.
+
+Verifiziert: Beide Typchecks und der Vite-Build laufen sauber durch. Im E2E-Smoke gegen einen frischen Seed: rückwirkende Version (gültig ab vor 3 Tagen) wird sofort zum aktuellen Plan und gilt am Stichtag korrekt (06-07 → alte Version, 06-08 → neue); eine Zukunfts-Version (ab 15.06.) bleibt aus dem aktuellen Plan und dem Diff draußen, erscheint in `upcoming` und greift am Stichtag; ungültiges Datumsformat wird mit 400 abgelehnt.
+
+`AGENTS.md` ist aktualisiert (Architektur, API-Tabelle, Schema, Smoke-Rezept, Stolperfalle zur `effective_from`-Semantik und neue offene Punkte, z. B. „geplante Version verwerfen“ als möglicher nächster Schritt). Committet/gepusht habe ich wie vorgegeben nicht.
+- **2026-06-11 20:58** [hermes] server/src/routes/substances.ts
+    - normalizeAmount() eingefügt
+    - Angewendet bei POST /api/substances (defaultDose) und PATCH /api/substances/:id (defaultDose)
+    
+    Verifikation:
+    - TypeScript: tsc --noEmit ✓
+    - E2E-Smoke: 100ml → "100 ml", PATCH 50ml → "50 ml", DEFAULTS-Fallback mit korrekter Normalisierung ✓
+    - Frontend-Build: vite build ✓
+    
+    Ergänzt in AGENTS.md: neue Sektion unter „Letzte Änderungen" dokumentiert die Normalisierung mitsamt Regex und allen betroffenen Stellen.
+╰──────────────────────────────────────────────────────────────────────────────╯
+- **2026-06-11 21:09** [hermes] - Alter Flag-Check (is_night_med pro Substanz) entfernt
+    - allNightMedsTaken(consumptionDay(takenAt)) ersetzt ihn
+    - nightMed: assessmentDate !== null — jetzt abgeleitet statt direkt berechnet
+    
+    Verifikation:
+    - Server TS ✓, Frontend TS ✓, Vite-Build ✓
+    - E2E-Smoke: Quetiapin (1/2 Nacht-Medis) → kein Assessment; Lithium (2/2) → Assessment ✓
+    - Auch: Elvanse nach Complet → Assessment ✓ (jede Substanz löst aus, wenn der Plan complet ist)
+    
+    Kein Commit/Push — wie verlangt.
+╰──────────────────────────────────────────────────────────────────────────────╯

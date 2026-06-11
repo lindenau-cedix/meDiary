@@ -10,6 +10,8 @@ import type {
   DefaultsPayload,
   ComplianceReport,
   IntakeImportResult,
+  PlanSlot,
+  PlanBatchResult,
 } from './types';
 
 const API_BASE_KEY = 'mediary.apiBase';
@@ -165,6 +167,8 @@ export const api = {
     importXlsx: (file: File) => uploadFile<IntakeImportResult>('/api/intakes/import', file),
     create: (body: IntakeInput) =>
       request<IntakeCreateResult>('/api/intakes', { method: 'POST', body: JSON.stringify(body) }),
+    planBatch: (body: { slot: PlanSlot; takenAt?: string }) =>
+      request<PlanBatchResult>('/api/intakes/plan-batch', { method: 'POST', body: JSON.stringify(body) }),
     update: (id: number, body: Partial<IntakeInput>) =>
       request<Intake>(`/api/intakes/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     remove: (id: number) => request<void>(`/api/intakes/${id}`, { method: 'DELETE' }),

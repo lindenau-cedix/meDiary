@@ -43,6 +43,25 @@ export interface IntakeImportResult {
   createdSubstances: number;
 }
 
+/** Tages-Slot des Medikationsplans (Morgens/Mittags/Abends/Nachts). */
+export type PlanSlot = 'morning' | 'noon' | 'evening' | 'night';
+
+/** Eine vom Sammel-Eintrag ("Morgendmedis"/"Nachtmedis") erzeugte Einnahme. */
+export interface PlanBatchEntry {
+  intake: Intake;
+  createdSubstance: boolean;
+}
+
+/** Antwort von POST /api/intakes/plan-batch — alle Einnahmen eines Slots. */
+export interface PlanBatchResult {
+  slot: PlanSlot;
+  count: number;
+  entries: PlanBatchEntry[];
+  nightMed: boolean;
+  assessmentDate: string | null;
+  assessmentExists: boolean;
+}
+
 export interface PlanItem {
   id?: number;
   substanceId: number | null;

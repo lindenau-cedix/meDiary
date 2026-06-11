@@ -1,6 +1,6 @@
 import express, { Router } from 'express';
 import { z } from 'zod';
-import { db, type IntakeRow, type SubstanceRow, allNightMedsTaken } from '../db.js';
+import { db, type IntakeRow, type SubstanceRow, allNightMedsTaken, planVersionAt, planItemsFor } from '../db.js';
 import { nowLocalISO, normalizeDateTime, consumptionDay } from '../lib/time.js';
 import { defaultsFor } from '../lib/defaults.js';
 import { findOrCreateSubstance, nameKey } from '../lib/substances.js';
@@ -219,6 +219,110 @@ intakesRouter.post('/', (req, res) => {
       intake: serializeIntake(c.row),
       createdSubstance: c.createdSubstance,
     })),
+  });
+});
+
+const PLAN_SLOTS = ['morning', 'noon', 'evening', 'night'] as const;
+type PlanSlot = (typeof PLAN_SLOTS)[number];
+
+const planBatchSchema = z.object({
+  slot: z.enum(PLAN_SLOTS),
+  takenAt: z.string().optional(), // default: jetzt
+});
+
+/**
+ * Trägt alle Substanzen des wirksamen Plans für einen Tages-Slot
+ * (`morning`/`noon`/`evening`/`night`) als Einnahmen zum selben Zeitpunkt ein —
+ * d. h. "Morgendmedis" bzw. "Nachtmedis" als ein einziger Tipp. Pro Substanz
+ * gilt dieselbe Mengen-/Notiz-Auflösung wie bei einer normalen Erfassung
+ * (Standarddosis > DEFAULTS > Plan-Stärke). Maßgeblich ist der zum `takenAt`
+ * wirksame Plan.
+ *
+ * Begleitsubstanzen (DEFAULTS "Mit:") werden hier bewusst NICHT miterfasst —
+ * der Plan ist die maßgebliche Liste, sonst entstünden Doppelungen, wenn eine
+ * Begleitsubstanz ohnehin im Plan steht. Wie bei `POST /` wird nach dem
+ * Eintragen geprüft, ob alle Nacht-Medis des Konsumtags erfasst sind, um das
+ * Tagesbild anzubieten (`nightMed`/`assessmentDate`).
+ */
+intakesRouter.post('/plan-batch', (req, res) => {
+  const parsed = planBatchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const slot: PlanSlot = parsed.data.slot;
+
+  const takenAt = parsed.data.takenAt ? normalizeDateTime(parsed.data.takenAt) : nowLocalISO();
+
+  // Den zum Zeitpunkt wirksamen Plan heranziehen und auf den Slot filtern.
+  const version = planVersionAt(takenAt);
+  const items = version
+    ? planItemsFor(version.id).filter((it) => {
+        const v = it[slot];
+        return v != null && v.trim() !== '';
+      })
+    : [];
+
+  const insertIntake = db.prepare(
+    `INSERT INTO intakes (substance_id, substance_name, taken_at, amount, notes, created_at, source_event_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const selectIntake = db.prepare(`SELECT * FROM intakes WHERE id = ?`);
+
+  interface BatchCreated {
+    row: IntakeRow;
+    createdSubstance: boolean;
+  }
+  const createBatch = db.transaction((): BatchCreated[] => {
+    const created: BatchCreated[] = [];
+    const seen = new Set<string>();
+    for (const item of items) {
+      const key = nameKey(item.substance_name);
+      if (seen.has(key)) continue; // Doppelnennungen im Plan überspringen
+      seen.add(key);
+
+      // Substanz auflösen: bevorzugt über die im Plan hinterlegte ID, sonst
+      // per Name (legt sie bei Bedarf als QuickPick an).
+      let sub: SubstanceRow | undefined;
+      let createdSubstance = false;
+      if (item.substance_id != null) {
+        sub = db.prepare(`SELECT * FROM substances WHERE id = ?`).get(item.substance_id) as SubstanceRow | undefined;
+      }
+      if (!sub) {
+        const existedBefore = (db.prepare(`SELECT name FROM substances`).all() as { name: string }[]).some(
+          (s) => nameKey(s.name) === key,
+        );
+        sub = findOrCreateSubstance(item.substance_name);
+        createdSubstance = !existedBefore;
+      }
+
+      const name = sub?.name ?? item.substance_name;
+      const def = defaultsFor(name);
+      const amount =
+        normalizeAmount(sub?.default_dose) || normalizeAmount(def.amount) || normalizeAmount(item.strength) || null;
+      const notes = def.note || null;
+
+      const info = insertIntake.run(sub?.id ?? null, name, takenAt, amount, notes, nowLocalISO(), `planbatch:${slot}`);
+      created.push({ row: selectIntake.get(info.lastInsertRowid) as IntakeRow, createdSubstance });
+    }
+    return created;
+  });
+  const created = createBatch();
+
+  // Erst wenn ALLE Nacht-Medis des aktuellen Plans für den Konsumtag
+  // eingenommen wurden, wird das Tages-Assessment angeboten.
+  const assessmentDate = allNightMedsTaken(consumptionDay(takenAt));
+  const assessmentExists = assessmentDate
+    ? !!db.prepare(`SELECT 1 FROM daily_assessments WHERE date = ?`).get(assessmentDate)
+    : false;
+
+  res.status(201).json({
+    slot,
+    count: created.length,
+    entries: created.map((c) => ({
+      intake: serializeIntake(c.row),
+      createdSubstance: c.createdSubstance,
+    })),
+    nightMed: assessmentDate !== null,
+    assessmentDate,
+    assessmentExists,
   });
 });
 
