@@ -59,6 +59,8 @@ export function QuickEntryScreen() {
     return entry?.[1] ?? null;
   }, [selected, defaults]);
   const defaultNote = selectedDefault?.note ?? null;
+  // Begleitsubstanzen (DEFAULTS "Mit:"), die beim Eintragen automatisch mitkommen
+  const companionDefaults = selectedDefault?.companions ?? [];
 
   const resetComposer = () => {
     setSelectedId(null);
@@ -77,12 +79,22 @@ export function QuickEntryScreen() {
       });
       haptics.success();
       const created = res.intake;
+      const companions = res.companions ?? [];
       toast.show({
         message: `${sub.name} eingetragen`,
-        detail: [created.amount, formatTime(created.takenAt)].filter(Boolean).join(' · '),
+        detail: [
+          created.amount,
+          formatTime(created.takenAt),
+          ...companions.map((c) => `+ ${c.intake.substanceName}`),
+        ]
+          .filter(Boolean)
+          .join(' · '),
         action: {
           label: 'Rückgängig',
-          onClick: () => remove.mutate(created.id),
+          onClick: () => {
+            remove.mutate(created.id);
+            for (const c of companions) remove.mutate(c.intake.id);
+          },
         },
       });
       resetComposer();
@@ -191,6 +203,14 @@ export function QuickEntryScreen() {
         {selected && defaultNote && !note.trim() && (
           <p className="text-xs text-ink-muted leading-snug pl-1 line-clamp-2">
             <span className="text-accent font-medium">Standard:</span> {defaultNote}
+          </p>
+        )}
+        {selected && companionDefaults.length > 0 && (
+          <p className="text-xs text-ink-muted leading-snug pl-1 line-clamp-2">
+            <span className="text-accent font-medium">Automatisch dazu:</span>{' '}
+            {companionDefaults
+              .map((c) => (c.amount ? `${c.name} (${c.amount})` : c.name))
+              .join(', ')}
           </p>
         )}
       </Card>

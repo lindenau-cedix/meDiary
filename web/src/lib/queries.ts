@@ -51,7 +51,17 @@ export function useIntakeMutations() {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ['intakes'] });
   return {
-    create: useMutation({ mutationFn: (b: IntakeInput) => api.intakes.create(b), onSuccess: invalidate }),
+    create: useMutation({
+      mutationFn: (b: IntakeInput) => api.intakes.create(b),
+      onSuccess: (res) => {
+        invalidate();
+        // Eine Begleitsubstanz (DEFAULTS "Mit:") kann eine neue Kachel angelegt haben
+        if (res.createdSubstance || res.companions?.some((c) => c.createdSubstance)) {
+          qc.invalidateQueries({ queryKey: ['substances'] });
+          qc.invalidateQueries({ queryKey: qk.compliance() });
+        }
+      },
+    }),
     update: useMutation({
       mutationFn: ({ id, body }: { id: number; body: Partial<IntakeInput> }) => api.intakes.update(id, body),
       onSuccess: invalidate,

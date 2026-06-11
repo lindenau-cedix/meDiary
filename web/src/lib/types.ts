@@ -22,12 +22,19 @@ export interface Intake {
   createdAt: string;
 }
 
+/** Automatisch miterfasste Begleit-Einnahme (DEFAULTS.md `Mit:`). */
+export interface IntakeCompanion {
+  intake: Intake;
+  createdSubstance: boolean;
+}
+
 export interface IntakeCreateResult {
   intake: Intake;
   nightMed: boolean;
   assessmentDate: string | null;
   assessmentExists: boolean;
   createdSubstance?: boolean;
+  companions?: IntakeCompanion[];
 }
 
 export interface IntakeImportResult {
@@ -111,9 +118,17 @@ export interface Metric {
   highLabel: string;
 }
 
+/** Begleitsubstanz aus einer `Mit:`-Zeile in DEFAULTS.md. */
+export interface CompanionDefault {
+  name: string;
+  amount: string | null;
+  note: string | null;
+}
+
 export interface SubstanceDefault {
   note: string | null;
   amount: string | null;
+  companions?: CompanionDefault[];
 }
 
 export interface DefaultsPayload {

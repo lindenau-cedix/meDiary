@@ -17,7 +17,7 @@ meDiary/
 ├── import/   → Datenquellen für den Importer (Markdown + entries.jsonl)
 ├── DEFAULTS.md  → Standard-Notizen/Mengen pro Substanz (live editierbar)
 ├── README.md
-└── AGENTS.md    (du bist hier)
+└── AGENTS.md    (du bist hier — CLAUDE.md ist ein Symlink auf diese Datei)
 ```
 
 ## Tech-Stack
@@ -32,7 +32,7 @@ meDiary/
 - **Tests:** keine Unit-Tests vorhanden — Verifikation läuft über manuelle
   Smoke-Tests gegen `npm run dev` und die API.
 
-## Schnellstart
+## Schnellstart & Kommandos
 
 ```bash
 npm run install:all    # server/ und web/ installieren
@@ -40,15 +40,45 @@ npm --prefix server run seed     # 6 Substanzen + 2 Plan-Versionen + Einnahmen
 npm run dev            # API :4000, Web :5173 (Proxy /api → 4000)
 ```
 
-Docker: `docker compose up -d --build` (siehe `docker-compose.yml`).
+Weitere Kommandos (kein Linter konfiguriert, kein Test-Runner — Verifikation
+siehe Rezepte unten):
+
+```bash
+npm --prefix server run build    # tsc → server/dist
+npm run start                    # node dist/index.js (vorher build)
+npm run build:web                # tsc --noEmit + vite build → web/dist
+npm --prefix server run import               # Importer Dry-Run (liest import/)
+npm --prefix server run import -- --commit   # schreibt in die DB (--reset-imported ersetzt Importiertes)
+npm run cap:android              # Capacitor: android/ anlegen + syncen (in web/: cap:sync, cap:open)
+```
+
+Server-Konfiguration über Env/`.env` (`server/src/config.ts`): `PORT` (4000),
+`DB_PATH` (Default `server/data/mediary.db`, relativ zu `server/`),
+`DEFAULTS_PATH` (Default `../DEFAULTS.md`), `WEB_DIST` (optional: gebautes
+Frontend statisch mit ausliefern).
+
+Docker: `docker compose up -d --build` (siehe `docker-compose.yml`) — die DB
+liegt dann im Volume `./data` im **Projekt-Root** (Live-Daten!).
 
 ## Wichtige Architektur-Punkte
 
 - **DEFAULTS.md wird bei JEDEM Schreibvorgang frisch gelesen** (kein Cache).
   Parser: `server/src/lib/defaults.ts → parse()`. Unterstützt `Menge:`/
-  `Dosis:` und `Notiz:`/`Hinweis:`; Fließtext unter einer `## …`-Überschrift
-  zählt als Notiz. Case-insensitive Match via `nameKey()` (Unicode-aware,
+  `Dosis:`, `Notiz:`/`Hinweis:` und `Mit:`/`Zusammen mit:` (Begleitsubstanz,
+  Format `Mit: Name | Menge | Notiz`, Menge/Notiz optional, mehrere Zeilen
+  möglich); Fließtext unter einer `## …`-Überschrift zählt als Notiz.
+  Case-insensitive Match via `nameKey()` (Unicode-aware,
   `toLocaleLowerCase('de')`).
+- **Begleitsubstanzen (`Mit:`)**: `POST /api/intakes` erfasst für jede
+  `Mit:`-Zeile der eingetragenen Substanz automatisch eine zweite Einnahme —
+  gleicher Zeitpunkt, in einer Transaktion mit dem Haupteintrag. Menge/Notiz
+  aus der `Mit:`-Zeile haben Vorrang, sonst Standarddosis bzw. eigener
+  DEFAULTS-Eintrag der Begleitsubstanz. Nur eine Ebene tief (`Mit:` der
+  Begleitsubstanz wird nicht verfolgt, Selbstbezug übersprungen),
+  Autovivifikation wie beim Haupteintrag, `source_event_id =
+  companion:<haupt-id>`. Ist die Begleitsubstanz Nachtmedikation, wird das
+  Tagesbild ausgelöst. Gilt NICHT für Importer/XLSX-Import/PATCH;
+  Request-Flag `companions: false` schaltet es pro Aufruf ab.
 - **Substanz-Autovivifikation** (`server/src/lib/substances.ts`):
   - `findOrCreateSubstance(name)` wird in `POST /api/intakes` aufgerufen,
     wenn ein `substanceName` ohne `substanceId` ankommt → legt die Substanz
@@ -96,7 +126,7 @@ Docker: `docker compose up -d --build` (siehe `docker-compose.yml`).
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
 | `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht |
 
-`POST /api/intakes` liefert `{ intake, nightMed, assessmentDate, assessmentExists, createdSubstance }` — `createdSubstance: true` heißt, der Name war neu und wurde als QuickPick angelegt.
+`POST /api/intakes` liefert `{ intake, nightMed, assessmentDate, assessmentExists, createdSubstance, companions }` — `createdSubstance: true` heißt, der Name war neu und wurde als QuickPick angelegt; `companions` (`{ intake, createdSubstance }[]`) sind die automatisch miterfassten Begleit-Einnahmen aus `Mit:`-Defaults (leer, wenn keine).
 
 ## DEFAULTS-Compliance — Checker & UI
 
@@ -172,10 +202,11 @@ Nach jeder Änderung an Server oder Import-Logik:
 cd server && npx tsc --noEmit        # muss exit 0
 cd ../web && npx tsc --noEmit        # muss exit 0
 
-# 2. E2E-Smoke (manuell oder via shell)
-cd ../server && rm -rf data
-PORT=4011 DEFAULTS_PATH=../DEFAULTS.md node_modules/.bin/tsx src/seed.ts
-PORT=4011 DEFAULTS_PATH=../DEFAULTS.md node_modules/.bin/tsx src/index.ts &
+# 2. E2E-Smoke gegen eine Scratch-DB in /tmp — niemals gegen ./data im
+#    Projekt-Root (Docker-Volume mit Live-Daten) oder server/data testen!
+cd ../server && rm -rf /tmp/mediary-test && mkdir -p /tmp/mediary-test
+PORT=4011 DB_PATH=/tmp/mediary-test/mediary.db DEFAULTS_PATH=../DEFAULTS.md node_modules/.bin/tsx src/seed.ts
+PORT=4011 DB_PATH=/tmp/mediary-test/mediary.db DEFAULTS_PATH=../DEFAULTS.md node_modules/.bin/tsx src/index.ts &
 
 # DEFAULTS-Compliance:
 curl -sS http://localhost:4011/api/defaults/check | jq
@@ -202,7 +233,26 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Änderungen (jüngste zuerst)
 
-- **`effective_from` mit optionaler Uhrzeit** (aktueller Task):
+- **Begleitsubstanzen via DEFAULTS `Mit:`** (aktueller Task):
+  - Neue DEFAULTS-Zeile `Mit: <Name> | <Menge> | <Notiz>` (Aliase
+    `Zusammen mit:`/`With:`; Menge/Notiz optional, mehrere Zeilen möglich).
+    Parser: `CompanionDefault[]` als neues Feld `companions` in
+    `SubstanceDefault` (`lib/defaults.ts`).
+  - `POST /api/intakes` legt Begleit-Einnahmen im selben Schritt an
+    (Transaktion): gleicher `taken_at`, Autovivifikation, Fallback auf
+    Standarddosis/eigene DEFAULTS der Begleitsubstanz, `source_event_id =
+    companion:<haupt-id>`. Keine Ketten/Zyklen (eine Ebene, Selbstbezug
+    übersprungen). `companions: false` im Request schaltet es ab (Backfill).
+    Antwort: neues Feld `companions: { intake, createdSubstance }[]`;
+    `nightMed` ist auch dann true, wenn erst die Begleitsubstanz
+    Nachtmedikation ist (Tagesbild-Trigger).
+  - Importer, XLSX-Import und `PATCH /api/intakes/:id` bleiben unberührt.
+  - **Frontend:** Composer-Vorschau „Automatisch dazu: …" bei Substanzen mit
+    `Mit:`-Defaults; Toast nennt Begleit-Einträge (`+ Name`) und „Rückgängig"
+    löscht Haupt- + Begleit-Einnahmen; `useIntakeMutations().create`
+    invalidiert `substances`/Compliance, wenn eine Begleitsubstanz neu
+    angelegt wurde. Hilfetext + Placeholder im DEFAULTS-Editor erweitert.
+- **`effective_from` mit optionaler Uhrzeit**:
   - `effective_from` akzeptiert jetzt auch `YYYY-MM-DDTHH:mm`; reines Datum
     gilt weiter ab Tagesbeginn (keine Migration nötig, String-Vergleich ordnet
     beide Formate korrekt).
@@ -274,12 +324,23 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Bekannte Stolperfallen
 
+- **Zwei `data/`-Verzeichnisse:** `./data` im Projekt-Root ist das
+  Docker-Volume mit der **Live-DB** — nie löschen oder für Tests verwenden.
+  `server/data` ist der lokale Dev-Default (`DB_PATH` relativ zu `server/`).
+  Smoke-Tests immer mit explizitem `DB_PATH` nach `/tmp` fahren.
 - **SQLite `lower()` ist ASCII-only** — `lower('Ö')` bleibt `Ö`. Für
   korrektes Umlaut-Matching ist `nameKey()` in JS Pflicht; keine
   `lower(name) = lower(?)` Queries mehr schreiben.
 - **DEFAULTS.md wird live eingelesen** — keine Notwendigkeit, den Server
   nach einer Änderung neu zu starten, aber auch keine Reload-Logik im
   Client nötig (Server liest pro Anfrage frisch).
+- **`Mit:`-Begleitsubstanzen gelten nur für `POST /api/intakes`** — Importer,
+  XLSX-Replace und PATCH legen bewusst keine Begleit-Einnahmen an (Historie
+  bleibt Historie). Es wird genau eine Ebene aufgelöst: `Mit:`-Zeilen der
+  Begleitsubstanz werden ignoriert, `Mit: <Substanz selbst>` ebenso. Eine
+  per `Mit:` referenzierte Substanz ohne eigenen `## …`-Abschnitt taucht
+  nach dem ersten Auto-Eintrag im Compliance-Check als `missing` auf —
+  gewollt (Aufforderung, sie zu pflegen).
 - **`is_night_med` triggert das Tagesbild** — `consumptionDay(takenAt)`
   rechnet 00:00–03:29 in den Vortag. Das passiert hier, nicht im Frontend.
 - **Import `entries.jsonl` deckt nur Lücken** — Markdown hat Vorrang; ein

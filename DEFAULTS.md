@@ -11,6 +11,13 @@ Format je Substanz (Felder optional):
     ## Substanzname
     Menge: <Standard-Menge>
     Notiz: <Standard-Notiz>
+    Mit: <Begleitsubstanz> | <Menge> | <Notiz>
+
+`Mit:` trägt die genannte Begleitsubstanz bei jeder Einnahme automatisch als
+eigenen Eintrag mit ein (gleicher Zeitpunkt). Menge und Notiz sind optional —
+ohne Angabe gelten die Defaults der Begleitsubstanz selbst. Mehrere
+`Mit:`-Zeilen sind möglich; `Mit:`-Angaben der Begleitsubstanz werden nicht
+weiterverfolgt (keine Ketten).
 
 
 ## Energy-Drink
@@ -35,4 +42,4 @@ Notiz: Sorte "Shakti"
 
 ## Theanin
 Menge: 400 mg
-Notiz: + 20 mg Lemon-Balm-5:1-Extrakt (= 100 mg Lemon Balm)
+Mit: Lemon Balm | 100 mg | 20 mg Lemon Balm 5:1-Extrakt (= 100 mg Lemon Balm)

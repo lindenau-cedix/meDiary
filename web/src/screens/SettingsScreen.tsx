@@ -370,12 +370,15 @@ export function SettingsScreen() {
               rows={9}
               spellCheck={false}
               className="font-mono text-[13px] leading-relaxed"
-              placeholder={'## Substanzname\nMenge: 0,4–0,5 g\nNotiz: Hinweistext …'}
+              placeholder={'## Substanzname\nMenge: 0,4–0,5 g\nNotiz: Hinweistext …\nMit: Begleitsubstanz | Menge | Notiz'}
             />
             <p className="text-xs text-ink-faint leading-relaxed">
               Pro Substanz eine Überschrift <code className="text-ink-muted">## Substanzname</code>, darunter optional{' '}
-              <code className="text-ink-muted">Menge:</code> und <code className="text-ink-muted">Notiz:</code>. Wird beim
-              Eintragen übernommen, wenn Menge bzw. Notiz nicht selbst angegeben wurden. Wird bei jedem Eintrag frisch gelesen.
+              <code className="text-ink-muted">Menge:</code>, <code className="text-ink-muted">Notiz:</code> und{' '}
+              <code className="text-ink-muted">Mit:</code>. Menge/Notiz werden beim Eintragen übernommen, wenn sie nicht
+              selbst angegeben wurden. <code className="text-ink-muted">Mit: Name | Menge | Notiz</code> trägt die genannte
+              Begleitsubstanz automatisch als eigene Einnahme mit ein (Menge/Notiz optional — sonst gelten deren eigene
+              Standards). Wird bei jedem Eintrag frisch gelesen.
             </p>
             <Button
               icon={<Check size={18} />}

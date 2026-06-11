@@ -178,12 +178,33 @@ Notiz: „dünner, aber voller Joint", wenn keine Menge genannt wird.
 
 ## Energy-Drinks
 Notiz: 32 mg Koffein pro 100 ml, solange keine produktspezifischen Werte genannt werden.
+
+## Theanin
+Menge: 400 mg
+Mit: Lemon Balm | 100 mg | als 5:1-Extrakt
 ```
 
 `Menge:` (alias `Dosis:`) → Standard-Menge, `Notiz:` (alias `Hinweis:`) →
 Standard-Notiz; reiner Fließtext unter der Überschrift zählt ebenfalls als Notiz.
 Die Datei liegt im **Projekt-Wurzelverzeichnis** (`DEFAULTS.md`) und ist auch in den
 **Einstellungen** des Frontends bearbeitbar.
+
+### Begleitsubstanzen (`Mit:`)
+
+`Mit: <Name> | <Menge> | <Notiz>` (alias `Zusammen mit:`) erfasst beim Eintragen
+der Substanz **automatisch eine zweite Einnahme** für die genannte
+Begleitsubstanz — gleicher Zeitpunkt, Menge/Notiz optional (ohne Angabe gelten
+die Defaults der Begleitsubstanz: Standarddosis bzw. eigener DEFAULTS-Eintrag).
+Mehrere `Mit:`-Zeilen sind möglich. `Mit:`-Angaben der Begleitsubstanz werden
+**nicht weiterverfolgt** (eine Ebene, keine Zyklen); Selbstbezüge werden
+übersprungen. Die Begleitsubstanz wird bei Bedarf als QuickPick angelegt, ihr
+Eintrag bekommt `source_event_id = companion:<id-des-auslösenden-Eintrags>`.
+Ist die Begleitsubstanz eine Nachtmedikation, wird das Tagesbild genauso
+ausgelöst. Gilt nur für `POST /api/intakes` (nicht für Importer/XLSX/PATCH);
+`{"companions": false}` im Request schaltet es ab. Die Antwort enthält die
+angelegten Einträge unter `companions[]`, der Composer zeigt eine Vorschau
+(„Automatisch dazu: …") und „Rückgängig" im Toast entfernt Haupt- und
+Begleit-Einträge gemeinsam.
 
 > Programmatische Regeln aus früheren Notizen sind in den Code gewandert: die
 > **Tagesgrenze des Konsum-Tags (03:30 Europe/Berlin)** liegt in

@@ -137,6 +137,8 @@ export interface IntakeInput {
   takenAt?: string;
   amount?: string | null;
   notes?: string | null;
+  /** false = Begleitsubstanzen aus DEFAULTS `Mit:` nicht automatisch miterfassen. */
+  companions?: boolean;
 }
 
 export const api = {

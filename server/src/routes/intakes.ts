@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db, type IntakeRow, type SubstanceRow } from '../db.js';
 import { nowLocalISO, normalizeDateTime, consumptionDay } from '../lib/time.js';
 import { defaultsFor } from '../lib/defaults.js';
-import { findOrCreateSubstance } from '../lib/substances.js';
+import { findOrCreateSubstance, nameKey } from '../lib/substances.js';
 import { serializeIntake } from '../lib/serialize.js';
 import { XLSX_MIME, buildIntakesWorkbook, parseIntakesWorkbook, type IntakeXlsxRow } from '../lib/intakes_xlsx.js';
 
@@ -15,6 +15,7 @@ const createSchema = z.object({
   takenAt: z.string().optional(), // default: jetzt
   amount: z.string().trim().nullish(),
   notes: z.string().nullish(),
+  companions: z.boolean().optional(), // false = "Mit:"-Begleitsubstanzen nicht miterfassen (z. B. Backfill-Skripte)
 });
 
 intakesRouter.get('/', (req, res) => {
@@ -144,17 +145,57 @@ intakesRouter.post('/', (req, res) => {
   const amount = d.amount?.trim() || substance?.default_dose || def.amount || null;
   const notes = d.notes?.trim() || def.note || null;
 
-  const info = db
-    .prepare(
-      `INSERT INTO intakes (substance_id, substance_name, taken_at, amount, notes, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-    )
-    .run(substance?.id ?? null, substanceName, takenAt, amount, notes, nowLocalISO());
+  const insertIntake = db.prepare(
+    `INSERT INTO intakes (substance_id, substance_name, taken_at, amount, notes, created_at, source_event_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const selectIntake = db.prepare(`SELECT * FROM intakes WHERE id = ?`);
 
-  const row = db.prepare(`SELECT * FROM intakes WHERE id = ?`).get(info.lastInsertRowid) as IntakeRow;
+  // Begleitsubstanzen aus DEFAULTS "Mit:" im selben Schritt miterfassen —
+  // bewusst nur eine Ebene tief ("Mit:" der Begleitsubstanz wird nicht
+  // verfolgt, keine Ketten/Zyklen). `companions: false` schaltet das ab.
+  interface CompanionCreated {
+    row: IntakeRow;
+    substance: SubstanceRow;
+    createdSubstance: boolean;
+  }
+  const createIntakes = db.transaction((): { row: IntakeRow; companions: CompanionCreated[] } => {
+    const info = insertIntake.run(
+      substance?.id ?? null, substanceName, takenAt, amount, notes, nowLocalISO(), null,
+    );
+    const mainRow = selectIntake.get(info.lastInsertRowid) as IntakeRow;
 
-  // Nachtmedikations-Erkennung -> Tages-Assessment anbieten
-  const isNightMed = !!substance?.is_night_med;
+    const companions: CompanionCreated[] = [];
+    if (d.companions === false) return { row: mainRow, companions };
+
+    const seen = new Set([nameKey(substanceName)]);
+    for (const comp of def.companions) {
+      const key = nameKey(comp.name);
+      if (seen.has(key)) continue; // Selbstbezug/Doppelnennung überspringen
+      seen.add(key);
+      const existedBefore = (db.prepare(`SELECT name FROM substances`).all() as { name: string }[])
+        .some((s) => nameKey(s.name) === key);
+      const compSub = findOrCreateSubstance(comp.name);
+      const compDef = defaultsFor(compSub.name);
+      const compAmount = comp.amount || compSub.default_dose || compDef.amount || null;
+      const compNotes = comp.note || compDef.note || null;
+      const compInfo = insertIntake.run(
+        compSub.id, compSub.name, takenAt, compAmount, compNotes, nowLocalISO(),
+        `companion:${mainRow.id}`,
+      );
+      companions.push({
+        row: selectIntake.get(compInfo.lastInsertRowid) as IntakeRow,
+        substance: compSub,
+        createdSubstance: !existedBefore,
+      });
+    }
+    return { row: mainRow, companions };
+  });
+  const { row, companions } = createIntakes();
+
+  // Nachtmedikations-Erkennung -> Tages-Assessment anbieten (auch wenn die
+  // Nachtmedikation als Begleitsubstanz miterfasst wurde)
+  const isNightMed = !!substance?.is_night_med || companions.some((c) => !!c.substance.is_night_med);
   let assessmentDate: string | null = null;
   let assessmentExists = false;
   if (isNightMed) {
@@ -169,6 +210,10 @@ intakesRouter.post('/', (req, res) => {
     assessmentDate,
     assessmentExists,
     createdSubstance,
+    companions: companions.map((c) => ({
+      intake: serializeIntake(c.row),
+      createdSubstance: c.createdSubstance,
+    })),
   });
 });
 

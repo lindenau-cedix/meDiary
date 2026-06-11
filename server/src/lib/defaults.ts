@@ -10,24 +10,52 @@ import { nameKey } from './substances.js';
  *   ## Substanzname
  *   Menge: 0,4–0,5 g
  *   Notiz: frei formulierter Hinweis …
+ *   Mit: Begleitsubstanz | Menge | Notiz
  *
  * `Menge:` (alias `Dosis:`) → Standard-Menge, `Notiz:` (alias `Hinweis:`)
- * → Standard-Notiz. Zeilen ohne erkanntes Präfix gelten als Notiztext
- * (so bleibt reiner Fließtext unter einer Überschrift als Notiz nutzbar).
- * Eine Überschrift der Ebene 1 (`# …`) gilt als Dokumenttitel und wird
- * ignoriert.
+ * → Standard-Notiz. `Mit:` (alias `Zusammen mit:`) nennt eine Begleitsubstanz,
+ * die beim Eintragen automatisch als eigene Einnahme miterfasst wird —
+ * Menge/Notiz dahinter sind optional (Pipe-getrennt); ohne Angabe gelten die
+ * Defaults der Begleitsubstanz selbst. Mehrere `Mit:`-Zeilen sind möglich.
+ * Zeilen ohne erkanntes Präfix gelten als Notiztext (so bleibt reiner
+ * Fließtext unter einer Überschrift als Notiz nutzbar). Eine Überschrift der
+ * Ebene 1 (`# …`) gilt als Dokumenttitel und wird ignoriert.
  *
  * Die Datei wird bei JEDEM Aufruf frisch gelesen (kein Cache), damit
  * Änderungen sofort bei jedem Schreibvorgang der API greifen.
  */
 
+/** Begleitsubstanz aus einer `Mit:`-Zeile. */
+export interface CompanionDefault {
+  name: string;
+  /** Menge der automatischen Einnahme; null = Defaults der Begleitsubstanz. */
+  amount: string | null;
+  /** Notiz der automatischen Einnahme; null = Defaults der Begleitsubstanz. */
+  note: string | null;
+}
+
 export interface SubstanceDefault {
   note: string | null;
   amount: string | null;
+  /** Begleitsubstanzen, die beim Eintragen automatisch miterfasst werden. */
+  companions: CompanionDefault[];
 }
 
 const AMOUNT_RE = /^[-*]?\s*(?:\*\*)?\s*(?:Menge|Dosis|Amount)\s*(?:\*\*)?\s*:\s*(.+?)\s*\**\s*$/i;
 const NOTE_RE = /^[-*]?\s*(?:\*\*)?\s*(?:Notiz|Note|Hinweis)\s*(?:\*\*)?\s*:\s*(.+?)\s*$/i;
+const COMPANION_RE = /^[-*]?\s*(?:\*\*)?\s*(?:Mit|Zusammen mit|With)\s*(?:\*\*)?\s*:\s*(.+?)\s*$/i;
+
+/** `Name | Menge | Notiz` → CompanionDefault (Menge/Notiz optional). */
+function parseCompanion(raw: string): CompanionDefault | null {
+  const parts = raw.split('|').map((p) => p.trim());
+  const name = parts[0];
+  if (!name) return null;
+  return {
+    name,
+    amount: parts[1] || null,
+    note: parts.slice(2).join(' | ').trim() || null,
+  };
+}
 
 function parse(content: string): Map<string, SubstanceDefault> {
   const map = new Map<string, SubstanceDefault>();
@@ -37,15 +65,19 @@ function parse(content: string): Map<string, SubstanceDefault> {
   let amount: string | null = null;
   let noteExplicit: string | null = null;
   let noteLines: string[] = [];
+  let companions: CompanionDefault[] = [];
 
   const flush = () => {
     if (current !== null) {
       const note = noteExplicit ?? (noteLines.join('\n').trim() || null);
-      if (note || amount) map.set(nameKey(current), { note, amount });
+      if (note || amount || companions.length) {
+        map.set(nameKey(current), { note, amount, companions });
+      }
     }
     amount = null;
     noteExplicit = null;
     noteLines = [];
+    companions = [];
   };
 
   for (const line of lines) {
@@ -69,6 +101,12 @@ function parse(content: string): Map<string, SubstanceDefault> {
       noteExplicit = (noteExplicit ? noteExplicit + '\n' : '') + n[1].trim();
       continue;
     }
+    const c = line.match(COMPANION_RE);
+    if (c) {
+      const companion = parseCompanion(c[1]);
+      if (companion) companions.push(companion);
+      continue;
+    }
     if (line.trim()) noteLines.push(line.trim());
   }
   flush();
@@ -88,7 +126,7 @@ function load(): Map<string, SubstanceDefault> {
 
 /** Standard-Notiz + -Menge einer Substanz (case-insensitive, Unicode-aware). */
 export function defaultsFor(substanceName: string): SubstanceDefault {
-  return load().get(nameKey(substanceName)) ?? { note: null, amount: null };
+  return load().get(nameKey(substanceName)) ?? { note: null, amount: null, companions: [] };
 }
 
 export function defaultNoteFor(substanceName: string): string | null {
