@@ -1,7 +1,7 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { AnimatePresence, motion } from 'framer-motion';
-import { Settings2, Plus, Check, Clock3, Moon, ChevronRight, WifiOff, AlertCircle } from 'lucide-react';
+import { AnimatePresence, motion, Reorder, useDragControls } from 'framer-motion';
+import { Settings2, Plus, Check, Clock3, Moon, ChevronRight, WifiOff, AlertCircle, GripVertical, ArrowUpDown } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -14,7 +14,7 @@ import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { greeting, nowLocalInput, todayStr, formatFull, formatTime } from '../lib/format';
-import { useSubstances, useIntakes, useIntakeMutations, useDefaults, useCompliance } from '../lib/queries';
+import { useSubstances, useIntakes, useIntakeMutations, useSubstanceMutations, useDefaults, useCompliance } from '../lib/queries';
 import { ApiError } from '../lib/api';
 import type { Substance } from '../lib/types';
 
@@ -44,6 +44,52 @@ export function QuickEntryScreen() {
   const [note, setNote] = useState('');
   const [manageOpen, setManageOpen] = useState(false);
   const [assessment, setAssessment] = useState<{ open: boolean; date: string }>({ open: false, date: today });
+
+  // Sortier-Modus: Reihenfolge der Kacheln per Drag anpassen. Die Reihenfolge
+  // wird automatisch (debounced) als `sort_order` gespeichert und beim nächsten
+  // Laden serverseitig über `ORDER BY sort_order` wieder abgerufen.
+  const { reorder } = useSubstanceMutations();
+  const [sortMode, setSortMode] = useState(false);
+  const [ordered, setOrdered] = useState<Substance[]>([]);
+  const saveTimer = useRef<number | null>(null);
+  const pendingIds = useRef<number[] | null>(null);
+
+  const flushOrder = () => {
+    if (saveTimer.current) {
+      window.clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+    }
+    if (pendingIds.current) {
+      reorder.mutate(pendingIds.current);
+      pendingIds.current = null;
+    }
+  };
+
+  const scheduleSaveOrder = (list: Substance[]) => {
+    pendingIds.current = list.map((s) => s.id);
+    if (saveTimer.current) window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(flushOrder, 500);
+  };
+
+  const enterSortMode = () => {
+    haptics.light();
+    setSelectedId(null);
+    setOrdered(substances);
+    setSortMode(true);
+  };
+  const exitSortMode = () => {
+    haptics.light();
+    flushOrder();
+    setSortMode(false);
+  };
+
+  const onReorder = (next: Substance[]) => {
+    setOrdered(next);
+    scheduleSaveOrder(next);
+  };
+
+  // Beim Verlassen des Bildschirms eine noch ausstehende Speicherung nachholen.
+  useEffect(() => () => flushOrder(), []);
 
   const selected = useMemo(
     () => substances.find((s) => s.id === selectedId) ?? null,
@@ -218,41 +264,73 @@ export function QuickEntryScreen() {
       {/* Substanz-Raster */}
       <div className="mt-5 flex items-center justify-between px-1 mb-2.5">
         <p className="font-sans text-[13px] font-semibold uppercase tracking-[0.13em] text-ink-faint">
-          Substanz wählen
+          {sortMode ? 'Reihenfolge ziehen' : 'Substanz wählen'}
         </p>
-        <button
-          onClick={() => setManageOpen(true)}
-          className="press text-[13px] font-medium text-primary inline-flex items-center gap-1"
-        >
-          Verwalten
-        </button>
+        {sortMode ? (
+          <button
+            onClick={exitSortMode}
+            className="press text-[13px] font-semibold text-primary inline-flex items-center gap-1"
+          >
+            <Check size={15} /> Fertig
+          </button>
+        ) : (
+          <div className="flex items-center gap-3">
+            {substances.length > 1 && (
+              <button
+                onClick={enterSortMode}
+                className="press text-[13px] font-medium text-ink-muted hover:text-ink inline-flex items-center gap-1"
+              >
+                <ArrowUpDown size={14} /> Sortieren
+              </button>
+            )}
+            <button
+              onClick={() => setManageOpen(true)}
+              className="press text-[13px] font-medium text-primary inline-flex items-center gap-1"
+            >
+              Verwalten
+            </button>
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-        {substances.map((s) => (
-          <SubstanceTile
-            key={s.id}
-            sub={s}
-            selected={selectedId === s.id}
-            missingDefault={missingDefaults.has(s.name.toLowerCase())}
-            onSelect={() => {
-              haptics.select();
-              setSelectedId((id) => (id === s.id ? null : s.id));
-              if (s.defaultDose && !amount) setAmount('');
-            }}
-            onInstant={() => submit(s, { instant: true })}
-          />
-        ))}
-        <button
-          onClick={() => setManageOpen(true)}
-          className="press min-h-[5.5rem] rounded-3xl border-2 border-dashed border-line grid place-items-center text-ink-faint hover:border-primary/50 hover:text-primary transition-colors"
-        >
-          <span className="flex flex-col items-center gap-1">
-            <Plus size={22} />
-            <span className="text-xs font-medium">Substanz</span>
-          </span>
-        </button>
-      </div>
+      {sortMode ? (
+        <Reorder.Group axis="y" values={ordered} onReorder={onReorder} className="space-y-2">
+          {ordered.map((s) => (
+            <SortRow key={s.id} sub={s} />
+          ))}
+        </Reorder.Group>
+      ) : (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+          {substances.map((s) => (
+            <SubstanceTile
+              key={s.id}
+              sub={s}
+              selected={selectedId === s.id}
+              missingDefault={missingDefaults.has(s.name.toLowerCase())}
+              onSelect={() => {
+                haptics.select();
+                setSelectedId((id) => (id === s.id ? null : s.id));
+                if (s.defaultDose && !amount) setAmount('');
+              }}
+              onInstant={() => submit(s, { instant: true })}
+            />
+          ))}
+          <button
+            onClick={() => setManageOpen(true)}
+            className="press min-h-[5.5rem] rounded-3xl border-2 border-dashed border-line grid place-items-center text-ink-faint hover:border-primary/50 hover:text-primary transition-colors"
+          >
+            <span className="flex flex-col items-center gap-1">
+              <Plus size={22} />
+              <span className="text-xs font-medium">Substanz</span>
+            </span>
+          </button>
+        </div>
+      )}
+      {sortMode && (
+        <p className="text-center text-xs text-ink-faint mt-3 px-6 leading-relaxed">
+          Am Griff ziehen, um die Reihenfolge zu ändern — sie wird automatisch gespeichert.
+        </p>
+      )}
 
       {substances.length === 0 && !isOffline && (
         <p className="text-center text-sm text-ink-muted mt-6 px-6 leading-relaxed">
@@ -410,5 +488,38 @@ function SubstanceTile({
         )}
       </AnimatePresence>
     </button>
+  );
+}
+
+/** Eine Zeile im Sortier-Modus: per Griff ziehbar (framer-motion Reorder). */
+function SortRow({ sub }: { sub: Substance }) {
+  const controls = useDragControls();
+  return (
+    <Reorder.Item
+      value={sub}
+      dragListener={false}
+      dragControls={controls}
+      whileDrag={{ scale: 1.03, boxShadow: '0 12px 30px rgba(0,0,0,0.18)' }}
+      className="flex items-center gap-3 rounded-2xl bg-surface ring-1 ring-line px-3 py-2.5 select-none"
+    >
+      <button
+        onPointerDown={(e) => {
+          haptics.medium();
+          controls.start(e);
+        }}
+        className="touch-none cursor-grab active:cursor-grabbing grid place-items-center size-9 rounded-xl text-ink-faint hover:text-ink-muted hover:bg-surface2 shrink-0"
+        aria-label="Zum Sortieren ziehen"
+      >
+        <GripVertical size={18} />
+      </button>
+      <SubstanceSeal name={sub.name} color={sub.color} />
+      <div className="flex-1 min-w-0">
+        <p className="font-medium text-[15px] text-ink truncate flex items-center gap-1.5">
+          <span className="truncate">{sub.name}</span>
+          {sub.isNightMed && <Moon size={12} className="text-accent shrink-0" />}
+        </p>
+        {sub.defaultDose && <p className="text-xs text-ink-muted truncate">{sub.defaultDose}</p>}
+      </div>
+    </Reorder.Item>
   );
 }

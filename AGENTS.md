@@ -114,6 +114,7 @@ liegt dann im Volume `./data` im **Projekt-Root** (Live-Daten!).
 | `GET` | `/api/metrics` | 11 Tages-Skalen |
 | `GET/POST` | `/api/substances` | Substanzen lesen / anlegen |
 | `PATCH/DELETE` | `/api/substances/:id` | ändern / archivieren (`?hard=true` löscht) |
+| `POST` | `/api/substances/reorder` | Kachel-Reihenfolge setzen (`{ ids: number[] }` → `sort_order = Index`) |
 | `GET/POST` | `/api/intakes` | Einnahmen (DEFAULTS-Logik, Autovivifikation) |
 | `PATCH/DELETE` | `/api/intakes/:id` | ändern / löschen |
 | `GET` | `/api/plan` | heute wirksamer Plan + `upcoming` (geplante Zukunfts-Versionen) |
@@ -160,7 +161,7 @@ Frontend-UI:
 
 | Tabelle | Zweck |
 |---|---|
-| `substances` | antippbare Liste (Farbe, Standarddosis, `is_night_med`, Soft-Archive via `archived_at`) |
+| `substances` | antippbare Liste (Farbe, Standarddosis, `is_night_med`, Reihenfolge via `sort_order`, Soft-Archive via `archived_at`) |
 | `intakes` | Einnahmen (Zeitpunkt, Substanz-Snapshot mit `substance_id` + `substance_name`, Menge, Notizen) |
 | `plan_versions` | Plan-Snapshots (`created_at` = erfasst, `effective_from` = gültig ab) |
 | `plan_items` | Plan-Zeilen (Morgens/Mittags/Abends/Nachts) je Version |
@@ -233,6 +234,21 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **Kachel-Reihenfolge im „Heute"-Tab sortierbar** (aktueller Task):
+  - Backend war bereits vollständig vorhanden (`sort_order`-Spalte,
+    `POST /api/substances/reorder`, `ORDER BY sort_order, name`, API-Client
+    `api.substances.reorder`, `useSubstanceMutations().reorder`) — es fehlte
+    nur die Bedien-UI.
+  - **Frontend (`web/src/screens/QuickEntryScreen.tsx`):** neuer
+    „Sortieren"-Modus (Toggle neben „Verwalten", ab 2 Substanzen). Im Modus
+    wird das Kachel-Raster durch eine vertikale Drag-Liste ersetzt
+    (framer-motion `Reorder` + `useDragControls`, Zieh-Griff `GripVertical`) —
+    bewusst 1D-Liste statt 2D-Grid-Drag, um Konflikte mit der
+    Tap-/Long-Press-Geste der Kacheln zu vermeiden. Neue Reihenfolge wird
+    debounced (500 ms) via `reorder.mutate(ids)` automatisch gespeichert;
+    „Fertig" und ein `useEffect`-Cleanup beim Verlassen flushen eine noch
+    ausstehende Speicherung. Wiederabruf passiert serverseitig über
+    `ORDER BY sort_order` (kein Client-State nötig).
 - **Begleitsubstanzen via DEFAULTS `Mit:`** (aktueller Task):
   - Neue DEFAULTS-Zeile `Mit: <Name> | <Menge> | <Notiz>` (Aliase
     `Zusammen mit:`/`With:`; Menge/Notiz optional, mehrere Zeilen möglich).
