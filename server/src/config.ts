@@ -39,4 +39,19 @@ export const config = {
   })(),
   /** Optional path to a built web frontend (web/dist) to serve statically. */
   webDist: process.env.WEB_DIST ? resolveFromRoot(process.env.WEB_DIST) : null,
+  /**
+   * Cloudflare Access (Zero Trust) für geschützte Endpunkte (z. B.
+   * POST /api/intakes/text). Ohne teamDomain+aud antworten geschützte
+   * Endpunkte mit 503 (fail-closed); CF_ACCESS_DISABLED=true ist der
+   * explizite Bypass für lokale Entwicklung/Smoke-Tests.
+   */
+  cfAccess: {
+    /** Team-Domain: "meinteam", "meinteam.cloudflareaccess.com" oder volle URL. */
+    teamDomain: process.env.CF_ACCESS_TEAM_DOMAIN?.trim() || null,
+    /** AUD-Tag der Access-Application (Zero Trust → Access → Applications). */
+    aud: process.env.CF_ACCESS_AUD?.trim() || null,
+    /** Override der JWKS-URL (Standard: <team>/cdn-cgi/access/certs; nur für Tests). */
+    certsUrl: process.env.CF_ACCESS_CERTS_URL?.trim() || null,
+    disabled: process.env.CF_ACCESS_DISABLED === 'true',
+  },
 };

@@ -6,6 +6,8 @@ import { defaultsFor } from '../lib/defaults.js';
 import { findOrCreateSubstance, nameKey } from '../lib/substances.js';
 import { serializeIntake } from '../lib/serialize.js';
 import { XLSX_MIME, buildIntakesWorkbook, parseIntakesWorkbook, type IntakeXlsxRow } from '../lib/intakes_xlsx.js';
+import { parseFreeText } from '../lib/text_entries.js';
+import { requireCloudflareAccess } from '../lib/cloudflare_access.js';
 
 export const intakesRouter = Router();
 
@@ -16,6 +18,39 @@ function normalizeAmount(raw: string | null | undefined): string | null {
   if (!trimmed) return null;
   // Zwischen Ziffer und Buchstabe (Einheiten wie ml, mg, µg etc.)
   return trimmed.replace(/(\d)([a-zA-ZäöüÄÖÜßµ])/g, '$1 $2');
+}
+
+/** True, wenn eine Substanz mit diesem nameKey (aktiv oder archiviert) existiert. */
+function substanceExists(key: string): boolean {
+  return (db.prepare(`SELECT name FROM substances`).all() as { name: string }[]).some((s) => nameKey(s.name) === key);
+}
+
+/**
+ * Read-only-Vorschau der "Mit:"-Begleitsubstanzen einer Substanz (für den
+ * dryRun von POST /text): gleiche Mengen-/Notiz-Auflösung wie beim Schreiben
+ * (Mit:-Wert > Substanz-Standarddosis > DEFAULTS der Begleitsubstanz), aber
+ * OHNE Substanz-Anlage. Eine Ebene tief, Selbstbezug übersprungen.
+ */
+function previewCompanions(
+  substanceName: string,
+  takenAt: string,
+): { substanceName: string; amount: string | null; note: string | null; takenAt: string }[] {
+  const def = defaultsFor(substanceName);
+  const seen = new Set([nameKey(substanceName)]);
+  const subs = db.prepare(`SELECT * FROM substances`).all() as SubstanceRow[];
+  const out: { substanceName: string; amount: string | null; note: string | null; takenAt: string }[] = [];
+  for (const comp of def.companions) {
+    const key = nameKey(comp.name);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const compSub = subs.find((s) => nameKey(s.name) === key);
+    const compDef = defaultsFor(comp.name);
+    const amount =
+      normalizeAmount(comp.amount) || normalizeAmount(compSub?.default_dose) || normalizeAmount(compDef.amount) || null;
+    const note = comp.note || compDef.note || null;
+    out.push({ substanceName: compSub?.name ?? comp.name, amount, note, takenAt });
+  }
+  return out;
 }
 
 const createSchema = z.object({
@@ -323,6 +358,174 @@ intakesRouter.post('/plan-batch', (req, res) => {
     nightMed: assessmentDate !== null,
     assessmentDate,
     assessmentExists,
+  });
+});
+
+const textSchema = z.object({
+  text: z.string().min(1, 'text darf nicht leer sein'),
+  dryRun: z.boolean().optional(), // true = nur parsen, nichts schreiben
+  companions: z.boolean().optional(), // false = "Mit:"-Begleitsubstanzen nicht miterfassen
+});
+
+const textPlain = express.text({ type: ['text/plain', 'text/*'], limit: '1mb' });
+
+/**
+ * Freitext → Einnahmen: nimmt einen mehrzeiligen Text entgegen (Format siehe
+ * SAMPLES.md im Projekt-Root) und legt daraus Einträge an. Jede Zeile wird
+ * einzeln verarbeitet (Datum/Zeit-Präfix, `jetzt:` oder aktuelle Zeit;
+ * Aufzählung mit Kommas/„und"; `Substanz Menge (Notiz)` je Eintrag). Eine
+ * Zeile ist atomar: ein unparsbarer Eintrag macht die ganze Zeile zum
+ * `lineErrors`-Eintrag, die übrigen Zeilen werden trotzdem angelegt.
+ *
+ * Auflösung pro Eintrag wie bei `POST /`: Menge aus dem Text > Standarddosis >
+ * DEFAULTS; Notiz aus dem Text > DEFAULTS. Menge und/oder Notiz dürfen im Text
+ * weggelassen werden — dann greifen die DEFAULTS.md-Werte der Substanz.
+ * Autovivifikation inklusive.
+ *
+ * `Mit:`-Begleitsubstanzen aus DEFAULTS.md werden — wie bei `POST /` — pro
+ * Eintrag automatisch als eigene Einnahme zum selben Zeitpunkt miterfasst
+ * (z. B. Theanin → Lemon Balm). Eine Ebene tief, Selbstbezug übersprungen,
+ * `source_event_id = companion:<haupt-id>`. `companions: false` im JSON-Body
+ * schaltet das pro Aufruf ab.
+ *
+ * Geschützt via Cloudflare Access (Service-Token/Login am Edge, JWT-Prüfung
+ * hier am Origin). Body: JSON `{ text, dryRun?, companions? }` oder direkt
+ * `text/plain`.
+ *
+ * Nach dem Schreiben liest der Endpunkt die Einträge FRISCH aus der DB und
+ * meldet zurück, welche wirklich angekommen sind (`entries[].verified` samt
+ * `entries[].companions[].verified`, Gesamt-Flag `verified`).
+ */
+intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
+  const body = typeof req.body === 'string' ? { text: req.body } : req.body;
+  const parsedBody = textSchema.safeParse(body);
+  if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
+  const { text, dryRun } = parsedBody.data;
+  const withCompanions = parsedBody.data.companions !== false; // Default: an
+
+  const parsed = parseFreeText(text);
+
+  if (dryRun) {
+    return res.json({
+      dryRun: true,
+      lineCount: parsed.lineCount,
+      requested: parsed.entries.length,
+      entries: parsed.entries.map((e) => ({
+        ...e,
+        // Vorschau der "Mit:"-Begleitsubstanzen (read-only aus DEFAULTS.md,
+        // keine Substanz-Anlage); identische Auflösung wie beim Schreiben.
+        companions: withCompanions ? previewCompanions(e.substanceName, e.takenAt) : [],
+      })),
+      lineErrors: parsed.errors,
+    });
+  }
+
+  if (parsed.entries.length === 0) {
+    return res.status(400).json({
+      error: 'Keine gültigen Einträge im Text gefunden',
+      lineCount: parsed.lineCount,
+      lineErrors: parsed.errors,
+    });
+  }
+
+  // Gemeinsame Batch-Markierung, damit ein Text-Import in der DB als Gruppe
+  // auffindbar bleibt (source_event_id ist nicht unique).
+  const batchId = `text:${nowLocalISO()}`;
+
+  const insertIntake = db.prepare(
+    `INSERT INTO intakes (substance_id, substance_name, taken_at, amount, notes, created_at, source_event_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+
+  interface TextCompanionCreated {
+    id: number;
+    createdSubstance: boolean;
+  }
+  interface TextCreated {
+    id: number;
+    line: number;
+    createdSubstance: boolean;
+    companions: TextCompanionCreated[];
+  }
+  const createAll = db.transaction((): TextCreated[] => {
+    const out: TextCreated[] = [];
+    for (const entry of parsed.entries) {
+      const key = nameKey(entry.substanceName);
+      const existedBefore = substanceExists(key);
+      const sub = findOrCreateSubstance(entry.substanceName);
+      const def = defaultsFor(sub.name);
+      const amount =
+        normalizeAmount(entry.amount) || normalizeAmount(sub.default_dose) || normalizeAmount(def.amount) || null;
+      const notes = entry.note || def.note || null;
+      const info = insertIntake.run(sub.id, sub.name, entry.takenAt, amount, notes, nowLocalISO(), batchId);
+      const mainId = Number(info.lastInsertRowid);
+
+      // Begleitsubstanzen (DEFAULTS "Mit:") des Eintrags zum selben Zeitpunkt
+      // miterfassen — eine Ebene tief, Selbstbezug übersprungen, wie bei
+      // `POST /`. `companions: false` schaltet das ab.
+      const companions: TextCompanionCreated[] = [];
+      if (withCompanions) {
+        const seen = new Set([key]);
+        for (const comp of def.companions) {
+          const compKey = nameKey(comp.name);
+          if (seen.has(compKey)) continue;
+          seen.add(compKey);
+          const compExisted = substanceExists(compKey);
+          const compSub = findOrCreateSubstance(comp.name);
+          const compDef = defaultsFor(compSub.name);
+          const compAmount =
+            normalizeAmount(comp.amount) ||
+            normalizeAmount(compSub.default_dose) ||
+            normalizeAmount(compDef.amount) ||
+            null;
+          const compNotes = comp.note || compDef.note || null;
+          const compInfo = insertIntake.run(
+            compSub.id, compSub.name, entry.takenAt, compAmount, compNotes, nowLocalISO(), `companion:${mainId}`,
+          );
+          companions.push({ id: Number(compInfo.lastInsertRowid), createdSubstance: !compExisted });
+        }
+      }
+
+      out.push({ id: mainId, line: entry.line, createdSubstance: !existedBefore, companions });
+    }
+    return out;
+  });
+  const created = createAll();
+
+  // Verifikation: ALLE IDs (Haupt- + Begleit-Einträge) frisch aus der DB lesen
+  // — stehen die Einträge wirklich drin?
+  const allIds = created.flatMap((c) => [c.id, ...c.companions.map((x) => x.id)]);
+  const rows = db
+    .prepare(`SELECT * FROM intakes WHERE id IN (${allIds.map(() => '?').join(',')}) ORDER BY id`)
+    .all(...allIds) as IntakeRow[];
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const entriesOut = created.map((c) => {
+    const row = byId.get(c.id);
+    return {
+      line: c.line,
+      createdSubstance: c.createdSubstance,
+      verified: !!row,
+      intake: row ? serializeIntake(row) : null,
+      companions: c.companions.map((comp) => {
+        const compRow = byId.get(comp.id);
+        return {
+          createdSubstance: comp.createdSubstance,
+          verified: !!compRow,
+          intake: compRow ? serializeIntake(compRow) : null,
+        };
+      }),
+    };
+  });
+  const verifiedCount = rows.length; // gefundene = verifizierte (alle IDs sind eindeutig)
+
+  res.status(201).json({
+    batchId,
+    lineCount: parsed.lineCount,
+    requested: parsed.entries.length,
+    created: verifiedCount,
+    verified: verifiedCount === allIds.length,
+    entries: entriesOut,
+    lineErrors: parsed.errors,
   });
 });
 

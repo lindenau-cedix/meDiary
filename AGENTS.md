@@ -16,6 +16,7 @@ meDiary/
 ├── web/      → Frontend (React + Vite + Tailwind, Capacitor-fähig)
 ├── import/   → Datenquellen für den Importer (Markdown + entries.jsonl)
 ├── DEFAULTS.md  → Standard-Notizen/Mengen pro Substanz (live editierbar)
+├── SAMPLES.md   → Zeilen-Format für den Freitext-Import (POST /api/intakes/text)
 ├── README.md
 └── AGENTS.md    (du bist hier — CLAUDE.md ist ein Symlink auf diese Datei)
 ```
@@ -85,7 +86,8 @@ berührt die Daten nicht.
   Begleitsubstanz wird nicht verfolgt, Selbstbezug übersprungen),
   Autovivifikation wie beim Haupteintrag, `source_event_id =
   companion:<haupt-id>`. Ist die Begleitsubstanz Nachtmedikation, wird das
-  Tagesbild ausgelöst. Gilt NICHT für Importer/XLSX-Import/PATCH;
+  Tagesbild ausgelöst. **`POST /api/intakes/text` macht dasselbe** pro Eintrag
+  (ohne Tagesbild-Feld). Gilt NICHT für Importer/XLSX-Import/PATCH/plan-batch;
   Request-Flag `companions: false` schaltet es pro Aufruf ab.
 - **Substanz-Autovivifikation** (`server/src/lib/substances.ts`):
   - `findOrCreateSubstance(name)` wird in `POST /api/intakes` aufgerufen,
@@ -125,6 +127,7 @@ berührt die Daten nicht.
 | `POST` | `/api/substances/reorder` | Kachel-Reihenfolge setzen (`{ ids: number[] }` → `sort_order = Index`) |
 | `GET/POST` | `/api/intakes` | Einnahmen (DEFAULTS-Logik, Autovivifikation) |
 | `POST` | `/api/intakes/plan-batch` | alle Plan-Substanzen eines Slots auf einmal eintragen („Morgendmedis"/„Nachtmedis", `{ slot, takenAt? }`) |
+| `POST` | `/api/intakes/text` | mehrzeiligen Freitext (Format: SAMPLES.md) in Einnahmen umwandeln — **Cloudflare-Access-geschützt**, mit DB-Verifikation in der Antwort |
 | `PATCH/DELETE` | `/api/intakes/:id` | ändern / löschen |
 | `GET` | `/api/plan` | heute wirksamer Plan + `upcoming` (geplante Zukunfts-Versionen) |
 | `GET` | `/api/plan/at?date=…` \| `?days=N` | Plan zum Stichtag/Zeitpunkt (`date` auch `YYYY-MM-DDTHH:mm`) |
@@ -139,6 +142,30 @@ berührt die Daten nicht.
 `POST /api/intakes` liefert `{ intake, nightMed, assessmentDate, assessmentExists, createdSubstance, companions }` — `createdSubstance: true` heißt, der Name war neu und wurde als QuickPick angelegt; `companions` (`{ intake, createdSubstance }[]`) sind die automatisch miterfassten Begleit-Einnahmen aus `Mit:`-Defaults (leer, wenn keine).
 
 `POST /api/intakes/plan-batch` (`{ slot: "morning"|"noon"|"evening"|"night", takenAt? }`) trägt **alle** Substanzen des zum `takenAt` wirksamen Plans ein, die im jeweiligen Slot eine Dosis haben — die Sammel-Einträge „Morgendmedis" (morning) und „Nachtmedis" (night) im Heute-Tab. Pro Substanz gilt dieselbe Auflösung wie bei `POST /` (Menge: Standarddosis > DEFAULTS > Plan-`strength`; Notiz aus DEFAULTS), Autovivifikation inklusive (`source_event_id = planbatch:<slot>`). Begleitsubstanzen (`Mit:`) werden hier bewusst NICHT miterfasst (der Plan ist die maßgebliche Liste; sonst Doppelungen). Antwort: `{ slot, count, entries: { intake, createdSubstance }[], nightMed, assessmentDate, assessmentExists }`. Wie bei `POST /` löst auch hier das Komplettieren aller Nacht-Medis das Tagesbild aus.
+
+`POST /api/intakes/text` (Body: JSON `{ text, dryRun?, companions? }` oder direkt `text/plain`) wandelt mehrzeiligen Freitext in Einnahmen um. Format pro Zeile siehe **SAMPLES.md** im Projekt-Root: optionales Präfix `DD.MM(.YYYY) HH:MM:` (ohne Jahr = aktuelles, ohne Datum = heute), nur `HH:MM:`, `jetzt:` oder gar kein Präfix (= aktuelle Zeit); danach Einträge `Substanz Menge (Notiz)`, getrennt durch Kommas und/oder „ und " (Dezimal-Kommas wie `0,5 ml` und Klammer-Inhalte trennen nicht). Menge beginnt beim ersten Zahl-Token nach dem Namen (bei Folgen wie „Omega 3 500 mg" beim letzten der Zahlen-Folge); **Menge und/oder Notiz dürfen weggelassen werden — dann greifen die DEFAULTS.md-Werte** (Menge: Text > Standarddosis > DEFAULTS; Notiz: Klammer > DEFAULTS-Notiz). Autovivifikation wie bei `POST /`. **`Mit:`-Begleitsubstanzen aus DEFAULTS.md werden — wie bei `POST /` — pro Eintrag automatisch als eigene Einnahme zum selben Zeitpunkt miterfasst** (z. B. Theanin → Lemon Balm), eine Ebene tief, Selbstbezug übersprungen, `source_event_id = companion:<haupt-id>`; `companions: false` im JSON-Body schaltet das ab. Jede Zeile wird einzeln verarbeitet und ist atomar — ein fehlerhafter Eintrag macht die ganze Zeile zum `lineErrors`-Element, die übrigen Zeilen werden trotzdem angelegt (alle Inserts einer Anfrage in einer Transaktion, `source_event_id = text:<Zeitstempel>` als Batch-Marker für die Haupteinträge). **Nach dem Schreiben liest der Endpunkt die Einträge (inkl. Begleitsubstanzen) frisch aus der DB** und meldet, welche wirklich angekommen sind. Antwort (201): `{ batchId, lineCount, requested, created, verified, entries: { line, createdSubstance, verified, intake, companions: { createdSubstance, verified, intake }[] }[], lineErrors: { line, text, error }[] }` — `requested` zählt die Haupteinträge, `created` alle verifizierten Einträge (Haupt + Begleit), `verified` ist genau dann true, wenn jeder geplante Insert in der DB gefunden wurde. 400, wenn gar kein Eintrag parsebar war; `dryRun: true` liefert nur das Parse-Ergebnis (mit Begleit-Vorschau `entries[].companions[]`) ohne zu schreiben. **Zugriffsschutz:** Cloudflare Access (siehe Env-Tabelle) — ohne Konfiguration antwortet der Endpunkt 503 (fail-closed), `CF_ACCESS_DISABLED=true` ist der Dev-Bypass.
+
+**Kurzreferenz `/api/intakes/text` für externe Clients:** Lokal/Smoke-Test mit
+`CF_ACCESS_DISABLED=true`; produktiv über die Cloudflare-Access-geschützte URL
+aufrufen (Login-Cookie oder Service-Token am Cloudflare-Edge; am Origin wird
+das daraus entstehende JWT aus `Cf-Access-Jwt-Assertion` bzw. `CF_Authorization`
+validiert). Vor echten Writes erst `dryRun: true` senden. Beispiel:
+
+```bash
+curl -sS -X POST "$MEDIARY_URL/api/intakes/text" \
+  -H 'Content-Type: application/json' \
+  -d '{"dryRun":true,"text":"12.06.2026 08:30: Elvanse 30mg (nüchtern), Lithium 300 mg\njetzt: Theanin"}'
+```
+
+Für den echten Import `dryRun` weglassen; wenn keine automatischen
+`Mit:`-Begleitsubstanzen angelegt werden sollen, `{ "companions": false }`
+mitsenden. `text/plain` funktioniert ebenfalls:
+
+```bash
+curl -sS -X POST "$MEDIARY_URL/api/intakes/text" \
+  -H 'Content-Type: text/plain' \
+  --data-binary $'08:30: Elvanse 30mg (nuechtern)\njetzt: Theanin'
+```
 
 ## DEFAULTS-Compliance — Checker & UI
 
@@ -239,13 +266,99 @@ curl -sS -X PUT http://localhost:4011/api/plan -H 'Content-Type: application/jso
 # → sofort aktueller Plan; mit effectiveFrom in der Zukunft stattdessen:
 #   GET /api/plan → alte Version + upcoming[], GET /api/plan/at?date=<zukunft> → neue Version
 
+# Freitext-Import (Server dafür mit CF_ACCESS_DISABLED=true starten):
+curl -sS -X POST http://localhost:4011/api/intakes/text -H 'Content-Type: application/json' \
+  -d '{"text":"11.06.2026 08:30: Elvanse 30mg (nüchtern), Lithium 300 mg und Vitamin D 20000 IE\njetzt: Theanin"}'
+# → 201, verified:true, entries[] mit frisch aus der DB gelesenen Einträgen;
+#   dryRun:true im Body parst nur. Ohne CF_ACCESS_DISABLED/-Konfig → 503,
+#   mit CF_ACCESS_TEAM_DOMAIN+CF_ACCESS_AUD aber ohne/mit ungültigem JWT → 401.
+
 # 3. Frontend-Bau
 cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 ```
 
 ## Letzte Änderungen (jüngste zuerst)
 
-- **Sammel-Einträge „Morgendmedis" / „Nachtmedis"** (aktueller Task):
+- **Dokumentation: Mehrzeiltextinput-API erklärt**:
+  - Keine Code-/Schemaänderung. Die bestehende Route `POST /api/intakes/text`
+    wurde gegen Implementierung und `SAMPLES.md` geprüft und in dieser Datei
+    um eine kurze Nutzungsreferenz mit `curl`-Beispielen für JSON, `dryRun`,
+    `companions: false`, `text/plain` und Cloudflare-Access-Hinweise ergänzt.
+- **Freitext-Import (`/text`): `Mit:`-Begleitsubstanzen + Menge/Notiz-Weglassen**:
+  - `POST /api/intakes/text` erfasst jetzt — wie `POST /` — pro Eintrag die
+    `Mit:`-Begleitsubstanzen aus DEFAULTS.md automatisch mit (z. B. Theanin →
+    Lemon Balm „100 mg" + Mit:-Notiz). Gleicher Zeitpunkt wie der Haupteintrag,
+    eine Ebene tief, Selbstbezug übersprungen, `source_event_id =
+    companion:<haupt-id>`. Vorher waren sie hier bewusst ausgeschlossen — diese
+    Entscheidung ist auf Wunsch umgekehrt. `companions: false` im JSON-Body
+    schaltet es pro Aufruf ab.
+  - **Menge und/oder Notiz dürfen im Text weggelassen werden** → es greifen die
+    DEFAULTS.md-Werte (war bereits so: Text-Menge > Standarddosis > DEFAULTS;
+    Text-Notiz > DEFAULTS-Notiz). Jetzt verifiziert.
+  - **Verifikation deckt Begleiteinträge mit ab**: der Endpunkt liest nach dem
+    Commit ALLE IDs (Haupt + Begleit) frisch aus der DB. Antwort-`entries[]`
+    bekommen ein verschachteltes `companions: { createdSubstance, verified,
+    intake }[]`; `created` zählt alle verifizierten Einträge (Haupt + Begleit),
+    `requested` weiter nur die Haupteinträge, `verified` (gesamt) true gdw.
+    jeder geplante Insert gefunden wurde. `dryRun` zeigt eine read-only
+    Begleit-Vorschau (`previewCompanions` in `routes/intakes.ts`, keine
+    Substanz-Anlage).
+  - Verifiziert: Server-TS + Server-Build je exit 0; E2E gegen `/tmp`-Scratch-DB:
+    dryRun-Vorschau Theanin→Lemon Balm (100 mg + Mit:-Notiz); Real-Run
+    „jetzt: Theanin" → Theanin 400 mg (DEFAULTS, Menge weggelassen) + Lemon Balm
+    `companion:<id>`, beide `verified`, `created:2 requested:1`; Mehrfach-Zeile
+    (Companion hängt nur an Theanin, nicht an Elvanse/Lithium) mit atomarer
+    Fehlerzeile; `companions:false` → kein Lemon Balm; Live-`./data` unberührt.
+- **Freitext-Import `POST /api/intakes/text` + Cloudflare-Access-Schutz**:
+  - **Parser `server/src/lib/text_entries.ts`** (`parseFreeText`): mehrzeiliger
+    Freitext nach SAMPLES.md → Einträge. Pro Zeile optionales Präfix
+    `DD.MM(.YYYY) HH:MM:` / `HH:MM:` / `jetzt:` / keins (= jetzt; ohne Jahr =
+    aktuelles Jahr, ohne Datum = heute; nur Datum = aktuelle Uhrzeit an jenem
+    Tag); Einträge `Substanz Menge (Notiz)` getrennt durch Kommas/„ und " auf
+    Klammertiefe 0 (Dezimal-Kommas `0,5` trennen nicht). Menge = erster
+    Zahl-Token nach dem Namen, bei Zahl-Folgen („Omega 3 500 mg") der letzte
+    der Folge; reine Mengen ohne Name („300mg") sind Fehler. Kalender-echte
+    Datums-/Zeitvalidierung (31.02. / 25:99 → Zeilen-Fehler). Eine Zeile ist
+    atomar: ein unparsbarer Eintrag → ganze Zeile in `lineErrors`, übrige
+    Zeilen laufen weiter (gefahrloses erneutes Senden korrigierter Zeilen).
+  - **Route `POST /api/intakes/text`** (`server/src/routes/intakes.ts`): Body
+    JSON `{ text, dryRun?, companions? }` oder `text/plain`. Auflösung je
+    Eintrag wie `POST /` (Text-Menge > Standarddosis > DEFAULTS; Text-Notiz >
+    DEFAULTS-Notiz — **Menge/Notiz dürfen weggelassen werden, dann greifen die
+    DEFAULTS**), Autovivifikation inklusive. **`Mit:`-Begleitsubstanzen werden
+    pro Eintrag automatisch miterfasst** (wie bei `POST /`; z. B. Theanin →
+    Lemon Balm), eine Ebene tief, Selbstbezug übersprungen, `source_event_id =
+    companion:<haupt-id>`; `companions: false` schaltet das ab. Haupteinträge
+    in einer Transaktion, `source_event_id = text:<Zeitstempel>` als
+    Batch-Marker. **Verifikation: nach dem Commit liest der Endpunkt alle IDs
+    (Haupt + Begleit) frisch aus der DB** und antwortet mit `verified` pro
+    Eintrag, pro Begleiteintrag und gesamt (`{ batchId, lineCount, requested,
+    created, verified, entries: { …, companions[] }[], lineErrors[] }`;
+    `requested` = Haupteinträge, `created` = alle verifizierten). `dryRun`
+    parst nur (inkl. read-only Begleit-Vorschau `previewCompanions`). 400, wenn
+    nichts parsebar.
+  - **Cloudflare Access (`server/src/lib/cloudflare_access.ts`)**: Middleware
+    `requireCloudflareAccess` validiert das von Cloudflare an den Origin
+    gereichte JWT (`Cf-Access-Jwt-Assertion`-Header, alternativ
+    `CF_Authorization`-Cookie) komplett in `node:crypto` (keine neue
+    Dependency): RS256-Signatur gegen die Team-JWKS
+    (`<team>/cdn-cgi/access/certs`, 10-min-Cache, Frisch-Abruf bei
+    unbekannter kid für Key-Rotation), `aud` = AUD-Tag, `iss` = Team-Domain,
+    `exp`/`nbf` mit 30 s Toleranz. Service-Tokens (CF-Access-Client-Id/
+    -Secret) prüft Cloudflare am Edge — am Origin kommt auch dafür ein JWT
+    an. Fail-closed: ohne `CF_ACCESS_TEAM_DOMAIN`+`CF_ACCESS_AUD` → 503;
+    `CF_ACCESS_DISABLED=true` = expliziter Dev-Bypass. Neue Env-Variablen
+    siehe Tabelle (Server-Konfiguration). Kein UI-Anteil — der Endpunkt ist
+    für externe Automationen (Telegram-Bot, Shortcuts, …) gedacht.
+  - Verifiziert: Server-/Web-TS, Server-Build, Vite-Build je exit 0; E2E gegen
+    `/tmp`-Scratch-DB (dryRun ohne Schreiben; 7/7 Einträge erstellt+verifiziert
+    inkl. DEFAULTS-Menge Theanin, DEFAULTS-Notiz CBD, `30mg`→`30 mg`,
+    Dezimal-Komma, „Omega 3 500 mg"-Heuristik, 3 Fehlerzeilen; kein
+    Lemon-Balm-Companion; text/plain-Body; 400 bei nur-Fehler-Text; 503 ohne
+    CF-Konfig; 401 ohne Token / Müll-Token / manipulierte Signatur / falsche
+    Audience / abgelaufen; 201 mit gültigem JWT via Header und via Cookie
+    gegen lokalen Test-JWKS).
+- **Sammel-Einträge „Morgendmedis" / „Nachtmedis"**:
   - Neuer Endpunkt `POST /api/intakes/plan-batch` (`server/src/routes/intakes.ts`):
     trägt mit einem Aufruf alle Substanzen des zum `takenAt` wirksamen Plans
     ein, die im gewünschten Slot (`morning`/`noon`/`evening`/`night`) eine Dosis
@@ -277,7 +390,7 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
     `PATCH /api/intakes/:id`, `POST /api/substances`, `PATCH /api/substances/:id`,
     DEFAULTS.md-Parser (`Menge:` + `Mit:`), Begleitsubstanzen.
   - Regex: `(\d)([a-zA-ZäöüÄÖÜßµ])` → `$1 $2` — deckt mg, ml, µg etc. ab.
-- **Kachel-Reihenfolge im „Heute"-Tab sortierbar** (aktueller Task):
+- **Kachel-Reihenfolge im „Heute"-Tab sortierbar**:
   - Backend war bereits vollständig vorhanden (`sort_order`-Spalte,
     `POST /api/substances/reorder`, `ORDER BY sort_order, name`, API-Client
     `api.substances.reorder`, `useSubstanceMutations().reorder`) — es fehlte
@@ -292,7 +405,7 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
     „Fertig" und ein `useEffect`-Cleanup beim Verlassen flushen eine noch
     ausstehende Speicherung. Wiederabruf passiert serverseitig über
     `ORDER BY sort_order` (kein Client-State nötig).
-- **Begleitsubstanzen via DEFAULTS `Mit:`** (aktueller Task):
+- **Begleitsubstanzen via DEFAULTS `Mit:`**:
   - Neue DEFAULTS-Zeile `Mit: <Name> | <Menge> | <Notiz>` (Aliase
     `Zusammen mit:`/`With:`; Menge/Notiz optional, mehrere Zeilen möglich).
     Parser: `CompanionDefault[]` als neues Feld `companions` in
@@ -393,19 +506,34 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 - **DEFAULTS.md wird live eingelesen** — keine Notwendigkeit, den Server
   nach einer Änderung neu zu starten, aber auch keine Reload-Logik im
   Client nötig (Server liest pro Anfrage frisch).
-- **`Mit:`-Begleitsubstanzen gelten nur für `POST /api/intakes`** — Importer,
-  XLSX-Replace und PATCH legen bewusst keine Begleit-Einnahmen an (Historie
-  bleibt Historie). Es wird genau eine Ebene aufgelöst: `Mit:`-Zeilen der
-  Begleitsubstanz werden ignoriert, `Mit: <Substanz selbst>` ebenso. Eine
-  per `Mit:` referenzierte Substanz ohne eigenen `## …`-Abschnitt taucht
-  nach dem ersten Auto-Eintrag im Compliance-Check als `missing` auf —
-  gewollt (Aufforderung, sie zu pflegen).
+- **`Mit:`-Begleitsubstanzen gelten für `POST /api/intakes` UND
+  `POST /api/intakes/text`** — Importer, XLSX-Replace und PATCH legen bewusst
+  keine Begleit-Einnahmen an (Historie bleibt Historie); `plan-batch` ebenso
+  nicht (Plan ist die maßgebliche Liste). Es wird genau eine Ebene aufgelöst:
+  `Mit:`-Zeilen der Begleitsubstanz werden ignoriert, `Mit: <Substanz selbst>`
+  ebenso. Eine per `Mit:` referenzierte Substanz ohne eigenen `## …`-Abschnitt
+  taucht nach dem ersten Auto-Eintrag im Compliance-Check als `missing` auf —
+  gewollt (Aufforderung, sie zu pflegen). Bei `/text` gibt es KEINE
+  Querschnitt-Deduplizierung: nennt eine Zeile die Begleitsubstanz zusätzlich
+  selbst (z. B. „Theanin, Lemon Balm"), entstehen zwei Lemon-Balm-Einträge
+  (Haupt + Begleit) — wie zwei getrennte `POST /`-Aufrufe; `companions: false`
+  unterdrückt die automatischen.
 - **`plan-batch` erfasst genau die Plan-Substanzen des Slots** — keine
   `Mit:`-Begleitsubstanzen (sonst Doppelungen, wenn eine Begleitsubstanz
   ohnehin im Plan steht). Maßgeblich ist der zum `takenAt` wirksame Plan; eine
   Substanz, die morgens UND nachts dosiert ist (z. B. Lithium), wird von beiden
   Sammel-Einträgen je einmal erfasst (zwei Einnahmen, gewollt). Im Frontend
   erscheinen die Kacheln nur, wenn der Plan für den Slot etwas vorsieht.
+- **`/api/intakes/text` ist der einzige authentifizierte Endpunkt** — der
+  Rest der API ist bewusst offen (privates Deployment). Die CF-Access-Prüfung
+  ist fail-closed: ohne `CF_ACCESS_TEAM_DOMAIN`+`CF_ACCESS_AUD` → 503. Für
+  lokale Smoke-Tests `CF_ACCESS_DISABLED=true` setzen. `Mit:`-Begleit­
+  substanzen werden hier — anders als früher — miterfasst (wie bei `POST /`,
+  abschaltbar mit `companions: false`); kein `nightMed`/Tagesbild-Feld in der
+  Antwort (externe Automation, keine UI). Wiederholtes Senden desselben Texts
+  erzeugt Duplikate — es gibt bewusst keine Idempotenz (`source_event_id =
+  text:<Zeitstempel>` ist nur ein Batch-Marker zum Wiederfinden/Aufräumen;
+  Begleiteinträge tragen `companion:<haupt-id>`).
 - **`is_night_med` triggert das Tagesbild** — `consumptionDay(takenAt)`
   rechnet 00:00–03:29 in den Vortag. Das passiert hier, nicht im Frontend.
 - **Tagesbild-Trigger: alle Nacht-Medis des aktuellen Plans** — Das
@@ -464,6 +592,10 @@ Ablauf von `deploy.sh`:
 | `DB_PATH` | `~/.local/share/mediary/data/mediary.db` | SQLite-Pfad |
 | `DEFAULTS_PATH` | `~/.local/share/mediary/DEFAULTS.md` | DEFAULTS.md-Pfad |
 | `WEB_DIST` | — | Optional: gebautes Web-Frontend für statische Auslieferung |
+| `CF_ACCESS_TEAM_DOMAIN` | — | Cloudflare-Access-Team („meinteam", „meinteam.cloudflareaccess.com" oder volle URL) — schützt `POST /api/intakes/text` |
+| `CF_ACCESS_AUD` | — | AUD-Tag der Access-Application (Zero Trust → Access → Applications) |
+| `CF_ACCESS_CERTS_URL` | `<team>/cdn-cgi/access/certs` | Override der JWKS-URL (nur für Tests nötig) |
+| `CF_ACCESS_DISABLED` | `false` | `true` = expliziter Bypass für lokale Entwicklung/Smoke-Tests |
 
 ### iPad-App (Capacitor)
 
@@ -510,10 +642,15 @@ Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
   korrektes Umlaut-Matching ist `nameKey()` in JS Pflicht.
 - **DEFAULTS.md wird live eingelesen** — keine Notwendigkeit, den Server
   nach einer Änderung neu zu starten.
-- **`Mit:`-Begleitsubstanzen gelten nur für `POST /api/intakes`** — Importer,
-  XLSX-Replace und PATCH legen bewusst keine Begleit-Einnahmen an.
+- **`Mit:`-Begleitsubstanzen gelten für `POST /api/intakes` UND
+  `POST /api/intakes/text`** — Importer, XLSX-Replace und PATCH legen bewusst
+  keine an; `companions: false` schaltet sie pro Aufruf ab.
 - **`plan-batch` erfasst genau die Plan-Substanzen des Slots** — keine
   `Mit:`-Begleitsubstanzen (sonst Doppelungen).
+- **`/api/intakes/text` ist Cloudflare-Access-geschützt (fail-closed)** —
+  ohne `CF_ACCESS_TEAM_DOMAIN`+`CF_ACCESS_AUD` → 503; Dev-Bypass
+  `CF_ACCESS_DISABLED=true`. `Mit:`-Begleitsubstanzen werden miterfasst
+  (`companions: false` schaltet ab), keine Idempotenz.
 - **Tagesbild-Trigger: alle Nacht-Medis des aktuellen Plans** — Das
   Tagesbild wird ausgelöst, wenn ALLE Nacht-Medis des wirksamen Plans
   für den Konsumtag eingenommen sind (`allNightMedsTaken`).
@@ -524,24 +661,3 @@ Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
   wann" ist ausschließlich `effective_from`.
 
 
-## Letzte Tasks
-
-- **2026-06-11 22:XX** [hermes] Deployment: Docker → systemd, DB nach ~/.local/share/mediary
-    - `server/src/config.ts`: Defaults für DB/DEFAULTS nach `~/.local/share/mediary/`
-    - `mediary.service`: systemd user service nach `~/.config/systemd/user/`
-    - `build.sh`: Produktiv-Build (Frontend + Backend + node_modules)
-    - `start.sh`: Datenverzeichnis anlegen, DEFAULTS stubben, `node dist/index.js`
-    - `deploy.sh`: baut, spiegelt nach `~/mediary`, startet systemd service
-    - `package.json`: neue Scripts `build` + `deploy`
-    - `docker-compose.yml` + `Dockerfile` entfernt
-    - APK gebaut: `web/android/app/build/outputs/apk/debug/app-debug.apk`
-    - AGENTS.md: Deployment-Sektion, DB-Default, Offene Punkte aktualisiert
-╰──────────────────────────────────────────────────────────────────────────────╯
-- **2026-06-11 21:16** [codex] error: unexpected argument '--ask-for-approval' found
-
-  tip: to pass '--ask-for-approval' as a value, use '-- --ask-for-approval'
-
-Usage: codex exec [OPTIONS] [PROMPT]
-       codex exec [OPTIONS] <COMMAND> [ARGS]
-
-For more information, try '--help'.
