@@ -17,6 +17,7 @@ mkdir -p "${BUILD_DIR}"
 
 # --- Frontend ---
 echo "==> Frontend bauen ..."
+cd "${SCRIPT_DIR}/web"
 "${SCRIPT_DIR}/web/node_modules/.bin/vite" build \
   --outDir "${BUILD_DIR}/web/dist" \
   --emptyOutDir

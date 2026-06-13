@@ -659,5 +659,8 @@ Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
   Substanzen.
 - **`effective_from` vs. `created_at`:** Maßgeblich für „welcher Plan galt
   wann" ist ausschließlich `effective_from`.
+- **`build.sh`: Vite sucht `index.html` im CWD** — `cd web/` vor dem
+  `vite build`-Aufruf ist zwingend; ohne das scheitert der Build mit
+  „Could not resolve entry module 'index.html'".
 
 
