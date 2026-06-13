@@ -26,6 +26,10 @@ cd "${SCRIPT_DIR}/web"
 echo "==> Backend bauen ..."
 "${SCRIPT_DIR}/server/node_modules/.bin/tsc" -p "${SCRIPT_DIR}/server/tsconfig.json"
 
+# --- Build-Verzeichnis zusammenstellen ---
+mkdir -p "${BUILD_DIR}/dist"
+cp -r "${SCRIPT_DIR}/server/dist/"* "${BUILD_DIR}/dist/"
+
 # --- node_modules (Production!) ---
 echo "==> Server node_modules (production) ..."
 cp -r "${SCRIPT_DIR}/server/node_modules" "${BUILD_DIR}/"
