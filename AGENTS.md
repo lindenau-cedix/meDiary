@@ -59,9 +59,15 @@ Server-Konfiguration über Env/`.env` (`server/src/config.ts`): `PORT` (4000),
 - `DEFAULTS_PATH` → `~/.local/share/mediary/DEFAULTS.md`
 - `WEB_DIST` → wird nicht gesetzt (API läuft solo)
 
+**`.env`-Datei**: Vorlage in `.env.example`. Alle dort dokumentierten Vars
+(`WEB_DIST`, `PORT`, `DB_PATH`, `DEFAULTS_PATH`, `CF_ACCESS_*`) werden beim
+`npm run deploy` aus `.env` gelesen und in den systemd-Service injected —
+damit lassen sich Deployment-Parameter ändern, ohne die Service-Datei manuell
+zu editieren. `.env` ist in `.gitignore`.
+
 **systemd-Deployment** (kein Docker):
 ```bash
-npm run deploy        # baut + installiert nach ~/mediary + startet systemd service
+npm run deploy        # liest .env → baut + installiert nach ~/mediary + startet systemd service
 npm run build         # nur bauen (~/mediary/build/)
 ```
 

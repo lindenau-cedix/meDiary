@@ -29,6 +29,10 @@ ExecStart=%h/mediary/start.sh
 # Environment="PORT=4000"
 # Environment="DB_PATH=/custom/path/mediary.db"
 # Environment="DEFAULTS_PATH=/custom/path/DEFAULTS.md"
+# Environment="WEB_DIST=/custom/path/web/dist"
+# Environment="CF_ACCESS_TEAM_DOMAIN=meinteam"
+# Environment="CF_ACCESS_AUD=..."
+# Environment="CF_ACCESS_DISABLED=true"
 
 # ── Safety ──
 Restart=on-failure
