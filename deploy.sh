@@ -54,23 +54,39 @@ cp -r "${BUILD_DIR}" "${TARGET_DIR}"
 echo "==> Installiere systemd Service ..."
 mkdir -p "${HOME}/.config/systemd/user"
 
-# Env-Vars für den Service zusammenbauen
-SERVICE_ENV=""
+# Env-Vars für den Service zusammenbauen (als Array → echte Newlines)
+SERVICE_ENV_LINES=()
 if [[ -n "${WEB_DIST}" ]]; then
-  SERVICE_ENV="${SERVICE_ENV}Environment=\"WEB_DIST=${WEB_DIST}\""
+  SERVICE_ENV_LINES+=("Environment=\"WEB_DIST=${WEB_DIST}\"")
 fi
 # Weitere Env-Vars aus .env durchreichen (PORT, DB_PATH, DEFAULTS_PATH, CF_ACCESS_*)
 for key in PORT DB_PATH DEFAULTS_PATH CF_ACCESS_TEAM_DOMAIN CF_ACCESS_AUD CF_ACCESS_CERTS_URL CF_ACCESS_DISABLED; do
   if [[ -n "${ENV_VARS[${key}]:-}" ]]; then
-    SERVICE_ENV="${SERVICE_ENV}\nEnvironment=\"${key}=${ENV_VARS[${key}]}\""
+    SERVICE_ENV_LINES+=("Environment=\"${key}=${ENV_VARS[${key}]}\"")
   fi
 done
 
-if [[ -n "${SERVICE_ENV}" ]]; then
-  echo "==> Service-Env: ${SERVICE_ENV}"
-  # Service-Datei mit injected Env-Vars schreiben
-  sed "s|# Environment=\"WEB_DIST=/custom/path/web/dist\"|${SERVICE_ENV}|" \
-    "${SCRIPT_DIR}/mediary.service" > "${HOME}/.config/systemd/user/mediary.service"
+if [[ ${#SERVICE_ENV_LINES[@]} -gt 0 ]]; then
+  echo "==> Service-Env (${#SERVICE_ENV_LINES[@]} Zeilen):"
+  printf '    %s\n' "${SERVICE_ENV_LINES[@]}"
+  # Service-Datei mit injected Env-Vars schreiben.
+  # Trick: wir ersetzen den WEB_DIST-Marker in mediary.service durch alle
+  # Env-Lines (mit echten Newlines via printf), alle weiteren Env-Marker
+  # werden zeilenweise ersetzt, damit mehrere Vars korrekt landen.
+  TMP_ENV="$(mktemp)"
+  printf '%s\n' "${SERVICE_ENV_LINES[@]}" > "${TMP_ENV}"
+  # WEB_DIST-Marker durch die Env-Lines ersetzen (mehrzeilig, in-place)
+  # awk ist hier robuster als sed für mehrzeilige Ersetzungen.
+  awk -v envfile="${TMP_ENV}" '
+    /^# Environment="WEB_DIST=\/custom\/path\/web\/dist"$/ && !injected {
+      while ((getline line < envfile) > 0) print line
+      close(envfile)
+      injected = 1
+      next
+    }
+    { print }
+  ' "${SCRIPT_DIR}/mediary.service" > "${HOME}/.config/systemd/user/mediary.service"
+  rm -f "${TMP_ENV}"
 else
   cp "${SCRIPT_DIR}/mediary.service" "${HOME}/.config/systemd/user/mediary.service"
 fi
