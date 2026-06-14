@@ -302,7 +302,10 @@ export async function generateDiary(opts: {
   let generated = 0;
   for (const day of targets) {
     try {
-      const body = await generateText({ system: SYSTEM_PROMPT, prompt: buildDayPrompt(day), maxTokens: 700 });
+      // Kein harter maxTokens-Cap hier: der konfigurierte Default
+      // (config.anthropic.maxTokens / DIARY_MAX_TOKENS) gibt adaptivem Denken
+      // genug Spielraum, ohne den kurzen Tagebuchtext abzuschneiden.
+      const body = await generateText({ system: SYSTEM_PROMPT, prompt: buildDayPrompt(day) });
       result.set(day.date, { date: day.date, heading: day.label, body });
       generated++;
     } catch (e) {

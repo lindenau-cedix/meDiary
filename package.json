@@ -12,6 +12,7 @@
     "build:web": "npm --prefix web run build",
     "start": "npm --prefix server run start",
     "cap:android": "npm --prefix web run cap:android",
+    "typecheck:all": "npm --prefix server run typecheck && npm --prefix web run typecheck",
     "build": "./build.sh",
     "deploy": "./deploy.sh"
   },

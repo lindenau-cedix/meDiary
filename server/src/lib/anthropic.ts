@@ -1,17 +1,27 @@
 import { config } from '../config.js';
 
 /**
- * Minimaler Anthropic-Messages-API-Client über `fetch` (Node 18+ global, keine
- * neue Dependency — wie die Cloudflare-Access-Prüfung node:crypto nutzt statt
- * einer Bibliothek). Genutzt für die KI-Tagebuch-Generierung.
+ * Minimaler Anthropic-(kompatibler) Messages-API-Client über `fetch` (Node 18+
+ * global, keine neue Dependency — wie die Cloudflare-Access-Prüfung node:crypto
+ * nutzt statt einer Bibliothek). Genutzt für die KI-Tagebuch-Generierung.
+ *
+ * Funktioniert sowohl gegen die offizielle Anthropic-API als auch gegen
+ * Anthropic-kompatible Drittanbieter wie MiniMax (gleiches Wire-Format) —
+ * gesteuert über `ANTHROPIC_BASE_URL` + `ANTHROPIC_API_KEY` + `DIARY_MODEL`.
  *
  * Endpunkt:  POST {baseUrl}/v1/messages
- * Header:    x-api-key, anthropic-version: 2023-06-01, content-type
- * Modell:    config.anthropic.model (Default claude-opus-4-8)
+ * Header:    x-api-key (normaler API-Key, KEIN OAuth-Bearer), anthropic-version,
+ *            content-type
+ * Modell:    config.anthropic.model (Default claude-opus-4-8; für MiniMax z. B.
+ *            DIARY_MODEL=MiniMax-M2)
  *
- * Keine `temperature`/`thinking`-Parameter — auf Opus 4.8 sind Sampling-Parameter
- * entfernt (würden 400 liefern); adaptives Denken ist für kurzen Tagebuch-Text
- * nicht nötig.
+ * `thinking`: per `config.anthropic.thinking` (Default `{ type: 'adaptive' }`).
+ * Adaptives Denken ist gültig auf Anthropic (Opus 4.6+/Sonnet 4.6) UND auf
+ * MiniMax — nur `{ type: 'enabled', budget_tokens }` und Sampling-Parameter
+ * (`temperature`/`top_p`) würden auf Opus 4.8 mit 400 abgelehnt; adaptive nicht.
+ * Etwaige `thinking`-Blöcke in der Antwort werden ignoriert — wir extrahieren
+ * nur die `text`-Blöcke.
+ * `max_tokens`: per `config.anthropic.maxTokens` (DIARY_MAX_TOKENS).
  */
 
 const ANTHROPIC_VERSION = '2023-06-01';
@@ -50,9 +60,18 @@ interface GenerateOptions {
  * Text-Block zurück. Wirft bei fehlendem Key, HTTP-Fehler, Refusal oder leerer
  * Antwort (die Aufrufer behandeln das pro Tag).
  */
-export async function generateText({ system, prompt, maxTokens = 1024 }: GenerateOptions): Promise<string> {
+export async function generateText({ system, prompt, maxTokens }: GenerateOptions): Promise<string> {
   const key = config.anthropic.apiKey;
   if (!key) throw new AnthropicNotConfiguredError();
+
+  const body: Record<string, unknown> = {
+    model: config.anthropic.model,
+    max_tokens: maxTokens ?? config.anthropic.maxTokens,
+    system,
+    messages: [{ role: 'user', content: prompt }],
+  };
+  // Adaptives Denken (oder per DIARY_THINKING konfiguriert); weggelassen, wenn null.
+  if (config.anthropic.thinking) body.thinking = config.anthropic.thinking;
 
   let res: Response;
   try {
@@ -63,12 +82,7 @@ export async function generateText({ system, prompt, maxTokens = 1024 }: Generat
         'x-api-key': key,
         'anthropic-version': ANTHROPIC_VERSION,
       },
-      body: JSON.stringify({
-        model: config.anthropic.model,
-        max_tokens: maxTokens,
-        system,
-        messages: [{ role: 'user', content: prompt }],
-      }),
+      body: JSON.stringify(body),
     });
   } catch (e) {
     throw new Error(`Anthropic-API nicht erreichbar: ${(e as Error).message}`);
@@ -95,6 +109,15 @@ export async function generateText({ system, prompt, maxTokens = 1024 }: Generat
     .map((b) => b.text ?? '')
     .join('')
     .trim();
-  if (!text) throw new Error('Leere Antwort von der KI.');
+  if (!text) {
+    // Mit adaptivem Denken kann ein zu knappes max_tokens komplett ins Denken
+    // fließen, sodass kein Text mehr übrig bleibt (stop_reason "max_tokens").
+    if (data.stop_reason === 'max_tokens') {
+      throw new Error(
+        'Antwort abgeschnitten, bevor Text kam (max_tokens erreicht) — DIARY_MAX_TOKENS erhöhen.',
+      );
+    }
+    throw new Error('Leere Antwort von der KI.');
+  }
   return text;
 }

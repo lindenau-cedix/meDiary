@@ -64,6 +64,28 @@ function resolveFromRoot(p: string): string {
   return path.resolve(process.cwd(), p);
 }
 
+/**
+ * `thinking`-Parameter für die Tagebuch-Generierung (DIARY_THINKING).
+ *  - leer / `adaptive` / `on` / `true`  → `{ type: 'adaptive' }` (Default)
+ *  - `off` / `none` / `disabled` / `false` / `0` → kein thinking-Feld (weggelassen)
+ *  - positive Zahl N → `{ type: 'enabled', budget_tokens: N }` (nur ältere Modelle)
+ *
+ * Adaptives Denken (`{ type: 'adaptive' }`) ist gültig sowohl auf der offiziellen
+ * Anthropic-API (Opus 4.6+/Sonnet 4.6) ALS AUCH auf Anthropic-kompatiblen
+ * Drittanbietern wie MiniMax (`ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic`),
+ * deren Modelle dasselbe `thinking: { type: 'adaptive' }` akzeptieren. Nur
+ * `{ type: 'enabled', budget_tokens }` und Sampling-Parameter würden auf Opus 4.8
+ * mit 400 abgelehnt — adaptive nicht. Daher ist `adaptive` ein sicherer Default.
+ */
+function parseThinking(raw: string | undefined): { type: string; budget_tokens?: number } | null {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (v === '' || v === 'adaptive' || v === 'on' || v === 'true') return { type: 'adaptive' };
+  if (['off', 'none', 'disabled', 'false', '0', 'no'].includes(v)) return null;
+  const n = Number(v);
+  if (Number.isFinite(n) && n > 0) return { type: 'enabled', budget_tokens: Math.floor(n) };
+  return { type: 'adaptive' }; // Unbekannter Wert → sicherer Default
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 4000),
   /**
@@ -108,15 +130,36 @@ export const config = {
     return path.join(DEFAULT_DATA_DIR, 'diary.md');
   })(),
   /**
-   * Anthropic-API für die KI-Tagebuch-Generierung (POST /api/diary/generate).
-   * Ohne `apiKey` liefert die Generieren-Route 503 (das Kurz-Tagebuch und das
-   * Anzeigen vorhandener Einträge funktionieren auch ohne Key).
+   * Anthropic-(kompatible) API für die KI-Tagebuch-Generierung
+   * (POST /api/diary/generate). Ohne `apiKey` liefert die Generieren-Route 503
+   * (das Kurz-Tagebuch und das Anzeigen vorhandener Einträge funktionieren auch
+   * ohne Key).
+   *
+   * **MiniMax-Abo statt Anthropic-Key:** MiniMax bietet einen
+   * Anthropic-kompatiblen Endpunkt — einfach `ANTHROPIC_BASE_URL`,
+   * `ANTHROPIC_API_KEY` (normaler API-Key, KEIN OAuth) und `DIARY_MODEL` (z. B.
+   * `MiniMax-M2`) in der `.env` setzen. Das Wire-Format (`POST /v1/messages`,
+   * `x-api-key`, `anthropic-version`, `thinking: { type: 'adaptive' }`) ist
+   * identisch, daher braucht es keinen anderen Client.
    */
   anthropic: {
     apiKey: process.env.ANTHROPIC_API_KEY?.trim() || null,
-    /** Standardmodell; via DIARY_MODEL überschreibbar (z. B. claude-haiku-4-5). */
+    /** Standardmodell; via DIARY_MODEL überschreibbar (Anthropic: claude-haiku-4-5; MiniMax: MiniMax-M2). */
     model: process.env.DIARY_MODEL?.trim() || 'claude-opus-4-8',
     baseUrl: (process.env.ANTHROPIC_BASE_URL?.trim() || 'https://api.anthropic.com').replace(/\/$/, ''),
+    /**
+     * Maximale Output-Tokens pro Tag (DIARY_MAX_TOKENS). Großzügiger Default,
+     * damit adaptives Denken plus der kurze Tagebuchtext nicht abgeschnitten
+     * werden — „so viele Tokens wie möglich". Bei MiniMax-Modellen mit
+     * niedrigerem Output-Limit ggf. herabsetzen (eine zu hohe Vorgabe meldet
+     * die API mit einem klaren Fehler).
+     */
+    maxTokens: (() => {
+      const n = Number(process.env.DIARY_MAX_TOKENS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 32000;
+    })(),
+    /** `thinking`-Parameter (DIARY_THINKING, Default `{ type: 'adaptive' }`); siehe parseThinking(). */
+    thinking: parseThinking(process.env.DIARY_THINKING),
   },
   /**
    * Cloudflare Access (Zero Trust) für geschützte Endpunkte (z. B.

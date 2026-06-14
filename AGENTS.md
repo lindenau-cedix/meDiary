@@ -1,5 +1,24 @@
 # AGENTS.md — meDiary
 
+> **CLAUDE.md ist ein Symlink auf diese Datei.**
+
+## TL;DR für eilige KI-Instanzen
+
+```bash
+npm run install:all          # Deps (einmalig)
+npm run dev                  # API :4000 + Web :5173
+npm run typecheck:all        # Server- + Web-TS-Check (exit 0 = sauber)
+npm run deploy               # Bauen + systemd-Service aktualisieren
+```
+
+**Wichtigste Stolperfallen:**
+- **Niemals `./data/` für Tests** — das ist das Docker-Volume mit der Live-DB.
+  Smoke-Tests immer mit `DB_PATH=/tmp/mediary-test/…` gegen `/tmp` fahren.
+- **`nameKey()` statt SQLite `lower()`** — `lower('Ö')` ist ASCII-only und bleibt `Ö`.
+  Umlaut-Matching nur über JS `nameKey()` (`toLocaleLowerCase('de')`).
+
+---
+
 Schnell-Einstieg für eine andere KI (Claude Code, Hermes o. ä.), die dieses
 Projekt nahtlos weiterbearbeitet.
 
@@ -755,8 +774,10 @@ Ablauf von `deploy.sh`:
 | `DEFAULTS_PATH` | `~/.local/share/mediary/DEFAULTS.md` | DEFAULTS.md-Pfad |
 | `WEB_DIST` | _(auto)_ | Gebautes Web-Frontend für statische Auslieferung. Ohne Env wird ein neben dem Build liegendes `web/dist` (`SERVER_ROOT/web/dist`) **automatisch erkannt** — `deploy.sh` setzt zusätzlich `./web/dist` als Default, sodass `GET /` nach `npm run deploy` zuverlässig funktioniert (kein „Cannot GET /"). |
 | `ANTHROPIC_API_KEY` | — | API-Key für die KI-Tagebuch-Generierung (`POST /api/diary/generate`). Ohne Key bleibt die Kurzversion nutzbar; Generieren → 503. |
-| `DIARY_MODEL` | `claude-opus-4-8` | Modell für die Tagebuch-Generierung (z. B. `claude-haiku-4-5` günstiger). |
-| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Override des API-Hosts (nur für Tests/Proxy). |
+| `DIARY_MODEL` | `claude-opus-4-8` | Modell für die Tagebuch-Generierung (Anthropic: `claude-haiku-4-5` günstiger; MiniMax: z. B. `MiniMax-M2`). |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Override des API-Hosts — **für ein MiniMax-Abo** auf `https://api.minimax.io/anthropic` setzen (Anthropic-kompatibler Endpunkt, normaler API-Key, kein OAuth). |
+| `DIARY_THINKING` | `adaptive` | `thinking`-Parameter der Generierung: `adaptive` (gültig für Anthropic Opus 4.6+/Sonnet 4.6 UND MiniMax) \| `off`/`none`/`disabled` (weglassen) \| `<zahl>` = `budget_tokens` für ältere Modelle. |
+| `DIARY_MAX_TOKENS` | `32000` | Maximale Output-Tokens pro Tag — großzügig, damit adaptives Denken + der kurze Tagebuchtext nicht abgeschnitten werden. Bei MiniMax-Modellen mit niedrigerem Limit herabsetzen. |
 | `DIARY_PATH` | `~/.local/share/mediary/diary.md` | Pfad der generierten Tagebuch-Markdown-Datei. |
 | `CF_ACCESS_TEAM_DOMAIN` | — | Cloudflare-Access-Team („meinteam", „meinteam.cloudflareaccess.com" oder volle URL) — schützt `POST /api/intakes/text` |
 | `CF_ACCESS_AUD` | — | AUD-Tag der Access-Application (Zero Trust → Access → Applications) |
@@ -847,6 +868,53 @@ Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
   daemon-reload && systemctl --user restart mediary`.
 
 ## Letzte Änderungen (chronologisch, für nahtloses Weiterarbeiten)
+
+- **2026-06-14 — KI-Tagebuch über MiniMax-Abo statt Anthropic-Key + adaptives Denken + Max-Tokens**:
+  - **Ziel (Nutzerwunsch):** Die KI-Tagebuch-Generierung soll wahlweise das
+    **MiniMax-Abo** nutzen können statt eines Anthropic-API-Keys. MiniMax bietet
+    einen **Anthropic-kompatiblen** Endpunkt
+    (`ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic`, normaler API-Key,
+    **kein OAuth**), das Wire-Format ist identisch — also kein neuer Client nötig.
+    Zusätzlich: **`thinking: { type: 'adaptive' }`** für die Generierung und **so
+    viele Output-Tokens wie möglich**.
+  - **`server/src/lib/anthropic.ts` (`generateText`)**: sendet jetzt das
+    `thinking`-Feld (aus `config.anthropic.thinking`, Default `{ type:
+    'adaptive' }`) und nutzt `config.anthropic.maxTokens` als `max_tokens`-Default
+    (statt des bisherigen Hardcaps). Etwaige `thinking`-Blöcke der Antwort werden
+    weiterhin ignoriert (nur `text`-Blöcke fließen in den Tagebuchtext). Neue,
+    klarere Fehlermeldung, wenn `stop_reason: "max_tokens"` greift, **bevor** Text
+    kam („DIARY_MAX_TOKENS erhöhen"). Weiterhin `x-api-key` (kein
+    `Authorization`-Bearer) + `anthropic-version` — passt für Anthropic UND
+    MiniMax. Stale-Kommentar („thinking entfernt") korrigiert: adaptives Denken
+    ist auf Opus 4.6+/Sonnet 4.6 gültig (nur `budget_tokens` + Sampling-Parameter
+    liefern 400) UND auf MiniMax.
+  - **`server/src/config.ts`**: zwei neue Felder unter `config.anthropic` —
+    `maxTokens` (`DIARY_MAX_TOKENS`, Default **32000**) und `thinking`
+    (`DIARY_THINKING` via neuem `parseThinking()`: leer/`adaptive`/`on`/`true` →
+    `{ type:'adaptive' }`; `off`/`none`/`disabled`/`false`/`0`/`no` → weggelassen;
+    positive Zahl → `{ type:'enabled', budget_tokens:N }` für ältere Modelle).
+    `ANTHROPIC_BASE_URL`/`DIARY_MODEL` waren bereits vorhanden.
+  - **`server/src/lib/diary.ts`**: der harte `maxTokens: 700`-Cap beim
+    `generateText`-Aufruf ist raus → es greift der konfigurierte (hohe) Default,
+    sodass adaptives Denken genug Spielraum hat, ohne den kurzen Text
+    abzuschneiden.
+  - **`.env.example` / `deploy.sh` / `AGENTS.md`**: MiniMax-Block + `DIARY_THINKING`
+    + `DIARY_MAX_TOKENS` dokumentiert; `deploy.sh` reicht beide neuen Vars in die
+    systemd-Unit durch (Reihenfolge nach `DIARY_MODEL`); Env-Tabelle ergänzt.
+  - **Keine UI-/Schema-Änderung**: Route `/api/diary/generate`, Antwort und das
+    503-Verhalten ohne Key bleiben unverändert. Für MiniMax setzt der Nutzer in
+    `.env`: `ANTHROPIC_BASE_URL=https://api.minimax.io/anthropic`,
+    `ANTHROPIC_API_KEY=<MiniMax-Key>`, `DIARY_MODEL=MiniMax-M2` (Modellname nach
+    Wahl). `DIARY_THINKING`/`DIARY_MAX_TOKENS` sind optional (Defaults wie oben).
+  - **Verifiziert:** Server-TS (`tsc --noEmit`) exit 0; E2E gegen einen
+    In-Process-Mock im Anthropic-Wire-Format (5 Szenarien, je gegen das echte
+    `generateText`): (A) MiniMax-Default → `POST /v1/messages`,
+    `thinking:{type:adaptive}`, `max_tokens:32000`, Modell `MiniMax-M2`,
+    `x-api-key` gesetzt / **kein** `Authorization`, `anthropic-version` gesetzt,
+    `thinking`-Block der Antwort verworfen → nur Text übernommen; (B)
+    `DIARY_MAX_TOKENS=64000` greift; (C) `DIARY_THINKING=off` → `thinking`-Feld
+    fehlt; (D) `DIARY_THINKING=8000` → `{type:enabled,budget_tokens:8000}`; (E)
+    ohne Key → `AnthropicNotConfiguredError` (503-Pfad), **keine** HTTP-Anfrage.
 
 - **2026-06-14 — Frontend-Auto-Detect, KI-Tagebuch-Tab, Mehrfach-Eintrag**:
   - **(1) `deploy.sh`/Frontend immer erreichbar (Gürtel + Hosenträger):**

@@ -6,6 +6,7 @@
   "description": "meDiary — Web-Frontend (PC / iPad / Android-APK)",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "cap:sync": "cap sync",
