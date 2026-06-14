@@ -29,14 +29,29 @@ if [[ -f "${ENV_FILE}" ]]; then
   while IFS='=' read -r key value; do
     # Nur nicht-leere, nicht-kommentierte Zeilen
     [[ -z "${key}" || "${key}" == \#* ]] && continue
-    # Trimming
-    key=$(echo "${key}" | xargs)
-    value=$(echo "${value}" | xargs)
+    # Umgebende Whitespaces trimmen — OHNE xargs (das Anführungszeichen/
+    # Backslashes interpretiert und unter `set -e` z. B. an einem Apostroph im
+    # Wert abbräche). Reine Bash-Parameter-Expansion ist quote-/backslash-sicher.
+    key="${key#"${key%%[![:space:]]*}"}"; key="${key%"${key##*[![:space:]]}"}"
+    value="${value#"${value%%[![:space:]]*}"}"; value="${value%"${value##*[![:space:]]}"}"
     [[ -z "${key}" ]] && continue
     ENV_VARS["${key}"]="${value}"
   done < "${ENV_FILE}"
 else
   echo "==> Keine .env gefunden — verwende Defaults."
+fi
+
+# --- WEB_DIST-Default erzwingen ---
+# Ohne WEB_DIST landet der Service ohne statisches Frontend → `GET /` ergibt
+# „Cannot GET /". Der Build (build.sh) legt das Frontend immer nach
+# `build/web/dist` (→ ~/mediary/web/dist), und `WorkingDirectory=%h/mediary`
+# löst `./web/dist` korrekt dorthin auf. Ist in der .env kein WEB_DIST gesetzt,
+# spritzen wir diesen Default ein, damit das Frontend zuverlässig erreichbar ist.
+# (Zusätzlich erkennt der Server `web/dist` neben dem Build auch ohne Env —
+# Gürtel UND Hosenträger.)
+if [[ -z "${ENV_VARS[WEB_DIST]:-}" ]]; then
+  ENV_VARS[WEB_DIST]="./web/dist"
+  echo "==> Kein WEB_DIST in .env — nutze Default './web/dist' (sonst 'Cannot GET /')."
 fi
 
 # --- Build ---
@@ -64,7 +79,7 @@ SERVICE_ENV_LINES=()
 if [[ -n "${ENV_VARS[WEB_DIST]:-}" ]]; then
   SERVICE_ENV_LINES+=("Environment=\"WEB_DIST=${ENV_VARS[WEB_DIST]}\"")
 fi
-for key in PORT DB_PATH DEFAULTS_PATH CF_ACCESS_TEAM_DOMAIN CF_ACCESS_AUD CF_ACCESS_CERTS_URL CF_ACCESS_DISABLED; do
+for key in PORT DB_PATH DEFAULTS_PATH DIARY_PATH ANTHROPIC_API_KEY ANTHROPIC_BASE_URL DIARY_MODEL CF_ACCESS_TEAM_DOMAIN CF_ACCESS_AUD CF_ACCESS_CERTS_URL CF_ACCESS_DISABLED; do
   if [[ -n "${ENV_VARS[${key}]:-}" ]]; then
     SERVICE_ENV_LINES+=("Environment=\"${key}=${ENV_VARS[${key}]}\"")
   fi
@@ -93,7 +108,16 @@ if [[ "${SHOULD_INJECT}" == "true" ]]; then
   fi
 
   echo "==> Service-Env (${#SERVICE_ENV_LINES[@]} Zeilen):"
-  printf '    %s\n' "${SERVICE_ENV_LINES[@]}"
+  # Geheimnisse (API-Key/Token/Secret) beim Loggen maskieren — sonst landet
+  # z. B. ANTHROPIC_API_KEY im Terminal-Scrollback und in CI-Logs.
+  for _line in "${SERVICE_ENV_LINES[@]}"; do
+    case "${_line}" in
+      *API_KEY=*|*SECRET=*|*TOKEN=*)
+        printf '    %s\n' "$(printf '%s' "${_line}" | sed -E 's/(="?[^=]*=)[^"]*/\1***/')" ;;
+      *)
+        printf '    %s\n' "${_line}" ;;
+    esac
+  done
 
   # Env-Lines in eine Temp-Datei schreiben (echte Newlines).
   TMP_ENV="$(mktemp)"

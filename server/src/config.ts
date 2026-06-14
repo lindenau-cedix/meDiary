@@ -83,8 +83,41 @@ export const config = {
     if (process.env.DEFAULTS_PATH) return resolveFromRoot(process.env.DEFAULTS_PATH);
     return path.join(DEFAULT_DATA_DIR, 'DEFAULTS.md');
   })(),
-  /** Optional path to a built web frontend (web/dist) to serve statically. */
-  webDist: process.env.WEB_DIST ? resolveFromRoot(process.env.WEB_DIST) : null,
+  /**
+   * Path to a built web frontend (web/dist) to serve statically.
+   *
+   * Precedence:
+   *  1. WEB_DIST aus der .env (relativ zu process.cwd(), absolut wie angegeben).
+   *  2. Auto-Erkennung: ein neben dem Server-Build liegendes `web/dist`
+   *     (`SERVER_ROOT/web/dist`). Das Build-Layout (`build.sh`) legt das
+   *     Frontend genau dorthin, also funktioniert `GET /` nach `npm run deploy`
+   *     auch OHNE WEB_DIST in der .env — „Cannot GET /" kann so nicht
+   *     stillschweigend wiederkehren. Im Dev-Modus (`SERVER_ROOT = server/`)
+   *     existiert dieser Pfad nicht, daher läuft die API dort weiter solo,
+   *     während Vite das Frontend auf :5173 ausliefert.
+   *  3. Sonst null (API solo).
+   */
+  webDist: (() => {
+    if (process.env.WEB_DIST) return resolveFromRoot(process.env.WEB_DIST);
+    const colocated = path.join(SERVER_ROOT, 'web', 'dist');
+    return fs.existsSync(colocated) ? colocated : null;
+  })(),
+  /** Pfad zur Tagebuch-Markdown-Datei (KI-generierte Volltext-Einträge). */
+  diaryPath: (() => {
+    if (process.env.DIARY_PATH) return resolveFromRoot(process.env.DIARY_PATH);
+    return path.join(DEFAULT_DATA_DIR, 'diary.md');
+  })(),
+  /**
+   * Anthropic-API für die KI-Tagebuch-Generierung (POST /api/diary/generate).
+   * Ohne `apiKey` liefert die Generieren-Route 503 (das Kurz-Tagebuch und das
+   * Anzeigen vorhandener Einträge funktionieren auch ohne Key).
+   */
+  anthropic: {
+    apiKey: process.env.ANTHROPIC_API_KEY?.trim() || null,
+    /** Standardmodell; via DIARY_MODEL überschreibbar (z. B. claude-haiku-4-5). */
+    model: process.env.DIARY_MODEL?.trim() || 'claude-opus-4-8',
+    baseUrl: (process.env.ANTHROPIC_BASE_URL?.trim() || 'https://api.anthropic.com').replace(/\/$/, ''),
+  },
   /**
    * Cloudflare Access (Zero Trust) für geschützte Endpunkte (z. B.
    * POST /api/intakes/text). Ohne teamDomain+aud antworten geschützte

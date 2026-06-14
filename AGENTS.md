@@ -153,6 +153,7 @@ berührt die Daten nicht.
 | `POST` | `/api/substances/reorder` | Kachel-Reihenfolge setzen (`{ ids: number[] }` → `sort_order = Index`) |
 | `GET/POST` | `/api/intakes` | Einnahmen (DEFAULTS-Logik, Autovivifikation) |
 | `POST` | `/api/intakes/plan-batch` | alle Plan-Substanzen eines Slots auf einmal eintragen („Morgendmedis"/„Nachtmedis", `{ slot, takenAt? }`) |
+| `POST` | `/api/intakes/batch` | mehrere frei gewählte Substanzen auf einmal — gemeinsamer `takenAt`, je eigene Menge/Notiz (`{ takenAt?, companions?, entries: [{ substanceId?\|substanceName?, amount?, notes? }] }`) |
 | `POST` | `/api/intakes/text` | mehrzeiligen Freitext (Format: SAMPLES.md) in Einnahmen umwandeln — **Cloudflare-Access-geschützt**, mit DB-Verifikation in der Antwort |
 | `PATCH/DELETE` | `/api/intakes/:id` | ändern / löschen |
 | `GET` | `/api/plan` | heute wirksamer Plan + `upcoming` (geplante Zukunfts-Versionen) |
@@ -164,6 +165,10 @@ berührt die Daten nicht.
 | `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
 | `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht |
+| `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Liste der Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild) |
+| `GET` | `/api/diary` | Zustand des KI-Voll-Tagebuchs (`raw`, `entries[]`, `generatedDays`/`pendingDays`, `available`) |
+| `POST` | `/api/diary/generate` | KI-Volltext generieren (`{ scope?: 'missing'\|'all', from?, to?, max? }`); 503 ohne `ANTHROPIC_API_KEY` |
+| `PUT` | `/api/diary` | Tagebuch-Datei manuell überschreiben (`{ content }`) |
 
 `POST /api/intakes` liefert `{ intake, nightMed, assessmentDate, assessmentExists, createdSubstance, companions }` — `createdSubstance: true` heißt, der Name war neu und wurde als QuickPick angelegt; `companions` (`{ intake, createdSubstance }[]`) sind die automatisch miterfassten Begleit-Einnahmen aus `Mit:`-Defaults (leer, wenn keine).
 
@@ -241,8 +246,9 @@ web/src/
 ├── App.tsx                 # Router + Theme + QueryClient
 ├── main.tsx
 ├── screens/
-│   ├── QuickEntryScreen.tsx    # Heute: Composer + Kachel-Raster + Tagesbild
+│   ├── QuickEntryScreen.tsx    # Heute: Composer (Mehrfach-Auswahl) + Kachel-Raster + Tagesbild
 │   ├── HistoryScreen.tsx       # Verlauf nach Tagen gruppiert
+│   ├── DiaryScreen.tsx         # Tagebuch: Kurz (Notiz-Liste) / Voll (KI-generiert)
 │   ├── PlanScreen.tsx          # Medikationsplan + Verlauf + Diff
 │   ├── TrendsScreen.tsx        # 11 Skalen-Trends (SVG)
 │   └── SettingsScreen.tsx      # Theme, Substanzen, Server, DEFAULTS.md, Compliance
@@ -747,7 +753,11 @@ Ablauf von `deploy.sh`:
 | `PORT` | `4000` | HTTP-Port |
 | `DB_PATH` | `~/.local/share/mediary/data/mediary.db` | SQLite-Pfad |
 | `DEFAULTS_PATH` | `~/.local/share/mediary/DEFAULTS.md` | DEFAULTS.md-Pfad |
-| `WEB_DIST` | — | Optional: gebautes Web-Frontend für statische Auslieferung |
+| `WEB_DIST` | _(auto)_ | Gebautes Web-Frontend für statische Auslieferung. Ohne Env wird ein neben dem Build liegendes `web/dist` (`SERVER_ROOT/web/dist`) **automatisch erkannt** — `deploy.sh` setzt zusätzlich `./web/dist` als Default, sodass `GET /` nach `npm run deploy` zuverlässig funktioniert (kein „Cannot GET /"). |
+| `ANTHROPIC_API_KEY` | — | API-Key für die KI-Tagebuch-Generierung (`POST /api/diary/generate`). Ohne Key bleibt die Kurzversion nutzbar; Generieren → 503. |
+| `DIARY_MODEL` | `claude-opus-4-8` | Modell für die Tagebuch-Generierung (z. B. `claude-haiku-4-5` günstiger). |
+| `ANTHROPIC_BASE_URL` | `https://api.anthropic.com` | Override des API-Hosts (nur für Tests/Proxy). |
+| `DIARY_PATH` | `~/.local/share/mediary/diary.md` | Pfad der generierten Tagebuch-Markdown-Datei. |
 | `CF_ACCESS_TEAM_DOMAIN` | — | Cloudflare-Access-Team („meinteam", „meinteam.cloudflareaccess.com" oder volle URL) — schützt `POST /api/intakes/text` |
 | `CF_ACCESS_AUD` | — | AUD-Tag der Access-Application (Zero Trust → Access → Applications) |
 | `CF_ACCESS_CERTS_URL` | `<team>/cdn-cgi/access/certs` | Override der JWKS-URL (nur für Tests nötig) |
@@ -837,6 +847,88 @@ Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
   daemon-reload && systemctl --user restart mediary`.
 
 ## Letzte Änderungen (chronologisch, für nahtloses Weiterarbeiten)
+
+- **2026-06-14 — Frontend-Auto-Detect, KI-Tagebuch-Tab, Mehrfach-Eintrag**:
+  - **(1) `deploy.sh`/Frontend immer erreichbar (Gürtel + Hosenträger):**
+    - `server/src/config.ts → webDist`: ohne `WEB_DIST`-Env wird ein neben dem
+      Build liegendes `web/dist` (`SERVER_ROOT/web/dist`) **automatisch erkannt**
+      und ausgeliefert. Das Build-Layout (`build.sh`) legt das Frontend genau
+      dorthin (`~/mediary/web/dist`), `GET /` funktioniert also nach
+      `npm run deploy` auch ohne Env. Im Dev-Modus (`SERVER_ROOT = server/`)
+      existiert der Pfad nicht → API läuft solo, Vite bedient :5173.
+    - `deploy.sh`: fehlt `WEB_DIST` in `.env`, wird **Default `./web/dist`**
+      injiziert (zuvor: keine Env → kein Frontend → „Cannot GET /"). Zusätzlich
+      werden `DIARY_PATH`/`ANTHROPIC_API_KEY`/`ANTHROPIC_BASE_URL`/`DIARY_MODEL`
+      aus `.env` in die Service-Unit durchgereicht.
+    - Verifiziert: Build-Layout in `/tmp/inst` (dist + web/dist, **kein**
+      WEB_DIST-Env) → `GET /` 200 (index.html), `/api/health` 200, Asset 200,
+      Log „Serving frontend from …/web/dist"; `deploy.sh`-Injection isoliert →
+      `Environment="WEB_DIST=./web/dist"` landet in der Unit, Marker ersetzt.
+  - **(2) KI-Tagebuch als neuer Tab** (`/tagebuch`):
+    - Kurzversion (`GET /api/diary/notes`): reine Liste der Notizen je
+      Konsum-Tag (Einnahme-Notizen + Tagesbild-Werte/-Notiz), liest nur, ändert
+      die DB nie. Vollversion: pro Tag ein KI-Fließtext, geführt in einer
+      separaten `.md` (`config.diaryPath`, Default `~/.local/share/mediary/
+      diary.md`) — die DB-Notizen bleiben unberührt.
+    - **Anthropic-Anbindung dependency-frei via `fetch`** (`server/src/lib/
+      anthropic.ts`, wie CF-Access node:crypto nutzt): `POST {baseUrl}/v1/
+      messages`, Header `x-api-key`/`anthropic-version: 2023-06-01`, Modell
+      `config.anthropic.model` (Default `claude-opus-4-8`, via `DIARY_MODEL`
+      überschreibbar), keine `temperature`/`thinking` (auf Opus 4.8 entfernt).
+      `refusal`-Stop-Reason wird abgefangen. Ohne Key → 503 (fail-soft, Kurz­
+      version & Anzeige funktionieren weiter).
+    - `server/src/lib/diary.ts`: `gatherDiaryDays` (pro Konsum-Tag mit
+      `consumptionDay`), `.md`-Parser/-Assembler über `<!-- meDiary:day DATE -->`
+      -Marker (manuelle Edits bleiben erhalten; `scope:'missing'` ergänzt nur
+      fehlende Tage, `scope:'all'` regeneriert, `max` deckelt pro Aufruf →
+      `pendingDays`). Route `server/src/routes/diary.ts`, gemountet in `index.ts`.
+    - Frontend: neuer Tab „Tagebuch" (`BottomNav`/`App.tsx`),
+      `web/src/screens/DiaryScreen.tsx` mit Umschalter Kurz/Voll, Generieren-/
+      „Alles neu"-/Bearbeiten-Aktionen, Status-Badges; Hooks
+      `useDiaryNotes`/`useDiary`/`useGenerateDiary`/`useSaveDiary`, API-Client
+      `api.diary.*`, Typen `Diary*`.
+    - Verifiziert (Mock-Anthropic, `/tmp`-DB): Kurzversion listet Notizen +
+      Scores; `generate` (missing) erzeugte 6 Einträge + schrieb 6 `meDiary:day`
+      -Marker; erneut → 0 neu; `PUT` Round-Trip; **503 ohne Key**, Notes ohne
+      Key weiter 200.
+  - **(3) Mehrere Substanzen auf einmal eintragen** (`POST /api/intakes/batch`):
+    - Body `{ takenAt?, companions?, entries: [{ substanceId?|substanceName?,
+      amount?, notes? }] }` — ein gemeinsamer Zeitpunkt, je Eintrag eigene
+      Menge/Notiz, eine Transaktion. Gleiche Auflösung wie `POST /`
+      (Menge: Text > Standarddosis > DEFAULTS; Notiz: Text > DEFAULTS;
+      Autovivifikation; `Mit:`-Begleitsubstanzen je Eintrag — abschaltbar mit
+      `companions: false`). Danach `allNightMedsTaken` → `nightMed`/
+      `assessmentDate`. Der Companion-Insert wurde als Helfer `insertCompanions`
+      faktorisiert und von `POST /` mitbenutzt (identisches Verhalten).
+    - Frontend `QuickEntryScreen`: Einfach-Auswahl → **Mehrfach-Auswahl**
+      (`selectedIds[]`). Mehrere angetippte Substanzen erscheinen im Composer
+      als je eine Zeile mit Menge + Notiz (inkl. DEFAULTS-/Begleit-Vorschau),
+      Datum/Uhrzeit nur einmal. Schwebende Leiste „X Substanzen · Eintragen"
+      → `useIntakeMutations().batch`; Long-Press auf einer Kachel bleibt der
+      Sofort-Eintrag mit Standardwerten. Typen `IntakeBatch*`, `api.intakes.batch`.
+    - Verifiziert (`/tmp`-DB): 3 Substanzen in einem Call (gemeinsamer
+      `takenAt`, je eigene Menge/Notiz, neue Substanz autoviviziert +
+      Begleitstoff Lemon Balm), `companions:false` unterdrückt Begleiteintrag,
+      ungültige `substanceId`/leere `entries` → 400.
+  - **Nachgelagerte Review-Härtung** (adversarialer Multi-Agent-Audit, je
+    gegen-verifiziert): (a) `generateDiary` geht IMMER von den bestehenden
+    Einträgen aus — `scope:'all'` mit `from/to` löschte zuvor Einträge außerhalb
+    des Bereichs (Datenverlust manueller Edits); `'all'` regeneriert nun bis zum
+    Hard-Cap. (b) `POST /api/intakes/batch` prüft alle `substanceId` in einer
+    Vorab-Pass, BEVOR per Name neue Substanzen angelegt werden (sonst Leiche bei
+    400 wegen späterer ungültiger ID). (c) `deploy.sh` maskiert Geheimnisse
+    (`*API_KEY*/*SECRET*/*TOKEN*`) beim Loggen und trimmt `.env`-Werte per
+    Bash-Parameter-Expansion statt `xargs` (quote-/backslash-sicher, kein Abbruch
+    unter `set -e`). (d) `writeDiaryRaw` legt das Eltern­verzeichnis an
+    (`mkdir -p`). (e) Frontend: Sammel-Eintrag baut aus `selectedSubs` (keine
+    toten IDs), Tagebuch-Editor lädt den Entwurf nur beim Öffnen (kein
+    Überschreiben durch Refetch), „Voll"-Tab zeigt bei Lade-/Offline-Fehler eine
+    Karte statt leer.
+  - **Verifikation gesamt:** Server-TS + Web-TS je exit 0, Server-Build
+    (`tsc`) + Vite-Build je exit 0; E2E gegen `/tmp`-Scratch-DB (Batch inkl.
+    Begleitstoffe/400s/`companions:false`; Tagebuch Kurz/generate(Mock)/regen/
+    PUT/503; `scope:'all'`-Datenerhalt; Batch-Leak-Schutz; Tagebuch-mkdir;
+    Frontend-Auto-Detect-Serving); Live-`./data` unberührt.
 
 - **2026-06-14 — `deploy.sh` Env-Injection repariert (robuster Marker)**:
   - **Bug:** `deploy.sh` hat den WEB_DIST (und andere Env-Vars aus `.env`)

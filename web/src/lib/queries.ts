@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type IntakeInput, type SubstanceInput } from './api';
-import type { Plan, PlanItem, PlanSlot } from './types';
+import type { Plan, PlanItem, PlanSlot, IntakeBatchEntryInput } from './types';
 
 export const qk = {
   substances: (archived = false) => ['substances', archived] as const,
@@ -13,6 +13,8 @@ export const qk = {
   defaults: () => ['defaults'] as const,
   compliance: () => ['defaults', 'check'] as const,
   metrics: () => ['metrics'] as const,
+  diary: () => ['diary'] as const,
+  diaryNotes: (params?: object) => ['diary', 'notes', params ?? {}] as const,
 };
 
 // ---------- Substanzen ----------
@@ -67,6 +69,18 @@ export function useIntakeMutations() {
       onSuccess: invalidate,
     }),
     remove: useMutation({ mutationFn: (id: number) => api.intakes.remove(id), onSuccess: invalidate }),
+    // Mehrere Substanzen auf einmal (gleicher Zeitpunkt, je eigene Menge/Notiz).
+    batch: useMutation({
+      mutationFn: (b: { takenAt?: string; companions?: boolean; entries: IntakeBatchEntryInput[] }) =>
+        api.intakes.batch(b),
+      onSuccess: (res) => {
+        invalidate();
+        if (res.entries.some((e) => e.createdSubstance || e.companions.some((c) => c.createdSubstance))) {
+          qc.invalidateQueries({ queryKey: ['substances'] });
+          qc.invalidateQueries({ queryKey: qk.compliance() });
+        }
+      },
+    }),
     // Sammel-Eintrag aller Plan-Substanzen eines Slots ("Morgendmedis"/"Nachtmedis").
     planBatch: useMutation({
       mutationFn: (b: { slot: PlanSlot; takenAt?: string }) => api.intakes.planBatch(b),
@@ -152,6 +166,29 @@ export function useCompliance(enabled = true) {
 }
 export function useMetrics() {
   return useQuery({ queryKey: qk.metrics(), queryFn: () => api.metrics(), staleTime: Infinity });
+}
+
+// ---------- Tagebuch ----------
+export function useDiaryNotes(params?: { from?: string; to?: string }) {
+  return useQuery({ queryKey: qk.diaryNotes(params), queryFn: () => api.diary.notes(params) });
+}
+export function useDiary() {
+  return useQuery({ queryKey: qk.diary(), queryFn: () => api.diary.get() });
+}
+export function useGenerateDiary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (b: { scope?: 'missing' | 'all'; from?: string; to?: string; max?: number }) =>
+      api.diary.generate(b),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diary'] }),
+  });
+}
+export function useSaveDiary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (content: string) => api.diary.save(content),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['diary'] }),
+  });
 }
 
 export type { Plan };

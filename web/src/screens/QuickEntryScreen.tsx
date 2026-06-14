@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion, Reorder, useDragControls } from 'framer-motion';
-import { Settings2, Plus, Check, Clock3, Moon, Sunrise, ChevronRight, WifiOff, AlertCircle, GripVertical, ArrowUpDown } from 'lucide-react';
+import { Settings2, Plus, Check, Clock3, Moon, Sunrise, ChevronRight, WifiOff, AlertCircle, GripVertical, ArrowUpDown, X } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -16,7 +16,7 @@ import { haptics } from '../lib/haptics';
 import { greeting, nowLocalInput, consumptionToday, consumptionTodayOffset, formatFull, formatTime } from '../lib/format';
 import { useSubstances, useIntakes, useIntakeMutations, useSubstanceMutations, useDefaults, useCompliance, usePlan } from '../lib/queries';
 import { ApiError } from '../lib/api';
-import type { Substance, PlanSlot } from '../lib/types';
+import type { Substance, PlanSlot, SubstanceDefault, IntakeBatchEntryInput } from '../lib/types';
 
 export function QuickEntryScreen() {
   const toast = useToast();
@@ -29,10 +29,7 @@ export function QuickEntryScreen() {
   const today = consumptionToday();
   // Wir laden die letzten ~3 Wand­uhr-Tage und filtern lokal nach
   // `intake.date === today` (Konsum-Tag, vom Server mit DAY_BOUNDARY
-  // berechnet). So greift die 03:30-Grenze zuverlässig in beide
-  // Richtungen, unabhängig davon, ob wir uns vor oder nach 03:30
-  // befinden — der Server-Filter `from/to` arbeitet auf Wand­uhr-Zeit
-  // und kann den Rand nicht exakt treffen.
+  // berechnet).
   const todayIntakesRaw = useIntakes(
     { from: consumptionTodayOffset(-1), limit: 200 },
   );
@@ -41,16 +38,14 @@ export function QuickEntryScreen() {
     [todayIntakesRaw.data, today],
   );
   const { data: plan } = usePlan();
-  const { create, remove, planBatch } = useIntakeMutations();
+  const { create, remove, batch, planBatch } = useIntakeMutations();
 
   // Sammel-Einträge "Morgendmedis"/"Nachtmedis": tragen mit einem Tipp alle
-  // Substanzen des aktuell wirksamen Plans für den jeweiligen Slot ein. Nur
-  // sichtbar, wenn der Plan für den Slot überhaupt etwas vorsieht.
+  // Substanzen des aktuell wirksamen Plans für den jeweiligen Slot ein.
   const morningCount = useMemo(() => (plan?.items ?? []).filter((i) => i.morning?.trim()).length, [plan]);
   const nightCount = useMemo(() => (plan?.items ?? []).filter((i) => i.night?.trim()).length, [plan]);
 
-  // Substanz-Namen, für die DEFAULTS.md keinen Eintrag hat. Case-insensitive
-  // Schlüsselvergleich spiegelt das Server-Verhalten.
+  // Substanz-Namen, für die DEFAULTS.md keinen Eintrag hat.
   const missingDefaults = useMemo(() => {
     const set = new Set<string>();
     if (compliance?.missing) {
@@ -60,16 +55,16 @@ export function QuickEntryScreen() {
   }, [compliance]);
   const hasAnyMissing = missingDefaults.size > 0;
 
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  // Mehrfach-Auswahl: mehrere Substanzen mit demselben Zeitpunkt, je eigener
+  // Menge/Notiz. `selectedIds` hält die Reihenfolge der Auswahl, `fields` die
+  // pro-Substanz-Eingaben.
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [fields, setFields] = useState<Record<number, { amount: string; note: string }>>({});
   const [takenAt, setTakenAt] = useState(nowLocalInput());
-  const [amount, setAmount] = useState('');
-  const [note, setNote] = useState('');
   const [manageOpen, setManageOpen] = useState(false);
   const [assessment, setAssessment] = useState<{ open: boolean; date: string }>({ open: false, date: today });
 
-  // Sortier-Modus: Reihenfolge der Kacheln per Drag anpassen. Die Reihenfolge
-  // wird automatisch (debounced) als `sort_order` gespeichert und beim nächsten
-  // Laden serverseitig über `ORDER BY sort_order` wieder abgerufen.
+  // Sortier-Modus: Reihenfolge der Kacheln per Drag anpassen.
   const { reorder } = useSubstanceMutations();
   const [sortMode, setSortMode] = useState(false);
   const [ordered, setOrdered] = useState<Substance[]>([]);
@@ -95,7 +90,7 @@ export function QuickEntryScreen() {
 
   const enterSortMode = () => {
     haptics.light();
-    setSelectedId(null);
+    resetSelection();
     setOrdered(substances);
     setSortMode(true);
   };
@@ -113,53 +108,57 @@ export function QuickEntryScreen() {
   // Beim Verlassen des Bildschirms eine noch ausstehende Speicherung nachholen.
   useEffect(() => () => flushOrder(), []);
 
-  const selected = useMemo(
-    () => substances.find((s) => s.id === selectedId) ?? null,
-    [substances, selectedId],
-  );
-
-  // Default-Notiz + -Menge aus DEFAULTS.md (Vorschau)
-  const selectedDefault = useMemo(() => {
-    if (!selected || !defaults) return null;
-    const entry = Object.entries(defaults.defaults).find(
-      ([k]) => k.toLowerCase() === selected.name.toLowerCase(),
-    );
+  // DEFAULTS (Notiz/Menge/Begleitstoffe) einer Substanz — case-insensitive.
+  const defaultFor = (name: string): SubstanceDefault | null => {
+    if (!defaults) return null;
+    const entry = Object.entries(defaults.defaults).find(([k]) => k.toLowerCase() === name.toLowerCase());
     return entry?.[1] ?? null;
-  }, [selected, defaults]);
-  const defaultNote = selectedDefault?.note ?? null;
-  // Begleitsubstanzen (DEFAULTS "Mit:"), die beim Eintragen automatisch mitkommen
-  const companionDefaults = selectedDefault?.companions ?? [];
-
-  const resetComposer = () => {
-    setSelectedId(null);
-    setAmount('');
-    setNote('');
-    // `takenAt` bleibt bewusst stehen, damit mehrere Einträge
-    // hintereinander mit demselben Zeitpunkt erfasst werden können
-    // (z. B. "Morgendmedis"-Block oder mehrere Substanzen kurz
-    // nacheinander). Erst beim erneuten Aufruf des Bildschirms
-    // wird der Zeitpunkt über das `useState(nowLocalInput())`-
-    // Initial auf "jetzt" gesetzt.
   };
 
-  const submit = async (sub: Substance, opts?: { instant?: boolean }) => {
+  const selectedSubs = useMemo(
+    () => selectedIds.map((id) => substances.find((s) => s.id === id)).filter((s): s is Substance => !!s),
+    [selectedIds, substances],
+  );
+
+  const resetSelection = () => {
+    setSelectedIds([]);
+    setFields({});
+    // `takenAt` bleibt bewusst stehen, damit mehrere Blöcke nacheinander mit
+    // demselben Zeitpunkt erfasst werden können (erst "Jetzt" oder ein neuer
+    // Besuch des Tabs setzt ihn zurück).
+  };
+
+  const toggleSelect = (id: number) => {
+    haptics.select();
+    setSelectedIds((ids) => (ids.includes(id) ? ids.filter((x) => x !== id) : [...ids, id]));
+    setFields((f) => (f[id] ? f : { ...f, [id]: { amount: '', note: '' } }));
+  };
+
+  const removeSelected = (id: number) => {
+    setSelectedIds((ids) => ids.filter((x) => x !== id));
+    setFields((f) => {
+      const { [id]: _drop, ...rest } = f;
+      return rest;
+    });
+  };
+
+  const setField = (id: number, patch: Partial<{ amount: string; note: string }>) => {
+    setFields((f) => {
+      const cur = f[id] ?? { amount: '', note: '' };
+      return { ...f, [id]: { ...cur, ...patch } };
+    });
+  };
+
+  // Sofort-Eintrag (Long-Press) einer einzelnen Substanz mit Standardwerten.
+  const submitInstant = async (sub: Substance) => {
     try {
-      const res = await create.mutateAsync({
-        substanceId: sub.id,
-        takenAt,
-        amount: amount.trim() || null,
-        notes: note.trim() || null,
-      });
+      const res = await create.mutateAsync({ substanceId: sub.id, takenAt, amount: null, notes: null });
       haptics.success();
       const created = res.intake;
       const companions = res.companions ?? [];
       toast.show({
         message: `${sub.name} eingetragen`,
-        detail: [
-          created.amount,
-          formatTime(created.takenAt),
-          ...companions.map((c) => `+ ${c.intake.substanceName}`),
-        ]
+        detail: [created.amount, formatTime(created.takenAt), ...companions.map((c) => `+ ${c.intake.substanceName}`)]
           .filter(Boolean)
           .join(' · '),
         action: {
@@ -170,10 +169,45 @@ export function QuickEntryScreen() {
           },
         },
       });
-      resetComposer();
       if (res.nightMed && !res.assessmentExists && res.assessmentDate) {
-        // kurze Verzögerung, damit der Toast sichtbar ist, dann Tagesbild
-        setTimeout(() => setAssessment({ open: true, date: res.assessmentDate! }), opts?.instant ? 280 : 180);
+        setTimeout(() => setAssessment({ open: true, date: res.assessmentDate! }), 280);
+      }
+    } catch (e) {
+      haptics.warning();
+      toast.show({ tone: 'warning', message: 'Eintrag fehlgeschlagen', detail: (e as Error).message });
+    }
+  };
+
+  // Sammel-Eintrag aller ausgewählten Substanzen (gleicher Zeitpunkt).
+  const submitSelected = async () => {
+    // Aus `selectedSubs` (aktuell existierende Substanzen) bauen, nicht aus den
+    // rohen IDs — so kann eine zwischenzeitlich archivierte/gelöschte Auswahl
+    // keinen Eintrag mit toter ID erzeugen.
+    if (selectedSubs.length === 0 || batch.isPending) return;
+    const entries: IntakeBatchEntryInput[] = selectedSubs.map((sub) => {
+      const f = fields[sub.id] ?? { amount: '', note: '' };
+      return { substanceId: sub.id, amount: f.amount.trim() || null, notes: f.note.trim() || null };
+    });
+    try {
+      const res = await batch.mutateAsync({ takenAt, entries });
+      haptics.success();
+      const mainIds = res.entries.map((e) => e.intake.id);
+      const compIds = res.entries.flatMap((e) => e.companions.map((c) => c.intake.id));
+      const names = res.entries.map((e) => e.intake.substanceName);
+      const compNames = res.entries.flatMap((e) => e.companions.map((c) => c.intake.substanceName));
+      toast.show({
+        message: res.count === 1 ? `${names[0]} eingetragen` : `${res.count} Einträge erfasst`,
+        detail: [...names, ...compNames.map((n) => `+ ${n}`)].join(' · '),
+        action: {
+          label: 'Rückgängig',
+          onClick: () => {
+            for (const id of [...mainIds, ...compIds]) remove.mutate(id);
+          },
+        },
+      });
+      resetSelection();
+      if (res.nightMed && !res.assessmentExists && res.assessmentDate) {
+        setTimeout(() => setAssessment({ open: true, date: res.assessmentDate! }), 280);
       }
     } catch (e) {
       haptics.warning();
@@ -184,7 +218,7 @@ export function QuickEntryScreen() {
   // Sammel-Eintrag aller Plan-Substanzen eines Slots zum gewählten Zeitpunkt.
   const submitBatch = async (slot: PlanSlot, label: string) => {
     if (planBatch.isPending) return;
-    setSelectedId(null);
+    resetSelection();
     try {
       const res = await planBatch.mutateAsync({ slot, takenAt });
       if (res.entries.length === 0) {
@@ -211,9 +245,7 @@ export function QuickEntryScreen() {
           },
         },
       });
-      resetComposer();
       if (res.nightMed && !res.assessmentExists && res.assessmentDate) {
-        // kurze Verzögerung, damit der Toast sichtbar ist, dann Tagesbild
         setTimeout(() => setAssessment({ open: true, date: res.assessmentDate! }), 280);
       }
     } catch (e) {
@@ -223,6 +255,7 @@ export function QuickEntryScreen() {
   };
 
   const isOffline = error instanceof ApiError && error.status === 0;
+  const hasSelection = selectedSubs.length > 0;
 
   return (
     <>
@@ -276,7 +309,7 @@ export function QuickEntryScreen() {
         </Card>
       )}
 
-      {/* Composer */}
+      {/* Composer: gemeinsamer Zeitpunkt + pro-Substanz Menge/Notiz */}
       <Card className="p-4 space-y-3">
         <div className="flex items-center gap-2">
           <Clock3 size={18} className="text-ink-muted shrink-0" />
@@ -299,32 +332,25 @@ export function QuickEntryScreen() {
 
         <div className="h-px bg-hairline" />
 
-        <div className="grid grid-cols-[1fr_1.3fr] gap-3">
-          <TextInput
-            inputMode="text"
-            placeholder={selected?.defaultDose ?? selectedDefault?.amount ?? 'Menge'}
-            value={amount}
-            onChange={(e) => setAmount(e.target.value)}
-            aria-label="Menge"
-          />
-          <TextInput
-            placeholder={defaultNote ? 'Notiz (Standard hinterlegt)' : 'Notiz'}
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-            aria-label="Notiz"
-          />
-        </div>
-        {selected && defaultNote && !note.trim() && (
-          <p className="text-xs text-ink-muted leading-snug pl-1 line-clamp-2">
-            <span className="text-accent font-medium">Standard:</span> {defaultNote}
-          </p>
-        )}
-        {selected && companionDefaults.length > 0 && (
-          <p className="text-xs text-ink-muted leading-snug pl-1 line-clamp-2">
-            <span className="text-accent font-medium">Automatisch dazu:</span>{' '}
-            {companionDefaults
-              .map((c) => (c.amount ? `${c.name} (${c.amount})` : c.name))
-              .join(', ')}
+        {hasSelection ? (
+          <div className="space-y-2.5">
+            {selectedSubs.map((sub) => (
+              <SelectedRow
+                key={sub.id}
+                sub={sub}
+                def={defaultFor(sub.name)}
+                amount={fields[sub.id]?.amount ?? ''}
+                note={fields[sub.id]?.note ?? ''}
+                onAmount={(v) => setField(sub.id, { amount: v })}
+                onNote={(v) => setField(sub.id, { note: v })}
+                onRemove={() => removeSelected(sub.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <p className="text-[13px] text-ink-faint leading-snug pl-1">
+            Substanz(en) unten antippen — Menge &amp; Notiz erscheinen dann hier, der Zeitpunkt gilt für alle.
+            Lange drücken trägt eine Substanz sofort mit Standardwerten ein.
           </p>
         )}
       </Card>
@@ -332,7 +358,7 @@ export function QuickEntryScreen() {
       {/* Substanz-Raster */}
       <div className="mt-5 flex items-center justify-between px-1 mb-2.5">
         <p className="font-sans text-[13px] font-semibold uppercase tracking-[0.13em] text-ink-faint">
-          {sortMode ? 'Reihenfolge ziehen' : 'Substanz wählen'}
+          {sortMode ? 'Reihenfolge ziehen' : 'Substanzen wählen'}
         </p>
         {sortMode ? (
           <button
@@ -393,14 +419,10 @@ export function QuickEntryScreen() {
             <SubstanceTile
               key={s.id}
               sub={s}
-              selected={selectedId === s.id}
+              selected={selectedIds.includes(s.id)}
               missingDefault={missingDefaults.has(s.name.toLowerCase())}
-              onSelect={() => {
-                haptics.select();
-                setSelectedId((id) => (id === s.id ? null : s.id));
-                if (s.defaultDose && !amount) setAmount('');
-              }}
-              onInstant={() => submit(s, { instant: true })}
+              onSelect={() => toggleSelect(s.id)}
+              onInstant={() => submitInstant(s)}
             />
           ))}
           <button
@@ -452,9 +474,9 @@ export function QuickEntryScreen() {
         </div>
       )}
 
-      {/* schwebende Bestätigung */}
+      {/* schwebende Bestätigung (Sammel-Eintrag) */}
       <AnimatePresence>
-        {selected && (
+        {hasSelection && !sortMode && (
           <motion.div
             initial={{ y: 80, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
@@ -462,22 +484,25 @@ export function QuickEntryScreen() {
             transition={{ type: 'spring', damping: 28, stiffness: 360 }}
             className="fixed inset-x-0 z-30 px-4 bottom-[calc(env(safe-area-inset-bottom)+4.6rem)]"
           >
-            <div className="mx-auto max-w-app glass ring-1 ring-line shadow-float rounded-3xl p-2 pl-3 flex items-center gap-3">
-              <SubstanceSeal name={selected.name} color={selected.color} />
+            <div className="mx-auto max-w-app glass ring-1 ring-line shadow-float rounded-3xl p-2 pl-4 flex items-center gap-3">
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-ink truncate flex items-center gap-1.5">
-                  {selected.name}
-                  {selected.isNightMed && <Moon size={13} className="text-accent" />}
+                <p className="font-medium text-ink truncate">
+                  {selectedSubs.length === 1 ? selectedSubs[0]?.name : `${selectedSubs.length} Substanzen`}
                 </p>
-                <p className="text-xs text-ink-muted truncate tabular">
-                  {(amount || selected.defaultDose || '—')} · {takenAt.slice(11, 16)} Uhr
-                </p>
+                <p className="text-xs text-ink-muted truncate tabular">{takenAt.slice(11, 16)} Uhr</p>
               </div>
+              <button
+                onClick={resetSelection}
+                className="press shrink-0 grid place-items-center size-10 rounded-2xl text-ink-faint hover:text-ink hover:bg-surface2"
+                aria-label="Auswahl verwerfen"
+              >
+                <X size={18} />
+              </button>
               <Button
                 size="lg"
                 icon={<Check size={19} />}
-                loading={create.isPending}
-                onClick={() => submit(selected)}
+                loading={batch.isPending}
+                onClick={submitSelected}
                 className="shrink-0"
               >
                 Eintragen
@@ -494,6 +519,72 @@ export function QuickEntryScreen() {
         onClose={() => setAssessment((a) => ({ ...a, open: false }))}
       />
     </>
+  );
+}
+
+/** Eine ausgewählte Substanz im Composer: Menge + Notiz, je mit DEFAULTS-Vorschau. */
+function SelectedRow({
+  sub,
+  def,
+  amount,
+  note,
+  onAmount,
+  onNote,
+  onRemove,
+}: {
+  sub: Substance;
+  def: SubstanceDefault | null;
+  amount: string;
+  note: string;
+  onAmount: (v: string) => void;
+  onNote: (v: string) => void;
+  onRemove: () => void;
+}) {
+  const defaultNote = def?.note ?? null;
+  const companions = def?.companions ?? [];
+  return (
+    <div className="rounded-2xl bg-surface2/50 ring-1 ring-line p-3 space-y-2">
+      <div className="flex items-center gap-2.5">
+        <SubstanceSeal name={sub.name} color={sub.color} size="sm" />
+        <p className="flex-1 min-w-0 font-medium text-ink truncate flex items-center gap-1.5">
+          <span className="truncate">{sub.name}</span>
+          {sub.isNightMed && <Moon size={12} className="text-accent shrink-0" />}
+        </p>
+        <button
+          onClick={onRemove}
+          className="press grid place-items-center size-7 rounded-lg text-ink-faint hover:text-ink hover:bg-surface2"
+          aria-label={`${sub.name} entfernen`}
+        >
+          <X size={16} />
+        </button>
+      </div>
+      <div className="grid grid-cols-[1fr_1.3fr] gap-2">
+        <TextInput
+          inputMode="text"
+          placeholder={sub.defaultDose ?? def?.amount ?? 'Menge'}
+          value={amount}
+          onChange={(e) => onAmount(e.target.value)}
+          aria-label={`Menge ${sub.name}`}
+        />
+        <TextInput
+          placeholder={defaultNote ? 'Notiz (Standard hinterlegt)' : 'Notiz'}
+          value={note}
+          onChange={(e) => onNote(e.target.value)}
+          aria-label={`Notiz ${sub.name}`}
+        />
+      </div>
+      {defaultNote && !note.trim() && (
+        <p className="text-xs text-ink-muted leading-snug pl-1 line-clamp-2">
+          <span className="text-accent font-medium">Standard:</span> {defaultNote}
+        </p>
+      )}
+      {companions.length > 0 && (
+        <p className="text-xs text-ink-muted leading-snug pl-1 line-clamp-2">
+          <span className="text-accent font-medium">Automatisch dazu:</span>{' '}
+          {companions.map((c) => (c.amount ? `${c.name} (${c.amount})` : c.name)).join(', ')}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -581,9 +672,7 @@ function SubstanceTile({
 
 /**
  * Sammel-Kachel "Morgendmedis"/"Nachtmedis": ein Tipp trägt alle
- * Plan-Substanzen des jeweiligen Slots zum gewählten Zeitpunkt ein. Bewusst
- * keine Auswahl/Bestätigungsleiste wie bei einer Substanz — es ist eine
- * Sofort-Aktion (Rückgängig per Toast).
+ * Plan-Substanzen des jeweiligen Slots zum gewählten Zeitpunkt ein.
  */
 function PlanBatchTile({
   label,

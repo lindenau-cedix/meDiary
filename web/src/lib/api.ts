@@ -12,6 +12,11 @@ import type {
   IntakeImportResult,
   PlanSlot,
   PlanBatchResult,
+  IntakeBatchEntryInput,
+  IntakeBatchResult,
+  DiaryNotesResponse,
+  DiaryState,
+  DiaryGenerateResult,
 } from './types';
 
 const API_BASE_KEY = 'mediary.apiBase';
@@ -169,6 +174,8 @@ export const api = {
       request<IntakeCreateResult>('/api/intakes', { method: 'POST', body: JSON.stringify(body) }),
     planBatch: (body: { slot: PlanSlot; takenAt?: string }) =>
       request<PlanBatchResult>('/api/intakes/plan-batch', { method: 'POST', body: JSON.stringify(body) }),
+    batch: (body: { takenAt?: string; companions?: boolean; entries: IntakeBatchEntryInput[] }) =>
+      request<IntakeBatchResult>('/api/intakes/batch', { method: 'POST', body: JSON.stringify(body) }),
     update: (id: number, body: Partial<IntakeInput>) =>
       request<Intake>(`/api/intakes/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
     remove: (id: number) => request<void>(`/api/intakes/${id}`, { method: 'DELETE' }),
@@ -198,5 +205,15 @@ export const api = {
     save: (content: string) =>
       request<DefaultsPayload>('/api/defaults', { method: 'PUT', body: JSON.stringify({ content }) }),
     check: () => request<ComplianceReport>('/api/defaults/check'),
+  },
+
+  diary: {
+    notes: (params?: { from?: string; to?: string }) =>
+      request<DiaryNotesResponse>(`/api/diary/notes${qs(params)}`),
+    get: () => request<DiaryState>('/api/diary'),
+    generate: (body: { scope?: 'missing' | 'all'; from?: string; to?: string; max?: number }) =>
+      request<DiaryGenerateResult>('/api/diary/generate', { method: 'POST', body: JSON.stringify(body) }),
+    save: (content: string) =>
+      request<DiaryState>('/api/diary', { method: 'PUT', body: JSON.stringify({ content }) }),
   },
 };

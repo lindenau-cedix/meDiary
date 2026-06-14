@@ -62,6 +62,30 @@ export interface PlanBatchResult {
   assessmentExists: boolean;
 }
 
+/** Ein Eintrag im Sammel-Request POST /api/intakes/batch. */
+export interface IntakeBatchEntryInput {
+  substanceId?: number | null;
+  substanceName?: string;
+  amount?: string | null;
+  notes?: string | null;
+}
+
+/** Eine erzeugte Einnahme (samt Begleitsubstanzen) aus POST /api/intakes/batch. */
+export interface IntakeBatchEntry {
+  intake: Intake;
+  createdSubstance: boolean;
+  companions: IntakeCompanion[];
+}
+
+/** Antwort von POST /api/intakes/batch — mehrere Substanzen zum selben Zeitpunkt. */
+export interface IntakeBatchResult {
+  count: number;
+  entries: IntakeBatchEntry[];
+  nightMed: boolean;
+  assessmentDate: string | null;
+  assessmentExists: boolean;
+}
+
 export interface PlanItem {
   id?: number;
   substanceId: number | null;
@@ -169,4 +193,63 @@ export interface ComplianceReport {
   total: number;
   compliant: SubstanceCompliance[];
   missing: SubstanceCompliance[];
+}
+
+// ───────────────────────── Tagebuch ─────────────────────────
+
+/** Eine Notiz-tragende Einnahme in der Kurzversion des Tagebuchs. */
+export interface DiaryIntakeNote {
+  id: number;
+  takenAt: string;
+  time: string;
+  substanceName: string;
+  amount: string | null;
+  note: string | null;
+}
+
+export interface DiaryDayAssessment {
+  scores: Record<string, number>;
+  note: string | null;
+}
+
+/** Ein Konsum-Tag in der Kurzversion (Liste der Notizen). */
+export interface DiaryNoteDay {
+  date: string;
+  weekday: string;
+  label: string;
+  intakes: DiaryIntakeNote[];
+  assessment: DiaryDayAssessment | null;
+}
+
+export interface DiaryNotesResponse {
+  days: DiaryNoteDay[];
+}
+
+/** Ein generierter Volltext-Eintrag eines Tages. */
+export interface DiaryEntry {
+  date: string;
+  heading: string;
+  body: string;
+}
+
+/** Zustand des KI-Voll-Tagebuchs. */
+export interface DiaryState {
+  /** ANTHROPIC_API_KEY hinterlegt? (sonst kann nicht generiert werden) */
+  available: boolean;
+  model: string;
+  raw: string;
+  entries: DiaryEntry[];
+  /** Alle Tage mit Notizen/Tagesbild (Grundmenge für die Generierung). */
+  noteworthyDays: string[];
+  /** Tage, für die bereits ein Voll-Eintrag existiert. */
+  generatedDays: string[];
+  /** Tage mit Inhalt, aber noch ohne Voll-Eintrag. */
+  pendingDays: string[];
+  lastGeneratedAt: string | null;
+}
+
+export interface DiaryGenerateResult extends DiaryState {
+  generated: number;
+  skippedExisting: number;
+  errors: { date: string; error: string }[];
 }

@@ -7,6 +7,7 @@ import { initNative } from './lib/native';
 import { AppShell } from './components/AppShell';
 import { QuickEntryScreen } from './screens/QuickEntryScreen';
 import { HistoryScreen } from './screens/HistoryScreen';
+import { DiaryScreen } from './screens/DiaryScreen';
 import { PlanScreen } from './screens/PlanScreen';
 import { TrendsScreen } from './screens/TrendsScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
@@ -36,6 +37,7 @@ export function App() {
               <Route element={<AppShell />}>
                 <Route index element={<QuickEntryScreen />} />
                 <Route path="verlauf" element={<HistoryScreen />} />
+                <Route path="tagebuch" element={<DiaryScreen />} />
                 <Route path="plan" element={<PlanScreen />} />
                 <Route path="werte" element={<TrendsScreen />} />
                 <Route path="einstellungen" element={<SettingsScreen />} />

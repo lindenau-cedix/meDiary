@@ -53,6 +53,56 @@ function previewCompanions(
   return out;
 }
 
+interface CompanionCreated {
+  row: IntakeRow;
+  substance: SubstanceRow;
+  createdSubstance: boolean;
+}
+
+/**
+ * Erfasst die "Mit:"-Begleitsubstanzen aus DEFAULTS.md des Haupteintrags als
+ * eigene Einnahmen zum selben Zeitpunkt — eine Ebene tief, Selbstbezug
+ * übersprungen, `source_event_id = companion:<haupt-id>`. MUSS innerhalb der
+ * umgebenden Transaktion aufgerufen werden. Geteilt von POST `/` und
+ * POST `/batch`, damit beide identisch auflösen (Mit:-Wert > Standarddosis der
+ * Begleitsubstanz > deren DEFAULTS).
+ */
+function insertCompanions(mainSubstanceName: string, mainId: number, takenAt: string): CompanionCreated[] {
+  const insertIntake = db.prepare(
+    `INSERT INTO intakes (substance_id, substance_name, taken_at, amount, notes, created_at, source_event_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const selectIntake = db.prepare(`SELECT * FROM intakes WHERE id = ?`);
+  const def = defaultsFor(mainSubstanceName);
+  const out: CompanionCreated[] = [];
+  const seen = new Set([nameKey(mainSubstanceName)]);
+  for (const comp of def.companions) {
+    const key = nameKey(comp.name);
+    if (seen.has(key)) continue; // Selbstbezug/Doppelnennung überspringen
+    seen.add(key);
+    const existedBefore = (db.prepare(`SELECT name FROM substances`).all() as { name: string }[]).some(
+      (s) => nameKey(s.name) === key,
+    );
+    const compSub = findOrCreateSubstance(comp.name);
+    const compDef = defaultsFor(compSub.name);
+    const compAmount =
+      normalizeAmount(comp.amount) ||
+      normalizeAmount(compSub.default_dose) ||
+      normalizeAmount(compDef.amount) ||
+      null;
+    const compNotes = comp.note || compDef.note || null;
+    const compInfo = insertIntake.run(
+      compSub.id, compSub.name, takenAt, compAmount, compNotes, nowLocalISO(), `companion:${mainId}`,
+    );
+    out.push({
+      row: selectIntake.get(compInfo.lastInsertRowid) as IntakeRow,
+      substance: compSub,
+      createdSubstance: !existedBefore,
+    });
+  }
+  return out;
+}
+
 const createSchema = z.object({
   substanceId: z.number().int().nullish(),
   substanceName: z.string().trim().min(1).optional(),
@@ -198,41 +248,12 @@ intakesRouter.post('/', (req, res) => {
   // Begleitsubstanzen aus DEFAULTS "Mit:" im selben Schritt miterfassen —
   // bewusst nur eine Ebene tief ("Mit:" der Begleitsubstanz wird nicht
   // verfolgt, keine Ketten/Zyklen). `companions: false` schaltet das ab.
-  interface CompanionCreated {
-    row: IntakeRow;
-    substance: SubstanceRow;
-    createdSubstance: boolean;
-  }
   const createIntakes = db.transaction((): { row: IntakeRow; companions: CompanionCreated[] } => {
     const info = insertIntake.run(
       substance?.id ?? null, substanceName, takenAt, amount, notes, nowLocalISO(), null,
     );
     const mainRow = selectIntake.get(info.lastInsertRowid) as IntakeRow;
-
-    const companions: CompanionCreated[] = [];
-    if (d.companions === false) return { row: mainRow, companions };
-
-    const seen = new Set([nameKey(substanceName)]);
-    for (const comp of def.companions) {
-      const key = nameKey(comp.name);
-      if (seen.has(key)) continue; // Selbstbezug/Doppelnennung überspringen
-      seen.add(key);
-      const existedBefore = (db.prepare(`SELECT name FROM substances`).all() as { name: string }[])
-        .some((s) => nameKey(s.name) === key);
-      const compSub = findOrCreateSubstance(comp.name);
-      const compDef = defaultsFor(compSub.name);
-      const compAmount = normalizeAmount(comp.amount) || normalizeAmount(compSub.default_dose) || normalizeAmount(compDef.amount) || null;
-      const compNotes = comp.note || compDef.note || null;
-      const compInfo = insertIntake.run(
-        compSub.id, compSub.name, takenAt, compAmount, compNotes, nowLocalISO(),
-        `companion:${mainRow.id}`,
-      );
-      companions.push({
-        row: selectIntake.get(compInfo.lastInsertRowid) as IntakeRow,
-        substance: compSub,
-        createdSubstance: !existedBefore,
-      });
-    }
+    const companions = d.companions === false ? [] : insertCompanions(substanceName, mainRow.id, takenAt);
     return { row: mainRow, companions };
   });
   const { row, companions } = createIntakes();
@@ -354,6 +375,130 @@ intakesRouter.post('/plan-batch', (req, res) => {
     entries: created.map((c) => ({
       intake: serializeIntake(c.row),
       createdSubstance: c.createdSubstance,
+    })),
+    nightMed: assessmentDate !== null,
+    assessmentDate,
+    assessmentExists,
+  });
+});
+
+const batchEntrySchema = z
+  .object({
+    substanceId: z.number().int().nullish(),
+    substanceName: z.string().trim().min(1).optional(),
+    amount: z.string().trim().nullish(),
+    notes: z.string().nullish(),
+  })
+  .refine((e) => e.substanceId != null || !!e.substanceName, {
+    message: 'substanceId oder substanceName erforderlich',
+  });
+
+const batchSchema = z.object({
+  takenAt: z.string().optional(), // default: jetzt — gilt für ALLE Einträge
+  companions: z.boolean().optional(), // false = "Mit:"-Begleitsubstanzen nicht miterfassen
+  entries: z.array(batchEntrySchema).min(1, 'mindestens ein Eintrag erforderlich'),
+});
+
+/**
+ * Mehrere Substanzen in einem Rutsch erfassen — gleicher Zeitpunkt für alle,
+ * pro Eintrag eigene Menge/Notiz. Eine Transaktion, gleiche Auflösung wie
+ * `POST /` (Menge: Text > Standarddosis > DEFAULTS; Notiz: Text > DEFAULTS;
+ * Autovivifikation; `Mit:`-Begleitsubstanzen je Eintrag, `companions: false`
+ * schaltet sie ab). Wie bei `POST /` wird danach geprüft, ob alle Nacht-Medis
+ * des Konsumtags erfasst sind (`nightMed`/`assessmentDate`).
+ *
+ * Antwort: `{ count, entries: { intake, createdSubstance, companions[] }[],
+ * nightMed, assessmentDate, assessmentExists }`.
+ */
+intakesRouter.post('/batch', (req, res) => {
+  const parsed = batchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const d = parsed.data;
+  const withCompanions = d.companions !== false;
+  const takenAt = d.takenAt ? normalizeDateTime(d.takenAt) : nowLocalISO();
+
+  // Substanzen vorab auflösen (legt neue Namen als QuickPick an, wie POST /);
+  // eine fehlende substanceId ist ein 400, bevor irgendetwas geschrieben wird.
+  interface Resolved {
+    substance?: SubstanceRow;
+    substanceName: string;
+    amount: string | null;
+    notes: string | null;
+    createdSubstance: boolean;
+  }
+  // Erst ALLE per ID referenzierten Substanzen prüfen, BEVOR per Name neue
+  // angelegt werden: so kann ein 400 wegen einer ungültigen ID weiter hinten
+  // keine bereits (per Name) angelegte Substanz als Leiche zurücklassen.
+  const idRows = new Map<number, SubstanceRow>();
+  for (let i = 0; i < d.entries.length; i++) {
+    const e = d.entries[i];
+    if (e.substanceId == null) continue;
+    const row = db.prepare(`SELECT * FROM substances WHERE id = ?`).get(e.substanceId) as SubstanceRow | undefined;
+    if (!row) return res.status(400).json({ error: `Substanz nicht gefunden (Eintrag ${i + 1})` });
+    idRows.set(i, row);
+  }
+
+  const resolved: Resolved[] = [];
+  for (let i = 0; i < d.entries.length; i++) {
+    const e = d.entries[i];
+    let substance: SubstanceRow | undefined;
+    let createdSubstance = false;
+    if (e.substanceId != null) {
+      substance = idRows.get(i);
+    } else if (e.substanceName) {
+      const before = db.prepare(`SELECT id, name FROM substances`).all() as { id: number; name: string }[];
+      const wanted = e.substanceName.trim().toLocaleLowerCase('de');
+      const existing = before.find((s) => s.name.trim().toLocaleLowerCase('de') === wanted);
+      substance = findOrCreateSubstance(e.substanceName);
+      createdSubstance = !existing;
+    }
+    const substanceName = substance?.name ?? e.substanceName!;
+    const def = defaultsFor(substanceName);
+    const amount = normalizeAmount(e.amount) || substance?.default_dose || def.amount || null;
+    const notes = e.notes?.trim() || def.note || null;
+    resolved.push({ substance, substanceName, amount, notes, createdSubstance });
+  }
+
+  const insertIntake = db.prepare(
+    `INSERT INTO intakes (substance_id, substance_name, taken_at, amount, notes, created_at, source_event_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  );
+  const selectIntake = db.prepare(`SELECT * FROM intakes WHERE id = ?`);
+  const batchId = `batch:${nowLocalISO()}`;
+
+  interface BatchCreated {
+    row: IntakeRow;
+    createdSubstance: boolean;
+    companions: CompanionCreated[];
+  }
+  const createBatch = db.transaction((): BatchCreated[] => {
+    const created: BatchCreated[] = [];
+    for (const r of resolved) {
+      const info = insertIntake.run(
+        r.substance?.id ?? null, r.substanceName, takenAt, r.amount, r.notes, nowLocalISO(), batchId,
+      );
+      const mainRow = selectIntake.get(info.lastInsertRowid) as IntakeRow;
+      const companions = withCompanions ? insertCompanions(r.substanceName, mainRow.id, takenAt) : [];
+      created.push({ row: mainRow, createdSubstance: r.createdSubstance, companions });
+    }
+    return created;
+  });
+  const created = createBatch();
+
+  const assessmentDate = allNightMedsTaken(consumptionDay(takenAt));
+  const assessmentExists = assessmentDate
+    ? !!db.prepare(`SELECT 1 FROM daily_assessments WHERE date = ?`).get(assessmentDate)
+    : false;
+
+  res.status(201).json({
+    count: created.length,
+    entries: created.map((c) => ({
+      intake: serializeIntake(c.row),
+      createdSubstance: c.createdSubstance,
+      companions: c.companions.map((comp) => ({
+        intake: serializeIntake(comp.row),
+        createdSubstance: comp.createdSubstance,
+      })),
     })),
     nightMed: assessmentDate !== null,
     assessmentDate,
