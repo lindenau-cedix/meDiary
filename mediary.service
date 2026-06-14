@@ -24,16 +24,12 @@ WorkingDirectory=%h/mediary
 ExecStart=%h/mediary/start.sh
 
 # ── Env ──
-# DB und DEFAULTS liegen in ~/.local/share/mediary (server/src/config.ts)
-# Override hier möglich, z. B.:
-# Environment="PORT=4000"
-# Environment="DB_PATH=/custom/path/mediary.db"
-# Environment="DEFAULTS_PATH=/custom/path/DEFAULTS.md"
-# Environment="WEB_DIST=./web/dist"  # relative to WorkingDirectory=%h/mediary
-# Environment="WEB_DIST=/custom/path/web/dist"
-# Environment="CF_ACCESS_TEAM_DOMAIN=meinteam"
-# Environment="CF_ACCESS_AUD=..."
-# Environment="CF_ACCESS_DISABLED=true"
+# DB und DEFAULTS liegen in ~/.local/share/mediary (server/src/config.ts).
+# Diese Env-Vars werden beim `npm run deploy` aus der .env im Projekt-Root
+# hier injiziert. deploy.sh ersetzt die untenstehende Marker-Zeile durch
+# die tatsächlichen `Environment=...`-Zeilen (eine pro Variable).
+# Marker-Zeile (muss genau so aussehen, eine Zeile, eine Zeile, ein Match):
+# __MEDIARY_INJECT_ENV_HERE__
 
 # ── Safety ──
 Restart=on-failure

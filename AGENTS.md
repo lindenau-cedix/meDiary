@@ -829,12 +829,58 @@ Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
 - **`Cannot GET /` ohne WEB_DIST:** Wenn die systemd-Unit keinen
   `Environment="WEB_DIST=..."` enthält, antwortet der Server auf `GET /`
   mit Express' Default-404 („Cannot GET /"). API-Endpunkte unter `/api/…`
-  funktionieren weiterhin. Symptom dafür, dass die Service-Unit nicht
-  durch `deploy.sh` regeneriert wurde. Lösung: `Environment="WEB_DIST=./web/dist"`
+  funktionieren weiterhin. Seit 2026-06-14 validiert `deploy.sh` den
+  Env-Inject-Marker und die resultierende Service-Unit fail-loud, sobald
+  der WEB_DIST nicht ankommt — `Cannot GET /` kann also nicht mehr still
+  wiederkehren. Manuelle Reparatur: `Environment="WEB_DIST=./web/dist"`
   in `~/.config/systemd/user/mediary.service` ergänzen, `systemctl --user
   daemon-reload && systemctl --user restart mediary`.
 
 ## Letzte Änderungen (chronologisch, für nahtloses Weiterarbeiten)
+
+- **2026-06-14 — `deploy.sh` Env-Injection repariert (robuster Marker)**:
+  - **Bug:** `deploy.sh` hat den WEB_DIST (und andere Env-Vars aus `.env`)
+    nur dann in die systemd-Service-Unit injiziert, wenn die alte
+    `awk`-Regex `^# Environment="WEB_DIST=/custom/path/web/dist"$` **exakt**
+    auf die (auskommentierte) Beispiel-Zeile in `mediary.service` passte.
+    Sobald jemand das Service-Template editiert, den Kommentar umformuliert
+    oder einfach keine `/custom/path/web/dist`-Beispielzeile mehr da war
+    (typisch nach `git pull` oder nach dem Hot-Fix-Stand `2c318cb9`, der
+    den Service-Block anders strukturiert hatte), fiel `deploy.sh`
+    **fail-silent** in den `else`-Branch und kopierte die Service-Datei
+    unverändert — der User merkte erst im Browser mit
+    `Cannot GET /`, dass das Frontend fehlt. Genau das war auf dem
+    laufenden VPS der Fall: installierte Unit unter
+    `~/.config/systemd/user/mediary.service` hatte **kein**
+    `Environment="WEB_DIST=..."`, `GET /` → 404, obwohl der Build
+    `~/mediary/web/dist/` korrekt vorhanden war.
+  - **Fix `mediary.service`:** Auskommentierten Beispiel-Block durch
+    **eindeutige Marker-Zeile** `__MEDIARY_INJECT_ENV_HERE__` ersetzt.
+    deploy.sh matcht diese eine Zeile, nicht mehr einen exemplarischen
+    Pfad. Marker-Drift (0 oder >1 Vorkommen) führt zu `exit 1` mit
+    klarer Fehlermeldung — kein stummes „Cannot GET /" mehr.
+  - **Fix `deploy.sh`:** Marker-Logik von `awk`-Regex auf
+    `awk` mit `$0 == "# __MEDIARY_INJECT_ENV_HERE__"`-Match umgestellt
+    (newline-treu, immun gegen Template-Drift). Reihenfolge der injizierten
+    Vars: WEB_DIST zuerst, dann PORT/DB_PATH/DEFAULTS_PATH/CF_ACCESS_*.
+    Kein `else`-Fail-silent mehr: bei fehlender `.env` wird die
+    Service-Datei sauber ohne Marker kopiert (mit erklärendem Kommentar),
+    bei vorhandener `.env` muss die Marker-Zeile **genau einmal**
+    vorkommen — sonst Exit 1. Zusätzlich Sanity-Check: nach dem
+    Schreiben prüft das Skript, dass `Environment="WEB_DIST=…"` (falls
+    in `.env` gesetzt) tatsächlich in der resultierenden Service-Unit
+    steht, und failt sonst mit klarer Meldung.
+  - **Hot-Fix auf laufendem System:** `~/.config/systemd/user/mediary.service`
+    einmalig manuell um `Environment="WEB_DIST=./web/dist"` ergänzt,
+    `systemctl --user daemon-reload && systemctl --user restart mediary`.
+    **Verifiziert:** `GET /` → 200 (`<!doctype html>` aus
+    `~/mediary/web/dist/index.html`), `GET /api/health` → 200,
+    `GET /favicon.svg` → 200, `GET /api/intakes` → 200, SPA-Fallback
+    funktioniert. Server-Log: `[mediary] Serving frontend from
+    /home/ubuntu/mediary/web/dist`.
+  - **Folge-Aktion für User:** Beim nächsten `npm run deploy` greift
+    der neue Marker-Pfad automatisch — `.env` weiterhin mit
+    `WEB_DIST=./web/dist` (oder absolut) pflegen, der Rest läuft.
 
 - **2026-06-14 — Merge-Konflikt aufgelöst** (Task `0a55cd9d`):
   - **Bug:** `b409d7a` (Merge `cd/task/2c318cb9` + `cd/task/448cd00a`) wurde
