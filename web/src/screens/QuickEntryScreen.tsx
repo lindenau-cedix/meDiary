@@ -13,7 +13,7 @@ import { AssessmentSheet } from '../components/AssessmentSheet';
 import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
-import { greeting, nowLocalInput, todayStr, formatFull, formatTime } from '../lib/format';
+import { greeting, nowLocalInput, consumptionToday, consumptionTodayOffset, formatFull, formatTime } from '../lib/format';
 import { useSubstances, useIntakes, useIntakeMutations, useSubstanceMutations, useDefaults, useCompliance, usePlan } from '../lib/queries';
 import { ApiError } from '../lib/api';
 import type { Substance, PlanSlot } from '../lib/types';
@@ -23,8 +23,23 @@ export function QuickEntryScreen() {
   const { data: substances = [], error } = useSubstances();
   const { data: defaults } = useDefaults();
   const { data: compliance } = useCompliance();
-  const today = todayStr();
-  const { data: todayIntakes = [] } = useIntakes({ from: today, limit: 50 });
+  // Konsum-Tag (03:30-Tagesgrenze), nicht der reine Wand­uhr-Tag — eine
+  // Einnahme um 02:30 morgens gehört konsumtechnisch zum Vortag, und
+  // so soll sie auch unter "Heute erfasst" erscheinen.
+  const today = consumptionToday();
+  // Wir laden die letzten ~3 Wand­uhr-Tage und filtern lokal nach
+  // `intake.date === today` (Konsum-Tag, vom Server mit DAY_BOUNDARY
+  // berechnet). So greift die 03:30-Grenze zuverlässig in beide
+  // Richtungen, unabhängig davon, ob wir uns vor oder nach 03:30
+  // befinden — der Server-Filter `from/to` arbeitet auf Wand­uhr-Zeit
+  // und kann den Rand nicht exakt treffen.
+  const todayIntakesRaw = useIntakes(
+    { from: consumptionTodayOffset(-1), limit: 200 },
+  );
+  const todayIntakes = useMemo(
+    () => (todayIntakesRaw.data ?? []).filter((it) => it.date === today),
+    [todayIntakesRaw.data, today],
+  );
   const { data: plan } = usePlan();
   const { create, remove, planBatch } = useIntakeMutations();
 
@@ -119,7 +134,12 @@ export function QuickEntryScreen() {
     setSelectedId(null);
     setAmount('');
     setNote('');
-    setTakenAt(nowLocalInput());
+    // `takenAt` bleibt bewusst stehen, damit mehrere Einträge
+    // hintereinander mit demselben Zeitpunkt erfasst werden können
+    // (z. B. "Morgendmedis"-Block oder mehrere Substanzen kurz
+    // nacheinander). Erst beim erneuten Aufruf des Bildschirms
+    // wird der Zeitpunkt über das `useState(nowLocalInput())`-
+    // Initial auf "jetzt" gesetzt.
   };
 
   const submit = async (sub: Substance, opts?: { instant?: boolean }) => {

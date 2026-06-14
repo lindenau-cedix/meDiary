@@ -105,8 +105,28 @@ berührt die Daten nicht.
   - `nameKey()` normalisiert Unicode-aware — `CBD-Öl` und `cbd-öl` matchen.
     `SQLite lower()` ist ASCII-only und wird hier umgangen.
 - **Tagesgrenze 03:30 Europe/Berlin** (`server/src/lib/time.ts → DAY_BOUNDARY`).
-  Einnahmen 00:00–03:29 zählen zum Vortag; relevant für die Tagesbild-Zuordnung
-  bei Nachtmedikation.
+  Einnahmen 00:00–03:29 zählen zum Vortag. **Server** (`consumptionDay()`
+  in `db.ts`/`time.ts`) UND **Frontend** (`web/src/lib/time.ts`, gleicher
+  Algorithmus) kennen die Grenze. Konsequenz: `intake.date` im JSON
+  (gesendet von `serializeIntake`) IST der Konsum-Tag; die Heute-Liste
+  im QuickEntryScreen filtert lokal `it.date === consumptionToday()`,
+  damit die 03:30-Grenze in beide Richtungen sicher greift (der
+  SQL-`from/to`-Filter arbeitet auf Wand­uhr-Zeit). `allNightMedsTaken`
+  in `db.ts` sucht für Konsum-Tag `day` im Wand­uhr-Bereich
+  `dayT03:30:00` … `(day+1)T03:29:59`, sodass das Tagesbild exakt
+  passend zu `consumptionDay(takenAt)` ausgelöst wird. `formatDayLabel`
+  und `relativeDays` im Frontend vergleichen gegen `consumptionToday()`,
+  nicht den Wand­uhr-Tag — eine 02:30-Einnahme erscheint in der
+  Verlauf-Liste als „Gestern" (Konsum-Tag), nicht als „Heute"
+  (Wand­uhr-Tag).
+- **Composer-Zeitstempel bleibt nach Submit stehen** — `takenAt` wird
+  nur beim erstmaligen Mount des QuickEntry-Bildschirms per
+  `useState(nowLocalInput())` auf "jetzt" gesetzt. Nach erfolgreichem
+  Eintrag (auch Sammel-Eintrag „Morgendmedis"/„Nachtmedis") bleiben
+  `takenAt`/`amount`/`note` des Haupt-Eintrags erhalten, sodass
+  mehrere Substanzen mit demselben Zeitpunkt hintereinander erfasst
+  werden können. Erst ein erneuter Besuch des Heute-Tabs (oder ein
+  Klick auf den „Jetzt"-Button) setzt den Zeitpunkt neu.
 - **Plan-Versionierung** ist ein vollständiger Snapshot pro Version. Der
   `plan_items`-Datensatz hat `version_id` und `substance_id` (NULL = freier Name).
 - **Wirkungszeitpunkt `effective_from`** (`plan_versions`, `YYYY-MM-DD` oder
@@ -231,8 +251,8 @@ web/src/
 │   ├── api.ts                  # fetch-Wrapper + ApiError
 │   ├── queries.ts              # react-query-Hooks
 │   ├── types.ts                # API-Typen
-│   ├── time.ts                 # DAY_BOUNDARY, nowLocalISO, parseLocal
-│   ├── format.ts               # greeting, formatTime, formatDayLabel, …
+│   ├── time.ts                 # DAY_BOUNDARY, consumptionDay, consumptionToday, parseLocal, nowLocalInput
+│   ├── format.ts               # re-exportiert time-Helfer, greeting, formatTime, formatDayLabel, …
 │   ├── colors.ts, theme.tsx    # Design-Tokens / Theme-Persistenz
 │   └── haptics.ts, native.ts   # Capacitor-Haptik
 └── index.css                   # CSS-Variablen, Tailwind-Layer
@@ -284,6 +304,52 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 ```
 
 ## Letzte Änderungen (jüngste zuerst)
+
+- **Tagesgrenze 03:30 Europe/Berlin im Frontend + Datum bleibt nach Submit**:
+  - **Server `consumptionDay()` als Wahrheit für `intake.date`** —
+    `serializeIntake` (`server/src/lib/serialize.ts`) berechnet `date`
+    jetzt über `consumptionDay(taken_at)` (DAY_BOUNDARY) statt
+    `slice(0, 10)`. Einnahmen 00:00–03:29 haben damit ein um einen
+    Tag zurückverschobenes `date`.
+  - **Server `allNightMedsTaken(day)` repariert** (`server/src/db.ts`):
+    die DB-Suche verwendet jetzt den Wand­uhr-Bereich
+    `dayT03:30:00` … `(day+1)T03:29:59` — d. h. genau die
+    Einnahmen, deren `consumptionDay(takenAt) === day`. Vorher
+    suchte `dayT00:00:00` … `dayT23:59:59`, was das
+    03:30-Grenzverhalten nicht abdeckte (Einnahme um 02:30
+    konsumtechnisch zum Vortag, aber vom Suchbereich nicht
+    erfasst). Konsequenz: das Tagesbild wird jetzt zuverlässig
+    ausgelöst, wenn die letzte Nacht-Med-Einnahme vor 03:30
+    erfolgte.
+  - **Frontend `web/src/lib/time.ts`** (neu) spiegelt den
+    Server-Helfer: `DAY_BOUNDARY`, `consumptionDay`,
+    `consumptionToday`, `consumptionTodayOffset(n)`,
+    `nowLocalInput`, `parseLocal`, `toDateString`. `format.ts`
+    re-exportiert diese Helfer, sodass alte Aufrufer von
+    `todayStr`/`nowLocalInput`/`parseLocal`/`dateNDaysAgo` aus
+    `format.ts` weiter funktionieren.
+  - **`formatDayLabel`/`relativeDays` benutzen `consumptionToday()`**
+    statt `todayStr()` — eine Einnahme um 02:30 erscheint in
+    der Verlauf-Liste als „Gestern" (Konsum-Tag), nicht als
+    „Heute" (Wand­uhr-Tag).
+  - **QuickEntryScreen (`today = consumptionToday()`)** plus
+    lokaler Filter `it.date === today` aus den letzten 2
+    Konsum-Tagen. Robust gegen die SQL-`from/to`-Heuristik
+    (die weiter auf Wand­uhr-Zeit arbeitet).
+  - **Composer `takenAt` bleibt nach Submit stehen** —
+    `resetComposer()` setzt nur `selectedId`/`amount`/`note`
+    zurück, nicht mehr `takenAt`. Initial `useState(nowLocalInput())`
+    beim Mount, „Jetzt"-Button setzt ihn explizit zurück. Damit
+    können mehrere Substanzen eines Blocks („Morgendmedis" oder
+    nachts) ohne erneutes Stellen der Uhr erfasst werden.
+  - Verifiziert: Server-TS, Web-TS, Server-Build (`tsc`), Vite-Build
+    je exit 0; E2E gegen `/tmp`-Scratch-DB: `02:30` → date=Vortag,
+    `03:29` → Vortag, `03:30` → aktueller Tag, `03:31` → aktueller
+    Tag; Plan-Batch `night @ 22:00` (Konsum-Tag = gleicher Tag) und
+    `night @ 02:30` (Konsum-Tag = Vortag) lösen das Tagesbild für
+    den jeweils korrekten Konsum-Tag aus; PATCH mit
+    `takenAt=01:00` setzt `date` ebenfalls auf Vortag. Live-`./data`
+    unberührt.
 
 - **Dokumentation: Mehrzeiltextinput-API erklärt**:
   - Keine Code-/Schemaänderung. Die bestehende Route `POST /api/intakes/text`

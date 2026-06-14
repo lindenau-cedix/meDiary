@@ -6,6 +6,7 @@ import type {
   AssessmentRow,
 } from '../db.js';
 import { METRIC_KEYS } from './metrics.js';
+import { consumptionDay } from './time.js';
 
 export function serializeSubstance(r: SubstanceRow) {
   return {
@@ -28,7 +29,9 @@ export function serializeIntake(r: IntakeRow) {
     substanceId: r.substance_id,
     substanceName: r.substance_name,
     takenAt: r.taken_at,
-    date: r.taken_at.slice(0, 10),
+    // Konsum-/Medikations-Tag mit 03:30-Grenze (Europe/Berlin): Einnahmen
+    // 00:00–03:29 zählen zum Vortag. Siehe server/src/lib/time.ts.
+    date: consumptionDay(r.taken_at),
     amount: r.amount,
     notes: r.notes,
     createdAt: r.created_at,
