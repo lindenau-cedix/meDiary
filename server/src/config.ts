@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
+import fs from 'node:fs';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -8,14 +9,59 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-/** server/ root directory (one level up from src/) */
-export const SERVER_ROOT = path.resolve(__dirname, '..');
+/**
+ * "Effective root" — das Verzeichnis, gegen das relative Pfade aufgelöst
+ * werden (DB_PATH, DEFAULTS_PATH, WEB_DIST).
+ *
+ * Beim Dev-Start (tsx watch) liegt `__dirname` unter `server/src/`, also
+ * ist `__dirname/..` = `server/` — das ist, was der Code historisch erwartet.
+ *
+ * Beim Build (TS → JS in `dist/`) liegt `__dirname` aber unter
+ * `<install>/dist/` und `__dirname/..` = `<install>/` (z. B. `~/mediary`).
+ * Wenn `package.json` im Parent den Server-Namen trägt, sind wir im
+ * Dev-Modus; sonst ist es der Install-Root und wir nehmen ihn als Root.
+ *
+ * Wenn keines von beidem klappt, fallen wir auf `__dirname/..` zurück.
+ */
+function findServerRoot(): string {
+  const candidate = path.resolve(__dirname, '..');
+  // Dev-Modus: `server/package.json` mit "name": "mediary-server"
+  try {
+    const pkgPath = path.join(candidate, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = fs.readFileSync(pkgPath, 'utf8');
+      if (/"name"\s*:\s*"mediary-server"/.test(pkg)) return candidate;
+    }
+  } catch {
+    /* fall through */
+  }
+  return candidate;
+}
+
+/** server/ root directory (Dev: server/, Build: <install>/) */
+export const SERVER_ROOT = findServerRoot();
 
 /** Default data directory: ~/.local/share/mediary */
 export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'mediary');
 
+/**
+ * Resolve a path from .env. Precedence:
+ *  1. Absolute paths are returned as-is.
+ *  2. Relative paths are resolved against process.cwd() (NOT SERVER_ROOT).
+ *     Under systemd --user this is the install root, e.g. ~/mediary, so
+ *     `WEB_DIST=./web/dist` lands on ~/mediary/web/dist correctly.
+ *
+ * Historically this used `SERVER_ROOT`, which is correct for `npm run dev`
+ * (code lives in `server/src/`, so `SERVER_ROOT = server/`) but wrong for
+ * the built dist (where `__dirname = <install>/dist/`, so
+ * `SERVER_ROOT = <install>/`). The fix routes everything through
+ * process.cwd() — which is the install root under systemd, and the repo
+ * root under `npm run dev`. Both contexts then expect the same relative
+ * path in the .env (e.g. `WEB_DIST=./web/dist`).
+ */
 function resolveFromRoot(p: string): string {
-  return path.isAbsolute(p) ? p : path.resolve(SERVER_ROOT, p);
+  if (path.isAbsolute(p)) return p;
+  return path.resolve(process.cwd(), p);
 }
 
 export const config = {

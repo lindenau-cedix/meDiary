@@ -668,5 +668,50 @@ Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
 - **`build.sh`: Vite sucht `index.html` im CWD** — `cd web/` vor dem
   `vite build`-Aufruf ist zwingend; ohne das scheitert der Build mit
   „Could not resolve entry module 'index.html'".
+- **`WEB_DIST`: relative Pfade aus `.env` werden gegen `process.cwd()`
+  aufgelöst** (nicht gegen `SERVER_ROOT` wie ältere Stände). Grund: Im
+  Build ist `__dirname = <install>/dist/`, also `SERVER_ROOT = <install>/`,
+  und `../web/dist` würde **ein** Verzeichnis zu hoch landen
+  (`/home/ubuntu/web/dist` statt `/home/ubuntu/mediary/web/dist`).
+  **Empfohlener Wert in `.env`:** `WEB_DIST=./web/dist` (relativ zu
+  `WorkingDirectory=%h/mediary`) oder absolut `WEB_DIST=/pfad/zu/web/dist`.
+  `../web/dist` funktioniert **nicht**.
+- **`Cannot GET /` ohne WEB_DIST:** Wenn die systemd-Unit keinen
+  `Environment="WEB_DIST=..."` enthält, antwortet der Server auf `GET /`
+  mit Express' Default-404 („Cannot GET /"). API-Endpunkte unter `/api/…`
+  funktionieren weiterhin. Symptom dafür, dass die Service-Unit nicht
+  durch `deploy.sh` regeneriert wurde. Lösung: `Environment="WEB_DIST=./web/dist"`
+  in `~/.config/systemd/user/mediary.service` ergänzen, `systemctl --user
+  daemon-reload && systemctl --user restart mediary`.
+
+## Letzte Änderungen (chronologisch, für nahtloses Weiterarbeiten)
+
+- **2026-06-14 — „Cannot GET /"-Fix** (Task `2c318cb9`):
+  - **Bug:** Nach Commit `18833b2` (`.env`-basierte `WEB_DIST`-Konfiguration)
+    wurde `npm run deploy` nicht erneut ausgeführt → die installierte
+    `~/.config/systemd/user/mediary.service` enthielt keinen `WEB_DIST`.
+    Dazu kam ein **zweiter Bug in `deploy.sh`**: `${VAR}\n` in doppelten
+    Bash-Anführungszeichen ist literaler Text, kein Newline — die injizierten
+    Env-Lines landeten alle in **einer** Zeile und wurden vom
+    systemd-Parser ignoriert. **Dritter Bug:** `resolveFromRoot()` im
+    gebauten `dist/config.js` löste `WEB_DIST=../web/dist` zu
+    `/home/ubuntu/web/dist` auf (statt `/home/ubuntu/mediary/web/dist`),
+    weil `SERVER_ROOT` im Build = `~/mediary` ist und `..` darüber hinaus
+    ging.
+  - **Fix 1:** `deploy.sh` baut `SERVICE_ENV_LINES` jetzt als Bash-Array
+    und schreibt die Env-Lines über `awk` (statt `sed`) in die Service-Unit
+    ein. Damit landet jede Env-Variable in einer eigenen Zeile.
+  - **Fix 2:** `server/src/config.ts → resolveFromRoot()` löst **alle**
+    relativen Pfade aus der `.env` gegen `process.cwd()` auf (nicht mehr
+    gegen `SERVER_ROOT`). Empfohlener `WEB_DIST`-Wert: `./web/dist`
+    (relativ zu `WorkingDirectory=%h/mediary`).
+  - **Hot-Fix auf dem laufenden Service:** `~/mediary/dist/config.js`
+    wurde direkt gepatcht, `~/.config/systemd/user/mediary.service` um
+    `Environment="WEB_DIST=./web/dist"` ergänzt, Service neu gestartet.
+    Verifiziert: `GET /` → 200 (`index.html`), `GET /assets/...js` → 200,
+    SPA-Fallback → 200, `/api/health` → 200, `/api/substances` → 200.
+  - **Folge-Aktion für User:** `npm run deploy` ausführen, sobald der
+    Source-Stand konsistent sein soll — der neue `deploy.sh` läuft jetzt
+    sauber durch und schreibt die Service-Unit korrekt.
 
 
