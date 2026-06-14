@@ -149,7 +149,7 @@ berührt die Daten nicht.
 
 `POST /api/intakes/plan-batch` (`{ slot: "morning"|"noon"|"evening"|"night", takenAt? }`) trägt **alle** Substanzen des zum `takenAt` wirksamen Plans ein, die im jeweiligen Slot eine Dosis haben — die Sammel-Einträge „Morgendmedis" (morning) und „Nachtmedis" (night) im Heute-Tab. Pro Substanz gilt dieselbe Auflösung wie bei `POST /` (Menge: Standarddosis > DEFAULTS > Plan-`strength`; Notiz aus DEFAULTS), Autovivifikation inklusive (`source_event_id = planbatch:<slot>`). Begleitsubstanzen (`Mit:`) werden hier bewusst NICHT miterfasst (der Plan ist die maßgebliche Liste; sonst Doppelungen). Antwort: `{ slot, count, entries: { intake, createdSubstance }[], nightMed, assessmentDate, assessmentExists }`. Wie bei `POST /` löst auch hier das Komplettieren aller Nacht-Medis das Tagesbild aus.
 
-`POST /api/intakes/text` (Body: JSON `{ text, dryRun?, companions? }` oder direkt `text/plain`) wandelt mehrzeiligen Freitext in Einnahmen um. Format pro Zeile siehe **SAMPLES.md** im Projekt-Root: optionales Präfix `DD.MM(.YYYY) HH:MM:` (ohne Jahr = aktuelles, ohne Datum = heute), nur `HH:MM:`, `jetzt:` oder gar kein Präfix (= aktuelle Zeit); danach Einträge `Substanz Menge (Notiz)`, getrennt durch Kommas und/oder „ und " (Dezimal-Kommas wie `0,5 ml` und Klammer-Inhalte trennen nicht). Menge beginnt beim ersten Zahl-Token nach dem Namen (bei Folgen wie „Omega 3 500 mg" beim letzten der Zahlen-Folge); **Menge und/oder Notiz dürfen weggelassen werden — dann greifen die DEFAULTS.md-Werte** (Menge: Text > Standarddosis > DEFAULTS; Notiz: Klammer > DEFAULTS-Notiz). Autovivifikation wie bei `POST /`. **`Mit:`-Begleitsubstanzen aus DEFAULTS.md werden — wie bei `POST /` — pro Eintrag automatisch als eigene Einnahme zum selben Zeitpunkt miterfasst** (z. B. Theanin → Lemon Balm), eine Ebene tief, Selbstbezug übersprungen, `source_event_id = companion:<haupt-id>`; `companions: false` im JSON-Body schaltet das ab. Jede Zeile wird einzeln verarbeitet und ist atomar — ein fehlerhafter Eintrag macht die ganze Zeile zum `lineErrors`-Element, die übrigen Zeilen werden trotzdem angelegt (alle Inserts einer Anfrage in einer Transaktion, `source_event_id = text:<Zeitstempel>` als Batch-Marker für die Haupteinträge). **Nach dem Schreiben liest der Endpunkt die Einträge (inkl. Begleitsubstanzen) frisch aus der DB** und meldet, welche wirklich angekommen sind. Antwort (201): `{ batchId, lineCount, requested, created, verified, entries: { line, createdSubstance, verified, intake, companions: { createdSubstance, verified, intake }[] }[], lineErrors: { line, text, error }[] }` — `requested` zählt die Haupteinträge, `created` alle verifizierten Einträge (Haupt + Begleit), `verified` ist genau dann true, wenn jeder geplante Insert in der DB gefunden wurde. 400, wenn gar kein Eintrag parsebar war; `dryRun: true` liefert nur das Parse-Ergebnis (mit Begleit-Vorschau `entries[].companions[]`) ohne zu schreiben. **Zugriffsschutz:** Cloudflare Access (siehe Env-Tabelle) — ohne Konfiguration antwortet der Endpunkt 503 (fail-closed), `CF_ACCESS_DISABLED=true` ist der Dev-Bypass.
+`POST /api/intakes/text` (Body: JSON `{ text, dryRun?, companions? }` oder direkt `text/plain`) wandelt mehrzeiligen Freitext in Einnahmen um. Format pro Zeile siehe **SAMPLES.md** im Projekt-Root: optionales Präfix `DD.MM(.YYYY) HH:MM:` (ohne Jahr = aktuelles, ohne Datum = heute), nur `HH:MM:`, `jetzt:` oder gar kein Präfix (= aktuelle Zeit); danach Einträge `Substanz Menge (Notiz)`, getrennt durch Kommas und/oder „ und " (Dezimal-Kommas wie `0,5 ml` und Klammer-Inhalte trennen nicht). **Menge und Substanz dürfen in beider Reihenfolge stehen** — „Pregabalin 100 mg" ebenso wie „100mg Pregabalin" / „200 mg Lorazepam": ein bereits BEKANNTER Substanzname (alle Namen, aktiv + archiviert, werden der Route an `parseFreeText` übergeben) dient als Trennung zwischen Menge und Notiz (Menge davor/danach, freie Notiz dahinter ohne Klammern, z. B. „150mg Pregabalin morgens"); ist der Name unbekannt, gilt eine führende Menge MIT Einheit als Menge und der Rest als neuer Name, sonst Substanz-zuerst (Menge ab dem ersten Zahl-Token, bei Folgen wie „Omega 3 500 mg" beim letzten der Zahlen-Folge — eine führende einheitenlose Zahl wie „300 Baldrian" gilt als Menge). **Menge und/oder Notiz dürfen weggelassen werden — dann greifen die DEFAULTS.md-Werte** (Menge: Text > Standarddosis > DEFAULTS; Notiz: Klammer > DEFAULTS-Notiz). Autovivifikation wie bei `POST /`. **`Mit:`-Begleitsubstanzen aus DEFAULTS.md werden — wie bei `POST /` — pro Eintrag automatisch als eigene Einnahme zum selben Zeitpunkt miterfasst** (z. B. Theanin → Lemon Balm), eine Ebene tief, Selbstbezug übersprungen, `source_event_id = companion:<haupt-id>`; `companions: false` im JSON-Body schaltet das ab. Jede Zeile wird einzeln verarbeitet und ist atomar — ein fehlerhafter Eintrag macht die ganze Zeile zum `lineErrors`-Element, die übrigen Zeilen werden trotzdem angelegt (alle Inserts einer Anfrage in einer Transaktion, `source_event_id = text:<Zeitstempel>` als Batch-Marker für die Haupteinträge). **Nach dem Schreiben liest der Endpunkt die Einträge (inkl. Begleitsubstanzen) frisch aus der DB** und meldet, welche wirklich angekommen sind. Antwort (201): `{ batchId, lineCount, requested, created, verified, entries: { line, createdSubstance, verified, intake, companions: { createdSubstance, verified, intake }[] }[], lineErrors: { line, text, error }[] }` — `requested` zählt die Haupteinträge, `created` alle verifizierten Einträge (Haupt + Begleit), `verified` ist genau dann true, wenn jeder geplante Insert in der DB gefunden wurde. 400, wenn gar kein Eintrag parsebar war; `dryRun: true` liefert nur das Parse-Ergebnis (mit Begleit-Vorschau `entries[].companions[]`) ohne zu schreiben. **Zugriffsschutz:** Cloudflare Access (siehe Env-Tabelle) — ohne Konfiguration antwortet der Endpunkt 503 (fail-closed), `CF_ACCESS_DISABLED=true` ist der Dev-Bypass.
 
 **Kurzreferenz `/api/intakes/text` für externe Clients:** Lokal/Smoke-Test mit
 `CF_ACCESS_DISABLED=true`; produktiv über die Cloudflare-Access-geschützte URL
@@ -285,6 +285,89 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **Freitext-Parser robuster: Datum/Zeit-Formen, „Uhr"-Suffix, Menge/Notiz-Trennung**:
+  - **Ziel:** `POST /api/intakes/text` soll Datum, Zeit, Substanzname, Menge
+    (vor ODER nach dem Namen) und Notiz zuverlässig erkennen. „200 mg Pregabalin"
+    lieferte vorher teils nur einen Fehler; viele Zeit-/Notiz-Formen fehlten.
+  - **Zeit-Präfix (`parsePrefix` in `server/src/lib/text_entries.ts`)** erkennt
+    jetzt zusätzlich: **`Uhr`-Suffix** (`20 Uhr`, `8 Uhr`, `8:30 Uhr`,
+    `8.30 Uhr` — gepunktete Zahl vor `Uhr` = Zeit, nicht Datum), **nur-Stunde**
+    (`20 Uhr` → 20:00), optionales **`um`** (`um 20 Uhr`), **relative Tage**
+    (`heute`/`gestern`/`vorgestern`/`morgen`/`übermorgen`, allein oder mit Zeit).
+    Ein bekräftigendes **Tageszeit-Wort hinter der Zeit** (`21 Uhr nachts:`,
+    `8:30 morgens:`) wird als Präfix-Residuum verworfen statt zur Notiz zu werden.
+  - **Menge-Erkennung**: Mess-Einheiten und **Darreichungs-/Zähl-Wörter**
+    (`Tablette(n)`, `Tropfen`, `Hub`, `Sprühstöße`, `TL`, `Kapsel`, …) zählen
+    nach einer Zahl als Menge; **Unicode-Brüche an Einheit geklebt** (`½mg`,
+    `¼g`), **Bereiche** (`1-2 Tabletten`) und bloße führende Zahlen
+    (`300 Baldrian`) werden erkannt. Eine Dosis hinter einem **Beschreiber**
+    (`Lithium retard 450 mg`, `Pregabalin morgens 150 mg`,
+    `Magnesium Citrat 300mg`) wird korrekt als Menge herausgezogen, der
+    Beschreiber wird Notiz (statt die Menge zu verschlucken).
+  - **Notiz**: Klammer-Notiz UND Frei-Notiz (vor/hinter dem Namen) werden beide
+    bewahrt (`Lorazepam 1mg bei Panik (sublingual)` → Notiz
+    „bei Panik sublingual"). Abschließende adverbiale Notiz-Wörter (`morgens`,
+    `abends`, `nüchtern`, …) werden auch bei noch **unbekannten** Substanzen ohne
+    Anker vom Namen abgetrennt (`peelTrailingNoteWords`).
+  - **Mehrere Einträge**: `splitEntries` bekommt `knownKeys` — „ und " trennt nur
+    echte Einträge (führende Menge ODER bekannter Name ODER Menge-irgendwo, fängt
+    auch unbekannte „Menge-danach"-Einträge wie „Hustensaft 10 ml" ein); steht
+    „und" in einer Frei-Notiz (`Lithium 600 mg morgens und abends`), bleibt es
+    EIN Eintrag. Separator-Artefakte (führendes/abschließendes/doppeltes „und")
+    und reine Satzzeichen-Segmente (`.`/`...`/`300mg und`) werden bereinigt bzw.
+    als Fehler gemeldet, statt Geistersubstanzen anzulegen.
+  - **Verifikation**: Server-/Web-TS + Server-Build je exit 0; ein
+    adversarialer Multi-Agent-Audit (8 Linsen) bestätigte 25 Fehlparsings —
+    **alle behoben** und gegen-verifiziert. E2E gegen `/tmp`-Scratch-DB
+    (CF-Bypass): dryRun + echter Write mit DB-Verifikation (`verified:true`),
+    u. a. „200 mg Pregabalin" → Pregabalin/200 mg, „Uhr"-Formen,
+    „Lithium retard 450 mg", „½ Tablette", „Pregabalin morgens 150 mg" (unbekannt)
+    → Name/Menge/Notiz korrekt; „300mg"-only → isolierter Zeilenfehler;
+    Live-`./data` unberührt. Antwort-Schema/`dryRun`/Begleitsubstanzen
+    unverändert; der Parser bleibt DB-frei (`knownKeys` von der Route übergeben).
+
+- **Freitext-Import: Menge VOR dem Substanznamen + bekannter Name als Trennung**:
+  - **Problem:** `POST /api/intakes/text` las nur das Format `Substanz Menge`.
+    Bei „Menge zuerst" landete die Menge fälschlich im Namen
+    („100mg Pregabalin" → Substanz „100mg Pregabalin") und „200 mg Lorazepam"
+    scheiterte ganz (führende reine Zahl → Fehler „Substanzname fehlt").
+  - **Fix im Parser `server/src/lib/text_entries.ts`** (`parseSingleEntry`,
+    jetzt mit `knownKeys`-Parameter):
+    1. **Bekannter Substanzname als Anker** (Wunsch des Nutzers): kommt im
+       Eintrag ein bereits bekannter Substanzname vor (`knownKeys`, via
+       `nameKey` normalisiert, längste passende Token-Folge), trennt er Menge
+       von Notiz — Menge davor („100mg Pregabalin") ODER danach
+       („Pregabalin 100mg"), freie Notiz dahinter ohne Klammern
+       („Pregabalin nüchtern", „150mg Pregabalin morgens"). Mengen-geführte
+       Spannen („100mg Pregabalin") werden beim Matching übersprungen, sodass
+       eine evtl. vorhandene Altlast-Substanz „100mg Pregabalin" NICHT gewinnt.
+    2. **Menge-zuerst (Fallback ohne bekannten Namen):** beginnt der Eintrag mit
+       einer Mengenangabe MIT Einheit („100mg …", „200 mg …", „0,5 ml …"), gilt
+       sie als Menge, der Rest als (neuer) Substanzname. Die Einheit ist
+       Voraussetzung — so bleibt „5 HTP 100mg" → Substanz „5 HTP" + Menge
+       „100 mg" (Zahl gehört zum Namen).
+    3. **Substanz-zuerst (Standard, unverändert):** „Elvanse 30mg",
+       „Omega 3 500 mg"; eine führende einheitenlose Zahl („300 Baldrian") gilt
+       als Menge.
+    - Reine Mengen ohne Name („300mg", „200 mg", „0,5") bleiben ein Zeilenfehler
+      (zentraler `finalize`-Guard via `isQuantityRun`).
+  - **`nameKey` nach `server/src/lib/names.ts` extrahiert** (dependency-frei):
+    `substances.ts` re-exportiert es (Bestandscode unverändert), `db.ts` nutzt
+    es statt seiner lokalen Kopie, und der Parser bleibt DB-frei. Die Route
+    `POST /api/intakes/text` baut die Menge der bekannten Namen (aktiv +
+    archiviert) und übergibt sie an `parseFreeText(text, undefined, knownKeys)`.
+    Antwort-Schema/`dryRun`/Begleitsubstanzen unverändert.
+  - **Nebenbei (außerhalb des Auftrags):** `server/src/config.ts` nutzte
+    `__dirname` in `dotenv.config(...)` VOR dessen Deklaration (kaputter
+    uncommitteter Stand → TS-Fehler + Laufzeit-`ReferenceError`, blockierte den
+    gesamten Server-Build). Aufrufreihenfolge minimal korrigiert (Deklaration
+    zuerst), Intention (`.env` aus dem Repo-Root laden) unverändert.
+  - Verifiziert: Server-TS + Server-Build je exit 0; E2E gegen `/tmp`-Scratch-DB
+    (CF-Bypass): Nutzer-Beispiele „100mg/200mg Pregabalin", „200 mg Lorazepam"
+    → korrekt getrennt, 3/3 verifiziert, Mengen normalisiert; bekannter Name in
+    beiden Reihenfolgen + Notiz-dahinter; Altlast „100mg Pregabalin"-Substanz
+    wird ignoriert; „5 HTP 100mg"/„300 Baldrian"/„Omega 3 500 mg"/„0,5 ml CBD-Öl";
+    Begleitsubstanz Theanin → Lemon Balm weiter ok; „300mg"/„200 mg"/„0,5" → Fehler.
 - **Dokumentation: Mehrzeiltextinput-API erklärt**:
   - Keine Code-/Schemaänderung. Die bestehende Route `POST /api/intakes/text`
     wurde gegen Implementierung und `SAMPLES.md` geprüft und in dieser Datei

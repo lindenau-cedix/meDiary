@@ -3,14 +3,10 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { config } from './config.js';
 import { dateOf, nowLocalISO } from './lib/time.js';
+import { nameKey } from './lib/names.js';
 
 // Datenverzeichnis sicherstellen
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
-
-/** Normalisiert einen Substanznamen für den Vergleich (wie lib/substances.ts → nameKey). */
-function nameKey(name: string): string {
-  return name.trim().toLocaleLowerCase('de');
-}
 
 export const db = new Database(config.dbPath);
 db.pragma('journal_mode = WAL');

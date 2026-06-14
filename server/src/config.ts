@@ -3,10 +3,10 @@ import path from 'node:path';
 import os from 'node:os';
 import dotenv from 'dotenv';
 
-dotenv.config();
-
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
 /** server/ root directory (one level up from src/) */
 export const SERVER_ROOT = path.resolve(__dirname, '..');

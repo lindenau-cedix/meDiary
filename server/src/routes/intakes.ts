@@ -403,7 +403,13 @@ intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
   const { text, dryRun } = parsedBody.data;
   const withCompanions = parsedBody.data.companions !== false; // Default: an
 
-  const parsed = parseFreeText(text);
+  // Bekannte Substanznamen (aktiv + archiviert) als Trennung zwischen Menge und
+  // Notiz — so wird z. B. "100mg Pregabalin" als Menge "100 mg" + Substanz
+  // "Pregabalin" gelesen, nicht als ein einziger Name.
+  const knownKeys = new Set(
+    (db.prepare(`SELECT name FROM substances`).all() as { name: string }[]).map((s) => nameKey(s.name)),
+  );
+  const parsed = parseFreeText(text, undefined, knownKeys);
 
   if (dryRun) {
     return res.json({

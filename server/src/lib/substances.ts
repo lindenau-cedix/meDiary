@@ -1,5 +1,9 @@
 import { db, type SubstanceRow } from '../db.js';
 import { nowLocalISO } from './time.js';
+import { nameKey } from './names.js';
+
+// Re-Export für Bestandscode (`import { nameKey } from '.../substances.js'`).
+export { nameKey };
 
 /**
  * Substanz-Verwaltung jenseits der reinen CRUD-Route: sorgt dafür, dass jede
@@ -19,16 +23,6 @@ const SWATCHES = [
   '#5B8DB8', '#8E6BB0', '#D98E48', '#7EA46B', '#C9A14A',
   '#9C5C8A', '#5FA8A0', '#B5727A', '#6E8C6A', '#C2705A',
 ];
-
-/**
- * Case-insensitive Key für Substanz-Namen. SQLite's eingebautes `lower()`
- * ist ASCII-only und lässt z. B. "Ö" unverändert – für deutsche Namen wie
- * "CBD-Öl" wäre "CBD-Öl" != "cbd-öl" ein falsches Match. Daher normalisieren
- * wir in JS per `toLocaleLowerCase('de')`.
- */
-export function nameKey(name: string): string {
-  return name.trim().toLocaleLowerCase('de');
-}
 
 /** Deterministische, gut gestreute Farbe anhand der bisherigen Anzahl. */
 function nextColor(): string {
