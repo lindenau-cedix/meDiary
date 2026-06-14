@@ -305,7 +305,6 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Änderungen (jüngste zuerst)
 
-<<<<<<< HEAD
 - **Freitext-Parser robuster: Datum/Zeit-Formen, „Uhr"-Suffix, Menge/Notiz-Trennung**:
   - **Ziel:** `POST /api/intakes/text` soll Datum, Zeit, Substanzname, Menge
     (vor ODER nach dem Namen) und Notiz zuverlässig erkennen. „200 mg Pregabalin"
@@ -389,7 +388,7 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
     beiden Reihenfolgen + Notiz-dahinter; Altlast „100mg Pregabalin"-Substanz
     wird ignoriert; „5 HTP 100mg"/„300 Baldrian"/„Omega 3 500 mg"/„0,5 ml CBD-Öl";
     Begleitsubstanz Theanin → Lemon Balm weiter ok; „300mg"/„200 mg"/„0,5" → Fehler.
-=======
+
 - **Tagesgrenze 03:30 Europe/Berlin im Frontend + Datum bleibt nach Submit**:
   - **Server `consumptionDay()` als Wahrheit für `intake.date`** —
     `serializeIntake` (`server/src/lib/serialize.ts`) berechnet `date`
@@ -436,7 +435,6 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
     `takenAt=01:00` setzt `date` ebenfalls auf Vortag. Live-`./data`
     unberührt.
 
->>>>>>> 06ee54f83ca0cdee99946f88a8ef6e5e49ea009c
 - **Dokumentation: Mehrzeiltextinput-API erklärt**:
   - Keine Code-/Schemaänderung. Die bestehende Route `POST /api/intakes/text`
     wurde gegen Implementierung und `SAMPLES.md` geprüft und in dieser Datei
@@ -837,6 +835,33 @@ Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
   daemon-reload && systemctl --user restart mediary`.
 
 ## Letzte Änderungen (chronologisch, für nahtloses Weiterarbeiten)
+
+- **2026-06-14 — Merge-Konflikt aufgelöst** (Task `0a55cd9d`):
+  - **Bug:** `b409d7a` (Merge `cd/task/2c318cb9` + `cd/task/448cd00a`) wurde
+    mit ungelösten Konflikt-Markern committet:
+    - `server/src/config.ts`: `<<<<<<< HEAD`/`=======`/`>>>>>>> 06ee54f…`
+      zwischen altem `dotenv.config({ path: '../../.env' })` + `SERVER_ROOT =
+      __dirname/..` und der neuen `findServerRoot()`-Variante. Folge:
+      `tsc` brach mit **TS1185 „Merge conflict marker encountered"** ab,
+      Server-Build komplett blockiert.
+    - `AGENTS.md`: gleiches Muster in der Sektion „Letzte Änderungen
+      (jüngste zuerst)" — HEAD-Block (Freitext-Parser-Verbesserungen aus
+      PR #1-Nachfolger) gegen `06ee54f`-Block (Tagesgrenze 03:30 /
+      Composer-Reset aus PR #2).
+  - **Resolution `config.ts`:** `06ee54f`-Seite übernommen (mit
+    `dotenv.config()` ohne expliziten Pfad, `findServerRoot()`,
+    `resolveFromRoot` löst gegen `process.cwd()`). Diese Variante ist
+    konsistent mit dem Code unterhalb des Konfliktbereichs und entspricht
+    der auf dem laufenden Service deployeten Version (siehe Eintrag
+    „Cannot GET /"-Fix).
+  - **Resolution `AGENTS.md`:** beide Blöcke zusammengeführt — HEAD-Block
+    zuerst (jüngste Commits aus PR #1-Nachfolger), dann `06ee54f`-Block
+    (PR #2), dann nahtlos weiter mit „Dokumentation: Mehrzeiltextinput-API
+    erklärt" usw.
+  - **Verifiziert:** `npx tsc --noEmit` gegen `server/src/config.ts`
+    (mit `@types/node` + `dotenv` in `/tmp`-Sandbox) → exit 0, keine
+    TS1185-Marker mehr. Repo-intern keine `node_modules` (Worktree-Stand),
+    voller Build nur nach `npm run install:all` möglich.
 
 - **2026-06-14 — „Cannot GET /"-Fix** (Task `2c318cb9`):
   - **Bug:** Nach Commit `18833b2` (`.env`-basierte `WEB_DIST`-Konfiguration)

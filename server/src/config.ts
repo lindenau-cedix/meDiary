@@ -7,12 +7,8 @@ import dotenv from 'dotenv';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-<<<<<<< HEAD
-dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config();
 
-/** server/ root directory (one level up from src/) */
-export const SERVER_ROOT = path.resolve(__dirname, '..');
-=======
 /**
  * "Effective root" — das Verzeichnis, gegen das relative Pfade aufgelöst
  * werden (DB_PATH, DEFAULTS_PATH, WEB_DIST).
@@ -44,7 +40,6 @@ function findServerRoot(): string {
 
 /** server/ root directory (Dev: server/, Build: <install>/) */
 export const SERVER_ROOT = findServerRoot();
->>>>>>> 06ee54f83ca0cdee99946f88a8ef6e5e49ea009c
 
 /** Default data directory: ~/.local/share/mediary */
 export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'mediary');
