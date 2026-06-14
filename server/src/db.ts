@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { config } from './config.js';
-import { dateOf, nowLocalISO } from './lib/time.js';
+import { dateOf, nowLocalISO, toLocalISO } from './lib/time.js';
 import { nameKey } from './lib/names.js';
 
 // Datenverzeichnis sicherstellen
@@ -202,9 +202,17 @@ export function allNightMedsTaken(day: string): string | null {
   const planned = nightMedicationsFromPlan(day);
   if (planned.length === 0) return null;
 
-  // Einnahmen an diesem Konsumtag (mit Tagesgrenzen-Berücksichtigung)
-  const start = `${day}T00:00:00`;
-  const end = `${day}T23:59:59`;
+  // Einnahmen an diesem Konsumtag (mit Tagesgrenzen-Berücksichtigung):
+  // zum Konsumtag `day` zählen alle Einnahmen im Wand­uhr-Bereich
+  // dayT03:30:00 (inklusive)  bis  (day+1)T03:29:59 (inklusive) —
+  // d. h. `consumptionDay(takenAt) === day` für alle `takenAt` in
+  // diesem Intervall. Beispiel: Konsumtag 2026-06-15 → Einnahmen
+  // 2026-06-15T03:30 bis 2026-06-16T03:29:59 (lokale Wand­uhrzeit).
+  const next = new Date(`${day}T12:00:00`);
+  next.setDate(next.getDate() + 1);
+  const nextStr = toLocalISO(next).slice(0, 10);
+  const start = `${day}T03:30:00`;
+  const end = `${nextStr}T03:29:59`;
   const taken = db
     .prepare(
       `SELECT substance_id, substance_name FROM intakes
