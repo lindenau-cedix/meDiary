@@ -17,6 +17,7 @@ import type {
   DiaryNotesResponse,
   DiaryState,
   DiaryGenerateResult,
+  Habit,
 } from './types';
 
 const API_BASE_KEY = 'mediary.apiBase';
@@ -215,5 +216,20 @@ export const api = {
       request<DiaryGenerateResult>('/api/diary/generate', { method: 'POST', body: JSON.stringify(body) }),
     save: (content: string) =>
       request<DiaryState>('/api/diary', { method: 'PUT', body: JSON.stringify({ content }) }),
+  },
+
+  /**
+   * Habit-Daten (z. B. PC-Nutzungszeiten, gemeldet per POST /api/habit/uptime).
+   * `uptime()` ist der primäre Endpunkt für den lokalen Client-Cron; die
+   * Read-Methoden helfen beim Smoke-Test und sind hier nur der Vollständigkeit
+   * halber exponiert.
+   */
+  habit: {
+    uptime: (body: { last_user_interaction_unix: number; first_user_interaction_24h_unix: number }) =>
+      request<Habit>('/api/habit/uptime', { method: 'POST', body: JSON.stringify(body) }),
+    list: (params?: { from?: string; to?: string }) =>
+      request<Habit[]>(`/api/habit${qs(params)}`),
+    get: (date: string) => request<Habit>(`/api/habit/${date}`),
+    remove: (date: string) => request<void>(`/api/habit/${date}`, { method: 'DELETE' }),
   },
 };

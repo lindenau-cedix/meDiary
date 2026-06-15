@@ -184,10 +184,14 @@ berührt die Daten nicht.
 | `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
 | `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht |
-| `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Liste der Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild) |
+| `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Liste der Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild + PC-Habit) |
 | `GET` | `/api/diary` | Zustand des KI-Voll-Tagebuchs (`raw`, `entries[]`, `generatedDays`/`pendingDays`, `available`) |
 | `POST` | `/api/diary/generate` | KI-Volltext generieren (`{ scope?: 'missing'\|'all', from?, to?, max? }`); 503 ohne `ANTHROPIC_API_KEY` |
 | `PUT` | `/api/diary` | Tagebuch-Datei manuell überschreiben (`{ content }`) |
+| `POST` | `/api/habit/uptime` | Tägliche PC-Nutzungszeiten melden (`{ last_user_interaction_unix, first_user_interaction_24h_unix }`); gespeichert pro Konsum-Tag, fließt in `gatherDiaryDays()` (Kurz + KI-Prompt) ein |
+| `GET` | `/api/habit?from=&to=` | Liste der Habit-Tage (Range) |
+| `GET` | `/api/habit/:date` | Einzelner Habit-Tag (immer 200, `exists: false`, wenn leer) |
+| `DELETE` | `/api/habit/:date` | Habit-Datensatz löschen (204 / 404) |
 
 `POST /api/intakes` liefert `{ intake, nightMed, assessmentDate, assessmentExists, createdSubstance, companions }` — `createdSubstance: true` heißt, der Name war neu und wurde als QuickPick angelegt; `companions` (`{ intake, createdSubstance }[]`) sind die automatisch miterfassten Begleit-Einnahmen aus `Mit:`-Defaults (leer, wenn keine).
 
@@ -329,6 +333,75 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 ```
 
 ## Letzte Änderungen (jüngste zuerst)
+
+- **2026-06-15 — Habit-/PC-Uptime-Endpoint & Tagebuch-Integration**:
+  - **Ziel:** Tägliche PC-Nutzungszeiten vom lokalen Client (Cron um 03:30
+    Europe/Berlin) per HTTP annehmen und in das Tagebuch (sowohl Kurz- als
+    auch Voll-/KI-Version) integrieren.
+  - **Neue Tabelle `daily_habits`** in `server/src/db.ts` (idempotent via
+    `CREATE TABLE IF NOT EXISTS`):
+    - `date TEXT PRIMARY KEY` (Konsum-Tag, gleiche 03:30-Grenze wie
+      Einnahmen/Tagesbild)
+    - `pc_first_interaction_unix REAL` (nullable)
+    - `pc_last_interaction_unix REAL` (nullable)
+    - `created_at`, `updated_at` (lokale ISO)
+  - **Neuer Router `routes/habit.ts`** (in `index.ts` unter `/api/habit`
+    gemountet):
+    - `POST /api/habit/uptime` — Body
+      `{"last_user_interaction_unix": <float>, "first_user_interaction_24h_unix": <float>}`.
+      Tageszuordnung = Konsum-Tag des `last`-Timestamps (semantisch
+      "Tag, der gerade endet"). Bei einem echten 24h-Fenster um 03:30
+      kann `first` rechnerisch in einem anderen Konsum-Tag liegen (Fenster
+      überspannt die Tagesgrenze) — das ist **kein Fehler**, die Response
+      enthält `crossedBoundary: true` zur Diagnose. Plausi-Checks:
+      `last` ≤ `now+10min` (Scheduler-Skew), `first` ≥ `now-25h-10min`
+      (echtes 24h-Fenster + Slack), `first ≤ last`. Antwort enthält
+      zusätzlich `firstLocal`/`lastLocal` (lokal aufgelöste ISO-Zeiten)
+      und `firstDay`/`lastDay` (Konsum-Tage) fürs Debugging.
+    - `GET /api/habit?from=&to=` — Liste (YYYY-MM-DD-Range).
+    - `GET /api/habit/:date` — Einzel-Tag; `exists: false`, wenn leer.
+    - `DELETE /api/habit/:date` — 204 / 404.
+  - **Server-Helfer `time.ts`** ergänzt: `unixToLocalISO`, `nowUnix`,
+    `consumptionDayFromUnix` (Unix-Sek. → lokale ISO / Konsum-Tag).
+  - **Tagebuch-Lib (`server/src/lib/diary.ts`)**:
+    - `gatherDiaryDays()` liest `daily_habits` mit auf; ein Tag zählt
+      nun als "noteworthy", wenn er mind. eine Einnahme-Notiz, ein
+      Tagesbild **oder** einen Habit-Datensatz hat.
+    - `DiaryDay` um `habit: { pcFirstInteractionUnix, pcLastInteractionUnix }`
+      erweitert (Server-Side in `DiaryNoteDay` re-exposed).
+    - `buildDayPrompt()` reichert den KI-Prompt um
+      `Gewohnheiten: PC-Nutzung HH:MM–HH:MM (≈ X.X h aktiv).` an, sodass
+      die generierten Volltext-Einträge die PC-Aktivität einbeziehen.
+  - **API-Routen & Frontend:**
+    - `GET /api/diary/notes` liefert jetzt zusätzlich `habit` pro Tag.
+    - `web/src/lib/types.ts`: `DiaryDayHabit` und `Habit` ergänzt.
+    - `web/src/lib/api.ts`: `api.habit.{uptime,list,get,remove}` exponiert
+      (für künftige UI / Smoke-Tests; primärer Konsument ist der externe
+      Client-Cron, nicht das Frontend).
+    - `web/src/screens/DiaryScreen.tsx` (Kurz-Tab): PC-Nutzung als
+      eigener Block mit Monitor-Icon, analog zum Tagesbild-Block.
+      Darstellung `HH:MM – HH:MM · X.X h aktiv` (oder „letzte/erste
+      Aktivität HH:MM", falls nur ein Wert vorhanden).
+  - **Verifiziert:** `npx tsc --noEmit` für `server/` und `web/`
+    (in `/tmp`-Sandbox mit `npm install`) → exit 0. Smoke-Test gegen
+    einen lokalen Server (`DB_PATH=/tmp/...`, `PORT=4321`): POST speichert
+    unter korrektem Konsum-Tag, GET liefert Liste mit korrekt
+    serialisierten Werten, GET `/api/diary/notes` enthält das
+    `habit`-Feld, alle Validation-Tests (`first>last`, `first>25h`,
+    negative, NaN, fehlend) liefern 400 mit klarer Fehlermeldung.
+    `buildDayPrompt()` enthält die neue `Gewohnheiten:`-Zeile mit
+    lokal aufgelösten HH:MM + Stunden-Differenz.
+  - **Offene Punkte / Next Steps:**
+    - Client-Skript (Cron-Job, der `last` und `first` misst und POST
+      schickt) liegt außerhalb dieses Repos.
+    - Kein Auth-Schutz: `POST /api/habit/uptime` ist offen. Falls die
+      API nicht hinter Cloudflare Access / einem VPN läuft, sollte ein
+      Token-Header o. ä. ergänzt werden (siehe `intakes/text` als
+      Vorbild).
+    - Aktuell nur PC-Uptime; Schema ist generisch genug, um später
+      weitere Habit-Felder (z. B. Schlafzeiten, Bildschirmzeit) zu
+      ergänzen — die Spaltennamen sind explizit `pc_…` und eine
+      Erweiterung würde eine Schema-Migration erfordern.
 
 - **Freitext-Parser robuster: Datum/Zeit-Formen, „Uhr"-Suffix, Menge/Notiz-Trennung**:
   - **Ziel:** `POST /api/intakes/text` soll Datum, Zeit, Substanzname, Menge

@@ -17,6 +17,29 @@ export function toLocalISO(d: Date): string {
   );
 }
 
+/**
+ * Unix-Timestamp (Sekunden, float erlaubt) in lokale Wand­uhr-Zeit
+ * "YYYY-MM-DDTHH:mm:ss" umwandeln. Liefert null bei NaN/negativ.
+ */
+export function unixToLocalISO(unix: number): string | null {
+  if (!Number.isFinite(unix) || unix < 0) return null;
+  return toLocalISO(new Date(unix * 1000));
+}
+
+/** Aktuelle lokale Zeit als Unix-Timestamp (Sekunden, float). */
+export function nowUnix(): number {
+  return Date.now() / 1000;
+}
+
+/**
+ * Konsum-Tag für einen Unix-Timestamp — gleiche 03:30-Grenze wie
+ * `consumptionDay()`. null bei ungültigem Input.
+ */
+export function consumptionDayFromUnix(unix: number): string | null {
+  const iso = unixToLocalISO(unix);
+  return iso ? consumptionDay(iso) : null;
+}
+
 /** Tagesdatum "YYYY-MM-DD" aus einem lokalen Datetime-String. */
 export function dateOf(localDateTime: string): string {
   return localDateTime.slice(0, 10);

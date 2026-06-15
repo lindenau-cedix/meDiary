@@ -10,6 +10,7 @@ import {
   X,
   AlertCircle,
   Moon,
+  Monitor,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -66,6 +67,19 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
       ))}
     </div>
   );
+}
+
+/** "HH:MM" aus einem Unix-Sekunden-Timestamp (lokale Zeit). */
+function fmtUnixClock(unix: number): string {
+  const d = new Date(unix * 1000);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** "12.5 h" — kompakte Stundenformatierung, eine Nachkommastelle. */
+function fmtHours(unixDelta: number): string {
+  const h = Math.max(0, unixDelta / 3600);
+  return `${h.toFixed(1)} h`;
 }
 
 // ───────────────────────── Kurzversion: Liste der Notizen ─────────────────────────
@@ -125,6 +139,26 @@ function ShortDiary() {
                 )}
               </div>
             )}
+            {day.habit &&
+              (day.habit.pcFirstInteractionUnix != null || day.habit.pcLastInteractionUnix != null) && (
+                <div className="px-3.5 py-2.5 bg-surface2/40">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-accent flex items-center gap-1 mb-1">
+                    <Monitor size={12} /> PC-Nutzung
+                  </p>
+                  <p className="text-[13px] text-ink-muted leading-snug">
+                    {(() => {
+                      const first = day.habit!.pcFirstInteractionUnix;
+                      const last = day.habit!.pcLastInteractionUnix;
+                      if (first != null && last != null) {
+                        return `${fmtUnixClock(first)} – ${fmtUnixClock(last)} · ${fmtHours(last - first)} aktiv`;
+                      }
+                      if (last != null) return `letzte Aktivität ${fmtUnixClock(last)}`;
+                      if (first != null) return `erste Aktivität ${fmtUnixClock(first)}`;
+                      return null;
+                    })()}
+                  </p>
+                </div>
+              )}
           </Card>
         </section>
       ))}

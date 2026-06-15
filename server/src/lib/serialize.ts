@@ -4,6 +4,7 @@ import type {
   PlanVersionRow,
   PlanItemRow,
   AssessmentRow,
+  HabitRow,
 } from '../db.js';
 import { METRIC_KEYS } from './metrics.js';
 import { consumptionDay } from './time.js';
@@ -83,6 +84,16 @@ export function serializeAssessment(r: AssessmentRow) {
     date: r.date,
     scores: clean,
     note: r.note,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function serializeHabit(r: HabitRow) {
+  return {
+    date: r.date,
+    pcFirstInteractionUnix: r.pc_first_interaction_unix,
+    pcLastInteractionUnix: r.pc_last_interaction_unix,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { db, type IntakeRow, type AssessmentRow } from '../db.js';
+import { db, type IntakeRow, type AssessmentRow, type HabitRow } from '../db.js';
 import { consumptionDay } from './time.js';
 import { METRICS } from './metrics.js';
 import { generateText, anthropicAvailable, anthropicModel } from './anthropic.js';
@@ -33,12 +33,21 @@ export interface DiaryDayAssessment {
   note: string | null;
 }
 
+/** PC-Nutzungszeiten (vom Client per POST /api/habit/uptime gemeldet). */
+export interface DiaryDayHabit {
+  /** Erste User-Interaktion im 24h-Fenster vor dem Tages-Cron (Unix-Sek). */
+  pcFirstInteractionUnix: number | null;
+  /** Letzte User-Interaktion vor dem Tages-Cron (Unix-Sek). */
+  pcLastInteractionUnix: number | null;
+}
+
 export interface DiaryDay {
   date: string;
   weekday: string; // "Donnerstag"
   label: string; // "Donnerstag, 12. Juni 2026"
   intakes: DiaryIntakeEntry[];
   assessment: DiaryDayAssessment | null;
+  habit: DiaryDayHabit | null;
 }
 
 /** Ein generierter Voll-Eintrag aus der .md-Datei. */
@@ -61,10 +70,11 @@ function dayDate(date: string): Date {
 // ───────────────────────── Daten sammeln ─────────────────────────
 
 /**
- * Alle Konsum-Tage mit Inhalt (mindestens eine Einnahme-Notiz, oder ein
- * Tagesbild). Jeder Tag trägt ALLE Einnahmen des Tages (Kontext für die
- * KI-Generierung) — die Kurzversion-Route filtert auf Notiz-tragende.
- * Absteigend sortiert (neuester Tag zuerst). `from`/`to` (YYYY-MM-DD) grenzen ein.
+ * Alle Konsum-Tage mit Inhalt (mindestens eine Einnahme-Notiz, ein
+ * Tagesbild, oder ein PC-Habit-Datensatz). Jeder Tag trägt ALLE Einnahmen
+ * des Tages (Kontext für die KI-Generierung) — die Kurzversion-Route
+ * filtert auf Notiz-tragende. Absteigend sortiert (neuester Tag zuerst).
+ * `from`/`to` (YYYY-MM-DD) grenzen ein.
  */
 export function gatherDiaryDays(opts?: { from?: string; to?: string }): DiaryDay[] {
   const from = opts?.from?.slice(0, 10);
@@ -74,6 +84,7 @@ export function gatherDiaryDays(opts?: { from?: string; to?: string }): DiaryDay
     .prepare(`SELECT * FROM intakes ORDER BY taken_at ASC, id ASC`)
     .all() as IntakeRow[];
   const assessments = db.prepare(`SELECT * FROM daily_assessments`).all() as AssessmentRow[];
+  const habits = db.prepare(`SELECT * FROM daily_habits`).all() as HabitRow[];
 
   const byDate = new Map<string, DiaryDay>();
   const ensure = (date: string): DiaryDay => {
@@ -85,6 +96,7 @@ export function gatherDiaryDays(opts?: { from?: string; to?: string }): DiaryDay
         label: longFmt.format(dayDate(date)),
         intakes: [],
         assessment: null,
+        habit: null,
       };
       byDate.set(date, d);
     }
@@ -117,9 +129,20 @@ export function gatherDiaryDays(opts?: { from?: string; to?: string }): DiaryDay
     ensure(a.date).assessment = { scores: clean, note };
   }
 
+  for (const h of habits) {
+    // Nur Tage, an denen überhaupt ein PC-Wert gespeichert wurde, in den
+    // Tag-Pool aufnehmen — auch wenn es der einzige Inhalt des Tages ist.
+    ensure(h.date).habit = {
+      pcFirstInteractionUnix: h.pc_first_interaction_unix,
+      pcLastInteractionUnix: h.pc_last_interaction_unix,
+    };
+  }
+
   let days = [...byDate.values()];
-  // „Inhalt" = mind. eine Einnahme-Notiz ODER ein Tagesbild (Werte/Notiz).
-  days = days.filter((d) => d.intakes.some((i) => i.note) || d.assessment !== null);
+  // „Inhalt" = mind. eine Einnahme-Notiz, ein Tagesbild, ODER ein PC-Habit-Eintrag.
+  days = days.filter(
+    (d) => d.intakes.some((i) => i.note) || d.assessment !== null || d.habit !== null,
+  );
   if (from) days = days.filter((d) => d.date >= from);
   if (to) days = days.filter((d) => d.date <= to);
   days.sort((a, b) => (a.date < b.date ? 1 : -1));
@@ -249,6 +272,28 @@ function buildDayPrompt(day: DiaryDay): string {
     }
     if (day.assessment.note) {
       lines.push(`Tagesnotiz: ${day.assessment.note}`);
+      lines.push('');
+    }
+  }
+  if (day.habit) {
+    const first = day.habit.pcFirstInteractionUnix;
+    const last = day.habit.pcLastInteractionUnix;
+    if (first != null || last != null) {
+      const fmt = (u: number) => {
+        const d = new Date(u * 1000);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        return `${pad(d.getHours())}:${pad(d.getMinutes())} Uhr`;
+      };
+      const parts: string[] = [];
+      if (first != null && last != null) {
+        const hours = Math.max(0, (last - first) / 3600);
+        parts.push(`PC-Nutzung ${fmt(first)}–${fmt(last)} (≈ ${hours.toFixed(1)} h aktiv)`);
+      } else if (last != null) {
+        parts.push(`Letzte PC-Aktivität: ${fmt(last)}`);
+      } else if (first != null) {
+        parts.push(`Erste PC-Aktivität: ${fmt(first)}`);
+      }
+      lines.push(`Gewohnheiten: ${parts.join('; ')}.`);
       lines.push('');
     }
   }

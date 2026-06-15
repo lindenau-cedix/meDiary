@@ -68,6 +68,14 @@ CREATE TABLE IF NOT EXISTS daily_assessments (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS daily_habits (
+  date                     TEXT PRIMARY KEY,
+  pc_first_interaction_unix REAL,
+  pc_last_interaction_unix  REAL,
+  created_at               TEXT NOT NULL,
+  updated_at               TEXT NOT NULL
+);
 `);
 
 // Migration: Spalte für Import-Idempotenz (verknüpft Zeilen mit import event_id)
@@ -140,6 +148,14 @@ export interface AssessmentRow {
   date: string;
   scores: string;
   note: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HabitRow {
+  date: string;
+  pc_first_interaction_unix: number | null;
+  pc_last_interaction_unix: number | null;
   created_at: string;
   updated_at: string;
 }

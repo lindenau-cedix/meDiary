@@ -12,6 +12,7 @@ import { assessmentsRouter } from './routes/assessments.js';
 import { defaultsRouter } from './routes/defaults.js';
 import { diaryRouter } from './routes/diary.js';
 import { metaRouter } from './routes/meta.js';
+import { habitRouter } from './routes/habit.js';
 
 // Sicherstellen, dass jede jemals eingetragene Substanz eine QuickPick-Kachel
 // bekommt (z. B. nach Importen). Idempotent, blockiert den Start praktisch nicht.
@@ -37,6 +38,7 @@ app.use('/api/plan', planRouter);
 app.use('/api/assessments', assessmentsRouter);
 app.use('/api/defaults', defaultsRouter);
 app.use('/api/diary', diaryRouter);
+app.use('/api/habit', habitRouter);
 
 // Optional: gebautes Frontend ausliefern (für Single-Deployment)
 if (config.webDist && fs.existsSync(config.webDist)) {
