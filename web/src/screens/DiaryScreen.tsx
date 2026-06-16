@@ -10,7 +10,7 @@ import {
   X,
   AlertCircle,
   Moon,
-  Monitor,
+  Sun,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -140,20 +140,20 @@ function ShortDiary() {
               </div>
             )}
             {day.habit &&
-              (day.habit.pcFirstInteractionUnix != null || day.habit.pcLastInteractionUnix != null) && (
+              (day.habit.wakeFirstUnix != null || day.habit.wakeLastUnix != null) && (
                 <div className="px-3.5 py-2.5 bg-surface2/40">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-accent flex items-center gap-1 mb-1">
-                    <Monitor size={12} /> PC-Nutzung
+                    <Sun size={12} /> Wachzeit
                   </p>
                   <p className="text-[13px] text-ink-muted leading-snug">
                     {(() => {
-                      const first = day.habit!.pcFirstInteractionUnix;
-                      const last = day.habit!.pcLastInteractionUnix;
+                      const first = day.habit!.wakeFirstUnix;
+                      const last = day.habit!.wakeLastUnix;
                       if (first != null && last != null) {
-                        return `${fmtUnixClock(first)} – ${fmtUnixClock(last)} · ${fmtHours(last - first)} aktiv`;
+                        return `${fmtUnixClock(first)} – ${fmtUnixClock(last)} · ${fmtHours(last - first)} wach`;
                       }
-                      if (last != null) return `letzte Aktivität ${fmtUnixClock(last)}`;
-                      if (first != null) return `erste Aktivität ${fmtUnixClock(first)}`;
+                      if (last != null) return `zuletzt wach ${fmtUnixClock(last)}`;
+                      if (first != null) return `zuerst wach ${fmtUnixClock(first)}`;
                       return null;
                     })()}
                   </p>

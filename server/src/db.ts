@@ -70,13 +70,46 @@ CREATE TABLE IF NOT EXISTS daily_assessments (
 );
 
 CREATE TABLE IF NOT EXISTS daily_habits (
-  date                     TEXT PRIMARY KEY,
-  pc_first_interaction_unix REAL,
-  pc_last_interaction_unix  REAL,
-  created_at               TEXT NOT NULL,
-  updated_at               TEXT NOT NULL
+  date           TEXT PRIMARY KEY,
+  wake_first_unix REAL,
+  wake_last_unix  REAL,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
 );
 `);
+
+// Migration: Schemaumbenennung der Habit-Spalten von "PC-Nutzung" auf
+// "Wachzeit". SQLite kennt `RENAME COLUMN` seit 3.25.0; wir versuchen es
+// idempotent, mit Fallback für ältere Versionen. Betroffen:
+//   pc_first_interaction_unix → wake_first_unix
+//   pc_last_interaction_unix  → wake_last_unix
+const habitCols = db.prepare(`PRAGMA table_info(daily_habits)`).all() as { name: string }[];
+const habitColNames = new Set(habitCols.map((c) => c.name));
+const renameHabitCol = (from: string, to: string) => {
+  if (!habitColNames.has(from) || habitColNames.has(to)) return;
+  try {
+    db.exec(`ALTER TABLE daily_habits RENAME COLUMN ${from} TO ${to}`);
+  } catch {
+    // Sehr alte SQLite-Version (< 3.25) ohne RENAME COLUMN: neue Tabelle
+    // anlegen, Daten kopieren, alte löschen, umbenennen. Idempotent.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS daily_habits__new (
+        date           TEXT PRIMARY KEY,
+        wake_first_unix REAL,
+        wake_last_unix  REAL,
+        created_at     TEXT NOT NULL,
+        updated_at     TEXT NOT NULL
+      );
+      INSERT INTO daily_habits__new (date, wake_first_unix, wake_last_unix, created_at, updated_at)
+        SELECT date, ${from} AS wake_first_unix, NULL AS wake_last_unix, created_at, updated_at
+        FROM daily_habits;
+      DROP TABLE daily_habits;
+      ALTER TABLE daily_habits__new RENAME TO daily_habits;
+    `);
+  }
+};
+renameHabitCol('pc_first_interaction_unix', 'wake_first_unix');
+renameHabitCol('pc_last_interaction_unix', 'wake_last_unix');
 
 // Migration: Spalte für Import-Idempotenz (verknüpft Zeilen mit import event_id)
 function ensureColumn(table: string, column: string, type: string): void {
@@ -154,8 +187,11 @@ export interface AssessmentRow {
 
 export interface HabitRow {
   date: string;
-  pc_first_interaction_unix: number | null;
-  pc_last_interaction_unix: number | null;
+  /** Erster Wachzeit-Punkt des Tages (Unix-Sek): Aufwachen, früheste Einnahme des Tages
+   *  oder `first_user_interaction_24h_unix` aus dem Webhook — siehe `routes/habit.ts`. */
+  wake_first_unix: number | null;
+  /** Letzter Wachzeit-Punkt des Tages (Unix-Sek): letzte Einnahme oder `last_user_interaction_unix`. */
+  wake_last_unix: number | null;
   created_at: string;
   updated_at: string;
 }

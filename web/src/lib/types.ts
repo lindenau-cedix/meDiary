@@ -212,21 +212,22 @@ export interface DiaryDayAssessment {
   note: string | null;
 }
 
-/** PC-Nutzungszeiten (vom Client per POST /api/habit/uptime gemeldet). */
+/** Tägliche Wachzeit (vom Client per POST /api/habit/uptime gemeldet).
+ *  Siehe `server/src/routes/habit.ts` für den Algorithmus. */
 export interface DiaryDayHabit {
-  /** Erste User-Interaktion im 24h-Fenster vor dem Tages-Cron (Unix-Sek). */
-  pcFirstInteractionUnix: number | null;
-  /** Letzte User-Interaktion vor dem Tages-Cron (Unix-Sek). */
-  pcLastInteractionUnix: number | null;
+  /** Erster Wach-Moment des Tages (Unix-Sek). */
+  wakeFirstUnix: number | null;
+  /** Letzter Wach-Moment des Tages (Unix-Sek). */
+  wakeLastUnix: number | null;
 }
 
-// ───────────────────────── Habit (PC-Uptime & Co.) ─────────────────────────
+// ───────────────────────── Habit (Wachzeit & Co.) ─────────────────────────
 
-/** Tages-Habit-Eintrag (z. B. PC-Nutzungszeiten, gemeldet per /api/habit/uptime). */
+/** Tages-Habit-Eintrag (z. B. Wachzeit, gemeldet per /api/habit/uptime). */
 export interface Habit {
   date: string;
-  pcFirstInteractionUnix: number | null;
-  pcLastInteractionUnix: number | null;
+  wakeFirstUnix: number | null;
+  wakeLastUnix: number | null;
   createdAt?: string;
   updatedAt?: string;
   exists?: boolean;

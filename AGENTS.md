@@ -160,6 +160,38 @@ berührt die Daten nicht.
   diesem Tag"). `upcomingPlanVersions()` vergleicht gegen die aktuelle Zeit —
   eine Version „heute 23:50" bleibt bis dahin `upcoming`. Migration: idempotent
   in `db.ts` (`ensureColumn` + Backfill `effective_from = substr(created_at,1,10)`).
+- **Habit / Wachzeit** (`server/src/routes/habit.ts`, Tabelle `daily_habits`):
+  Der Client-Cron meldet per `POST /api/habit/uptime` einen Unix-Zeitpunkt für
+  die früheste User-Interaktion im 24h-Fenster vor dem Cron
+  (`first_user_interaction_24h_unix`) und einen für die letzte
+  (`last_user_interaction_unix`). Wir leiten daraus **nicht** PC-Bildschirmzeit,
+  sondern die **Wachzeit** des Vortages ab — Aufwachen bis Einschlafen. Ziel-
+  Datum ist **immer der Konsum-Vortag** aus Sicht des Webhook-Aufrufs
+  (Tagesgrenze 03:30 Europe/Berlin, hart `today - 1`), unabhängig von der
+  konkreten `last`-Wand­uhrzeit. Algorithmus:
+    1. `intakeFirst` = späteste Einnahme des Ziel-Tages im Intervall
+       `[Tagesbeginn 03:30, first)` (Einnahme muss nach 03:30 und VOR
+       `first` liegen — sie ist der späteste Hinweis, dass der Mensch
+       bereits wach war, bevor die erste PC-Interaktion gemeldet wurde).
+    2. `intakeLast` = späteste Einnahme des Ziel-Tages (egal wann).
+    3. `wake_first_unix` = `intakeFirst` falls gefunden, sonst
+       `first_user_interaction_24h_unix`.
+    4. `wake_last_unix`  = `max(intakeLast, last_user_interaction_unix)`.
+  Einnahmen werden im Wand­uhr-Bereich
+  `targetT03:30:00 … (target+1)T03:29:59` (Konsum-Tag-Bereich) gesucht
+  und als Unix-Sekunden via `new Date(iso).getTime()/1000` (lokales
+  `new Date(iso)` = lokale Wand­uhr) konvertiert. Plausi-Checks:
+  `last <= now + 15 min` (Clock-Skew) und
+  `first >= now − 25 h` (echtes 24h-Fenster + Slack). `wake_first`/`wake_last`
+  fließen in `gatherDiaryDays()` (Kurzfassung-Block „Wachzeit") und in
+  `buildDayPrompt()` ein; **nicht** als Bildschirmzeit, sondern explizit
+  als Spanne vom ersten Wach-Moment bis zum letzten Wach-Moment
+  (Kommentar im KI-Prompt weist die schreibende KI darauf hin). Schema-
+  Migration (`db.ts`, idempotent): alte Spalten `pc_first_interaction_unix`/
+  `pc_last_interaction_unix` werden per `ALTER TABLE … RENAME COLUMN`
+  (SQLite ≥ 3.25) auf `wake_first_unix`/`wake_last_unix` umbenannt,
+  Fallback-Pfad für ältere SQLite-Versionen (Tabelle neu anlegen +
+  kopieren) liegt vor.
 
 ## API-Referenz (Auszug)
 
@@ -184,11 +216,11 @@ berührt die Daten nicht.
 | `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
 | `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht |
-| `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Liste der Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild + PC-Habit) |
+| `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Liste der Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild + Wachzeit-Habit) |
 | `GET` | `/api/diary` | Zustand des KI-Voll-Tagebuchs (`raw`, `entries[]`, `generatedDays`/`pendingDays`, `available`) |
 | `POST` | `/api/diary/generate` | KI-Volltext generieren (`{ scope?: 'missing'\|'all', from?, to?, max? }`); 503 ohne `ANTHROPIC_API_KEY` |
 | `PUT` | `/api/diary` | Tagebuch-Datei manuell überschreiben (`{ content }`) |
-| `POST` | `/api/habit/uptime` | Tägliche PC-Nutzungszeiten melden (`{ last_user_interaction_unix, first_user_interaction_24h_unix }`); gespeichert pro Konsum-Tag, fließt in `gatherDiaryDays()` (Kurz + KI-Prompt) ein |
+| `POST` | `/api/habit/uptime` | Tägliche **Wachzeit** melden (`{ last_user_interaction_unix, first_user_interaction_24h_unix }`); Ziel-Datum = **Konsum-Vortag**; berechnet `wake_first`/`wake_last` aus Einnahmen + Webhook, fließt in `gatherDiaryDays()` (Kurz + KI-Prompt) ein |
 | `GET` | `/api/habit?from=&to=` | Liste der Habit-Tage (Range) |
 | `GET` | `/api/habit/:date` | Einzelner Habit-Tag (immer 200, `exists: false`, wenn leer) |
 | `DELETE` | `/api/habit/:date` | Habit-Datensatz löschen (204 / 404) |
@@ -258,6 +290,7 @@ Frontend-UI:
 | `plan_versions` | Plan-Snapshots (`created_at` = erfasst, `effective_from` = gültig ab) |
 | `plan_items` | Plan-Zeilen (Morgens/Mittags/Abends/Nachts) je Version |
 | `daily_assessments` | Tagesbild (11 Skalen als JSON, Primärschlüssel `date`) |
+| `daily_habits` | Tägliche **Wachzeit** (`wake_first_unix`, `wake_last_unix`, beide nullable) pro Konsum-Tag — siehe Abschnitt „Habit / Wachzeit" |
 
 Indices: `idx_intakes_taken_at`, `idx_intakes_source` (Import-Idempotenz),
 `idx_plan_items_version`, `idx_plan_versions_source`, `idx_plan_versions_effective`.
@@ -334,7 +367,77 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Änderungen (jüngste zuerst)
 
-- **2026-06-15 — Habit-/PC-Uptime-Endpoint & Tagebuch-Integration**:
+- **2026-06-16 — Habit-Endpoint: PC-Nutzung → Wachzeit + Vortag hart**:
+  - **Ziel:** Die vom Webhook `POST /api/habit/uptime` gemeldeten
+    `first_user_interaction_24h_unix`/`last_user_interaction_unix` waren
+    fälschlich als „PC-Nutzung" gespeichert, das Ziel-Datum hing am
+    `last`-Konsum-Tag (konnte falsch sein, wenn der Cron zu anderer
+    Zeit lief), und Einnahmen flossen gar nicht in die Berechnung ein.
+    Neu: die Werte werden als Indikatoren für „wach" gewertet und mit
+    den Einnahmen-Zeitpunkten des Vortages kombiniert; das Ziel-Datum
+    ist **immer der Konsum-Vortag** aus Sicht des Webhooks (Tagesgrenze
+    03:30 Europe/Berlin, hart `today - 1`).
+  - **Algorithmus (in `server/src/routes/habit.ts → POST /uptime`):**
+    1. `targetDate` = Konsum-Vortag (`yesterdayConsumptionDay()`,
+       `todayConsumption - 1d`).
+    2. Einnahmen im Wand­uhr-Bereich
+       `targetT03:30:00 … (target+1)T03:29:59` laden
+       (= genau `consumptionDay(takenAt) === targetDate`).
+    3. `intakeFirstUnix` = späteste Einnahme in
+       `[Tagesbeginn 03:30, first)` — „Einnahme vor erster PC-Interaktion".
+    4. `intakeLastUnix`  = späteste Einnahme des Tages.
+    5. `wake_first_unix` = `intakeFirstUnix` falls vorhanden, sonst
+       `first_user_interaction_24h_unix`.
+    6. `wake_last_unix`  = `max(intakeLastUnix, last_user_interaction_unix)`.
+  - **Schema-Migration in `db.ts`** (idempotent, läuft beim Start):
+    `ALTER TABLE daily_habits RENAME COLUMN pc_first_interaction_unix TO
+    wake_first_unix` (und analog `pc_last_interaction_unix → wake_last_unix`).
+    SQLite ≥ 3.25 unterstützt das nativ; Fallback-Pfad für ältere
+    Versionen (neue Tabelle anlegen, Daten kopieren, alte droppen)
+    liegt vor. `HabitRow` und `serializeHabit` entsprechend umbenannt.
+  - **Tagebuch-Lib (`server/src/lib/diary.ts`):**
+    - `DiaryDayHabit` umbenannt: `pcFirstInteractionUnix`/
+      `pcLastInteractionUnix` → `wakeFirstUnix`/`wakeLastUnix`.
+    - `gatherDiaryDays()` setzt das neue Feld, Kommentar von „PC-Wert"
+      auf „Wachzeit-Wert".
+    - `buildDayPrompt()` schreibt jetzt
+      `Gewohnheiten: Wachzeit HH:MM–HH:MM (≈ X.X h wach).` statt
+      „PC-Nutzung … h aktiv". **Wichtig:** die schreibende KI wird per
+      Kommentar explizit darauf hingewiesen, dass es sich um die
+      **Wachzeit** (Aufwachen bis Einschlafen) handelt, **nicht** um
+      Bildschirmzeit — die Dauer ist also kein „am PC verbracht".
+  - **Frontend (`web/src/lib/types.ts` + `web/src/screens/DiaryScreen.tsx`):**
+    Typen `DiaryDayHabit` und `Habit` umbenannt, Block in der
+    Kurzfassung heißt jetzt „Wachzeit" (mit `Sun`-Icon statt
+    `Monitor`), Anzeige `HH:MM – HH:MM · X.X h wach` (statt „aktiv"),
+    Fallback-Strings „zuerst wach …" / „zuletzt wach …" (statt
+    „erste/letzte Aktivität").
+  - **Verifiziert:**
+    - Server-TS (`tsc --noEmit`) + Web-TS je exit 0,
+      Server-Build (`tsc`) + Web-Build (`vite build`) je exit 0.
+    - E2E gegen `/tmp`-Scratch-DB (`seed.ts` + Einnahmen-Patch auf
+      15.06. 07:00..22:15):
+      - **Fall A** (Einnahmen am Vortag, `first=17:30 < intakeFirst`):
+        `wake_first = 08:00 (Vitamin D, späteste Einnahme vor first)`,
+        `wake_last = 22:15 (Quetiapin, intakeLast > last=22:00)`,
+        `date = 2026-06-15 (Konsum-Vortag)`. ✓
+      - **Fall B** (leerer Vortag):
+        `wake_first = first`, `wake_last = last`,
+        `intakeFirstUnix/intakeLastUnix = null`. ✓
+      - **Fall C** (eine Einnahme NACH `last`):
+        `wake_last = max(intakeLast, last) = intakeLast`. ✓
+    - Alle vier 400-Pfade getestet: `first > last`, `last` in der
+      Zukunft, `first` > 25h vor `now`, fehlende Felder (Zod). ✓
+  - **Folge-Aktion für User:** keine Konfig-Änderung; das bestehende
+    Cron-Skript schickt weiter dieselben Felder, nur die Bedeutung
+    im Server hat sich geändert. Eine historische Live-DB wird beim
+    nächsten Serverstart automatisch migriert.
+
+- **2026-06-15 — Habit-/PC-Uptime-Endpoint & Tagebuch-Integration** (überholt
+  durch 2026-06-16 — siehe oben): die ursprüngliche Implementierung zählte
+  die ankommenden Werte als „PC-Nutzung", nicht als Wachzeit, das
+  Ziel-Datum hing am `last`-Konsum-Tag statt am harten Vortag, und der
+  KI-Prompt suggerierte der schreibenden KI Bildschirmzeit statt Wachzeit.
   - **Ziel:** Tägliche PC-Nutzungszeiten vom lokalen Client (Cron um 03:30
     Europe/Berlin) per HTTP annehmen und in das Tagebuch (sowohl Kurz- als
     auch Voll-/KI-Version) integrieren.

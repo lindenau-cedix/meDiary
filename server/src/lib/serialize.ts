@@ -92,8 +92,8 @@ export function serializeAssessment(r: AssessmentRow) {
 export function serializeHabit(r: HabitRow) {
   return {
     date: r.date,
-    pcFirstInteractionUnix: r.pc_first_interaction_unix,
-    pcLastInteractionUnix: r.pc_last_interaction_unix,
+    wakeFirstUnix: r.wake_first_unix,
+    wakeLastUnix: r.wake_last_unix,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

@@ -33,12 +33,13 @@ export interface DiaryDayAssessment {
   note: string | null;
 }
 
-/** PC-Nutzungszeiten (vom Client per POST /api/habit/uptime gemeldet). */
+/** Tägliche Wachzeit (vom Client per POST /api/habit/uptime gemeldet).
+ *  Siehe `server/src/routes/habit.ts` für den Algorithmus. */
 export interface DiaryDayHabit {
-  /** Erste User-Interaktion im 24h-Fenster vor dem Tages-Cron (Unix-Sek). */
-  pcFirstInteractionUnix: number | null;
-  /** Letzte User-Interaktion vor dem Tages-Cron (Unix-Sek). */
-  pcLastInteractionUnix: number | null;
+  /** Erster Wach-Moment des Tages (Unix-Sek). */
+  wakeFirstUnix: number | null;
+  /** Letzter Wach-Moment des Tages (Unix-Sek). */
+  wakeLastUnix: number | null;
 }
 
 export interface DiaryDay {
@@ -130,16 +131,16 @@ export function gatherDiaryDays(opts?: { from?: string; to?: string }): DiaryDay
   }
 
   for (const h of habits) {
-    // Nur Tage, an denen überhaupt ein PC-Wert gespeichert wurde, in den
+    // Nur Tage, an denen überhaupt ein Wachzeit-Wert gespeichert wurde, in den
     // Tag-Pool aufnehmen — auch wenn es der einzige Inhalt des Tages ist.
     ensure(h.date).habit = {
-      pcFirstInteractionUnix: h.pc_first_interaction_unix,
-      pcLastInteractionUnix: h.pc_last_interaction_unix,
+      wakeFirstUnix: h.wake_first_unix,
+      wakeLastUnix: h.wake_last_unix,
     };
   }
 
   let days = [...byDate.values()];
-  // „Inhalt" = mind. eine Einnahme-Notiz, ein Tagesbild, ODER ein PC-Habit-Eintrag.
+  // „Inhalt" = mind. eine Einnahme-Notiz, ein Tagesbild, ODER ein Wachzeit-Eintrag.
   days = days.filter(
     (d) => d.intakes.some((i) => i.note) || d.assessment !== null || d.habit !== null,
   );
@@ -276,8 +277,8 @@ function buildDayPrompt(day: DiaryDay): string {
     }
   }
   if (day.habit) {
-    const first = day.habit.pcFirstInteractionUnix;
-    const last = day.habit.pcLastInteractionUnix;
+    const first = day.habit.wakeFirstUnix;
+    const last = day.habit.wakeLastUnix;
     if (first != null || last != null) {
       const fmt = (u: number) => {
         const d = new Date(u * 1000);
@@ -286,12 +287,17 @@ function buildDayPrompt(day: DiaryDay): string {
       };
       const parts: string[] = [];
       if (first != null && last != null) {
+        // Wichtig für die schreibende KI: Das ist die **Wachzeit** (Aufwachen
+        // bis Einschlafen), abgeleitet aus Einnahme-Zeitpunkten und einem
+        // PC-Interaktions-Webhook. **NICHT** Bildschirmzeit! Die Dauer ist
+        // die Spanne vom frühesten Wach-Moment bis zum letzten Wach-Moment
+        // des Tages.
         const hours = Math.max(0, (last - first) / 3600);
-        parts.push(`PC-Nutzung ${fmt(first)}–${fmt(last)} (≈ ${hours.toFixed(1)} h aktiv)`);
+        parts.push(`Wachzeit ${fmt(first)}–${fmt(last)} (≈ ${hours.toFixed(1)} h wach)`);
       } else if (last != null) {
-        parts.push(`Letzte PC-Aktivität: ${fmt(last)}`);
+        parts.push(`Letzte Wach-Aktivität: ${fmt(last)}`);
       } else if (first != null) {
-        parts.push(`Erste PC-Aktivität: ${fmt(first)}`);
+        parts.push(`Erste Wach-Aktivität: ${fmt(first)}`);
       }
       lines.push(`Gewohnheiten: ${parts.join('; ')}.`);
       lines.push('');
