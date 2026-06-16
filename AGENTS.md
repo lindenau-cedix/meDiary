@@ -367,6 +367,55 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-06-16 — Werte-Tab: Tagesbilder bearbeiten + sichtbarer Tages-Zuordnung**:
+  - **Bug/UX-Mangel:** Der "Werte"-Tab zeigte nur die 11 Skalen-Trend-Charts;
+    ein bestehendes Tagesbild konnte **nicht** nachträglich bearbeitet werden,
+    und es war nirgends erkennbar, **welcher Konsum-Tag** beim Trigger
+    (Nachtmedikation komplett → `nightMed=true`) gerade abgefragt wurde.
+  - **Werte-Tab (`web/src/screens/TrendsScreen.tsx`) komplett umgebaut:**
+    - **Schnellzugriff "Heute"** (`TodayHero`): fasst den aktuellen
+      Konsum-Tag als Karte zusammen (Datum, `n/11 Werte`, Ø, Notiz-Vorschau)
+      und öffnet per Tap das `AssessmentSheet` für genau diesen Tag.
+    - **Liste "Tagesbilder im Zeitraum"** (`AssessmentRow`): jedes
+      erfasste Tagesbild ist ein Tap-Element (Datum, `n/11 · Ø X.X`,
+      Notiz-Vorschau) — Tippen öffnet das `AssessmentSheet` für genau
+      diesen Konsum-Tag, sodass auch **vergangene** Tage jederzeit
+      nachgetragen / korrigiert werden können.
+    - **"+ Neu"-Button:** ein kompakter `DatePickerSheet` (`type="date"`
+      + Schnellauswahl Heute/Gestern/Vorgestern/vor 7 Tagen) legt ein
+      Tagesbild für einen beliebigen Konsum-Tag in der Vergangenheit
+      an (Default = heute; `max={today}` verhindert Zukunfts-Select).
+    - **"11 Skalen — Trends"-Bereich zusammenklappbar** (Default
+      eingeklappt), damit die Liste der Tagesbilder sofort sichtbar ist.
+  - **`AssessmentSheet` (`web/src/components/AssessmentSheet.tsx`)**
+    zeigt jetzt den **Konsum-Tag** im Subtitle (`Donnerstag, 11. Juni 2026
+    · Heute` / `… · gestern` / `… · vor 3 Tagen`) und passt den
+    Body-Text an (`isToday` / `date < today` / `date > today`),
+    damit klar ist, **welcher Tag** gerade bearbeitet wird — unabhängig
+    davon, ob er per Nachtmedikations-Trigger (Heute), rückwirkend
+    aus dem Verlauf oder aus dem DatePicker im Werte-Tab geöffnet
+    wurde. Save-Toast nennt jetzt zusätzlich `formatFull(date)` im
+    Detail.
+  - **Nachtmedikations-Trigger: Tag-Anzeige war schon korrekt.** Der
+    Server liefert `assessmentDate` (Konsum-Tag via `consumptionDay`)
+    seit dem 2026-06-14-Fix; das `AssessmentSheet` öffnet sich
+    bereits auf genau diesem Tag. Was fehlte, war die **sichtbare
+    Beschriftung** im Sheet (siehe oben) — das ist jetzt da.
+  - **Verifiziert:**
+    - Server-TS (`tsc --noEmit`) + Web-TS je exit 0,
+      Server-Build (`tsc`) + Web-Build (`vite build`) je exit 0.
+    - E2E gegen `/tmp`-Scratch-DB: `GET /api/assessments/2026-06-15`
+      liefert vorhandene Daten (`exists:true`), `PUT` mit neuen
+      Werten + Notiz überschreibt sauber (neue `updatedAt`),
+      `DELETE` → 204, nachfolgender `GET` → `exists:false` mit leeren
+      Defaults. Nachtmedikations-Trigger (Lithium+Quetiapin nachts):
+      Einnahme um 22:30 → `assessmentDate: "2026-06-16"` (heute);
+      Einnahme um 02:00 → `assessmentDate: "2026-06-15"` (Vortag
+      via 03:30-Grenze). Live-`./data` unberührt.
+  - **Folge-Aktion für User:** keine Konfig-Änderung. Die neue
+    DatePicker-Aktion ist nur ein UI-Add-On; die Server-Endpoints
+    `/api/assessments[/:date]` PUT/DELETE waren bereits vorhanden.
+
 - **2026-06-16 — Habit-Endpoint: PC-Nutzung → Wachzeit + Vortag hart**:
   - **Ziel:** Die vom Webhook `POST /api/habit/uptime` gemeldeten
     `first_user_interaction_24h_unix`/`last_user_interaction_unix` waren
@@ -850,6 +899,15 @@ cd ../web && node_modules/.bin/vite build   # dist/ entsteht
 - [ ] Der Plan-Editor bearbeitet immer den **heute aktiven** Stand als
       Ausgangsbasis — beim Anlegen einer Zukunfts-Version wäre die jüngste
       geplante Version als Vorlage ggf. praktischer.
+- [ ] `DatePickerSheet` im Werte-Tab: aktuell nur nativer `type="date"`
+      (Browser-UI). Ein Inline-Monatskalender (klickbare Tage mit
+      Tagesbild-Markern) wäre freundlicher, ist aber nicht trivial — und
+      der nativen Browser-Picker reicht für den Use-Case „Tag X
+      nachtragen" erstmal aus.
+- [ ] Trends-Tab: nach dem Anlegen eines neuen Tagesbilds springt die
+      Liste **nicht** automatisch zum neuen Eintrag oben. Aktuell genügt
+      `useAssessments`-Invalidation, aber visuelles Feedback (z. B. kurzes
+      Scrollen) wäre nice-to-have.
 
 ## Bekannte Stolperfallen
 
@@ -998,6 +1056,11 @@ Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
       nachträglich bearbeiten.
 - [ ] Der Plan-Editor bearbeitet immer den **heute aktiven** Stand als
       Ausgangsbasis.
+- [ ] `DatePickerSheet` im Werte-Tab: Inline-Monatskalender mit
+      Tagesbild-Markern statt nur nativer `type="date"` (siehe
+      2026-06-16 Eintrag oben).
+- [ ] Trends-Tab: nach Anlegen eines neuen Tagesbilds automatisches
+      Scrollen / Hervorheben des neuen Eintrags.
 
 ## Bekannte Stolperfallen
 

@@ -10,6 +10,7 @@ import { scoreColor } from '../lib/colors';
 import { formatFull, relativeDays, dateNDaysAgo } from '../lib/format';
 import { haptics } from '../lib/haptics';
 import { useAssessment, useAssessments, useSaveAssessment } from '../lib/queries';
+import { consumptionToday } from '../lib/time';
 
 export function AssessmentSheet({
   open,
@@ -24,6 +25,13 @@ export function AssessmentSheet({
   const existing = useAssessment(date, open);
   const history = useAssessments(dateNDaysAgo(60), date);
   const save = useSaveAssessment();
+  // `date` ist der **Konsum-Tag** (03:30-Tagesgrenze). Wir kennzeichnen
+  // das im Subtitle explizit — vor allem, wenn er ein anderer ist als der
+  // aktuelle Wand­uhr-Tag (z. B. bei Nachtrag um 02:30, das zum Vortag
+  // gehört) oder wenn der Sheet rückwirkend aus dem "Werte"-Tab geöffnet
+  // wurde (kann jeder beliebige Konsum-Tag sein).
+  const today = consumptionToday();
+  const subtitle = `${formatFull(date)} · ${date === today ? 'Heute' : relativeDays(date)}`;
 
   const [scores, setScores] = useState<Record<string, number>>({});
   const [note, setNote] = useState('');
@@ -65,7 +73,7 @@ export function AssessmentSheet({
     try {
       await save.mutateAsync({ date, scores, note: note.trim() || null });
       haptics.success();
-      toast.show({ message: 'Tagesbild gespeichert', detail: `${filledCount}/${METRICS.length} Werte · ${relativeDays(date)}` });
+      toast.show({ message: 'Tagesbild gespeichert', detail: `${formatFull(date)} · ${filledCount}/${METRICS.length} Werte` });
       onClose();
     } catch (e) {
       haptics.warning();
@@ -84,7 +92,7 @@ export function AssessmentSheet({
           Tagesbild
         </span>
       }
-      subtitle={`${formatFull(date)}`}
+      subtitle={subtitle}
       footer={
         <div className="flex items-center gap-3">
           <div className="flex-1 text-sm text-ink-muted">
@@ -100,7 +108,11 @@ export function AssessmentSheet({
       }
     >
       <p className="text-sm text-ink-muted leading-relaxed mb-1">
-        Die Nachtmedikation ist erfasst. Wie war der heutige Tag? Skala 1–10.
+        {date === today
+          ? 'Die Nachtmedikation ist erfasst. Wie war der heutige Tag? Skala 1–10.'
+          : date < today
+            ? `Werte für ${relativeDays(date)} nachtragen oder anpassen. Skala 1–10.`
+            : 'Werte für den kommenden Konsum-Tag voraus-planen. Skala 1–10.'}
       </p>
       {carried && (
         <p className="text-xs text-accent mb-4">
