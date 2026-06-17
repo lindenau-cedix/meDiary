@@ -201,4 +201,41 @@ export function useLatestDream() {
   return useQuery({ queryKey: qk.dreamLatest(), queryFn: () => api.dreams.latest(), staleTime: 60_000 });
 }
 
+// ---------- Daten-Konsole (Chat with your data) ----------
+export function useChatStatus() {
+  return useQuery({ queryKey: ['chat', 'status'], queryFn: () => api.chat.status(), staleTime: 60_000 });
+}
+export function useChangeSets(enabled = true) {
+  return useQuery({
+    queryKey: ['chat', 'change-sets'],
+    queryFn: () => api.chat.changeSets(),
+    enabled,
+    staleTime: 5_000,
+  });
+}
+/**
+ * Anwenden/Undo/Verwerfen eines Change-Sets. Da die Konsole Einnahmen &
+ * Substanzen verändert, wird nach Erfolg breit invalidiert (gesamte App), damit
+ * Verlauf/Heute/Plan/Werte den neuen Stand zeigen.
+ */
+export function useChangeSetActions() {
+  const qc = useQueryClient();
+  const refreshAll = () => {
+    qc.invalidateQueries({ queryKey: ['chat', 'change-sets'] });
+    qc.invalidateQueries({ queryKey: ['intakes'] });
+    qc.invalidateQueries({ queryKey: ['substances'] });
+    qc.invalidateQueries({ queryKey: qk.compliance() });
+    qc.invalidateQueries({ queryKey: ['plan'] });
+    qc.invalidateQueries({ queryKey: ['assessments'] });
+  };
+  return {
+    apply: useMutation({ mutationFn: (id: number) => api.chat.apply(id), onSuccess: refreshAll }),
+    undo: useMutation({ mutationFn: (id: number) => api.chat.undo(id), onSuccess: refreshAll }),
+    discard: useMutation({
+      mutationFn: (id: number) => api.chat.discard(id),
+      onSuccess: () => qc.invalidateQueries({ queryKey: ['chat', 'change-sets'] }),
+    }),
+  };
+}
+
 export type { Plan };

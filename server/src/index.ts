@@ -14,6 +14,7 @@ import { diaryRouter } from './routes/diary.js';
 import { metaRouter } from './routes/meta.js';
 import { habitRouter } from './routes/habit.js';
 import { dreamsRouter } from './routes/dreams.js';
+import { chatRouter } from './routes/chat.js';
 import { startDreamScheduler } from './lib/dream_scheduler.js';
 
 // Sicherstellen, dass jede jemals eingetragene Substanz eine QuickPick-Kachel
@@ -42,6 +43,7 @@ app.use('/api/defaults', defaultsRouter);
 app.use('/api/diary', diaryRouter);
 app.use('/api/habit', habitRouter);
 app.use('/api/dreams', dreamsRouter);
+app.use('/api/chat', chatRouter);
 
 // Optional: gebautes Frontend ausliefern (für Single-Deployment)
 if (config.webDist && fs.existsSync(config.webDist)) {

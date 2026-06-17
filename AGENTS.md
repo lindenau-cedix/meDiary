@@ -56,8 +56,76 @@ meDiary/
 - **Tests:** keine Unit-Tests vorhanden — Verifikation läuft über manuelle
   Smoke-Tests gegen `npm run dev` und die API.
 
+## Befehle
+
+Es gibt **keinen Test-Runner**. Verifikation = `typecheck:all` + manuelle
+Smoke-Tests gegen eine **Wegwerf-DB unter `/tmp`** (NIE `./data` — das ist die Live-DB).
+
+| Zweck | Befehl |
+|---|---|
+| Deps installieren | `npm run install:all` |
+| Dev: API :4000 + Web :5173 | `npm run dev` |
+| Nur API / nur Web | `npm run dev:server` · `npm run dev:web` |
+| TS-Check (Server + Web) | `npm run typecheck:all` |
+| Build (Web → `web/dist`, dann Server → `server/dist`) | `npm run build` |
+| Produktion (Docker) | `docker compose up -d --build` |
+| Seed / Import (tsx-Skripte) | `npm --prefix server run seed` · `… run import` |
+| Einzelnes Skript/Modul fahren | `cd server && DB_PATH=/tmp/x/db CF_ACCESS_DISABLED=true npx tsx src/<file>.ts` |
+
+**Smoke-Test-Rezept** (eigener Server gegen `/tmp`, dann ein Endpunkt):
+
+```bash
+cd server && rm -rf /tmp/m && mkdir -p /tmp/m
+DB_PATH=/tmp/m/db.sqlite DEFAULTS_PATH=/tmp/m/DEFAULTS.md CF_ACCESS_DISABLED=true \
+  PORT=4099 DREAM_SCHEDULER_DISABLED=true npx tsx src/index.ts &
+curl -s localhost:4099/api/health        # weitere Rezepte: docs/development.md
+```
+
+## Architektur auf einen Blick
+
+Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
+
+- **Lokale Wanduhrzeit, kein UTC.** Zeiten sind Strings `YYYY-MM-DDTHH:mm:ss`
+  (Europe/Berlin). Der **Konsum-/Medikations-Tag hat die Grenze 03:30** — Einnahmen
+  00:00–03:29 zählen zum Vortag (`consumptionDay()` in `server/src/lib/time.ts`,
+  serverseitig in `serializeIntake` gesetzt, NICHT im Frontend gerechnet).
+- **`nameKey()` ist die einzige korrekte Substanz-Normalisierung** (umlaut-bewusst,
+  `toLocaleLowerCase('de')`); SQLite `lower()` ist ASCII-only und falsch — gilt für
+  Matching, Dedup und `Mit:`-Auflösung.
+- **DEFAULTS.md wird pro Schreibvorgang frisch von Platte gelesen.** Auflösung von
+  Menge/Notiz überall gleich: expliziter Wert > Substanz-Standarddosis > DEFAULTS.
+  `Mit:`-Begleitsubstanzen werden als eigene Einnahmen miterfasst (eine Ebene tief) —
+  bei `POST /api/intakes` und `/text`, NICHT bei Import/XLSX/PATCH/`plan-batch`.
+- **Der Plan ist über `effective_from` versioniert** (nicht `created_at`): „welcher
+  Plan galt wann". Das **Tagesbild** (11-Skalen-Assessment) wird ausgelöst, sobald
+  ALLE Nacht-Medis des wirksamen Plans für den Konsumtag erfasst sind
+  (`allNightMedsTaken()` in `db.ts`) — nicht schon bei einer einzelnen Nachtmed.
+- **Drei KI-Integrationen, drei Wire-Formate** (alle Keys ausschließlich serverseitig):
+  KI-Tagebuch = Anthropic-Messages (`lib/anthropic.ts`), nächtliches „Träumen" =
+  OpenAI-Chat-Completions (`lib/minimax.ts`), Daten-Konsole = Anthropic-Messages mit
+  Tool-Loop + SSE (`lib/chat_agent.ts`). Alle laufen wahlweise gegen MiniMax.
+- **Auth = Cloudflare Access** (`lib/cloudflare_access.ts`, fail-closed), bewusst NUR
+  auf mutierenden Endpunkten (`POST /api/intakes/text`, `/api/chat/*`-Writes); der Rest
+  der API ist offen (privates Deployment). `CF_ACCESS_DISABLED=true` = Local-Bypass.
+- **Datenfluss Web:** `lib/api.ts` (typisierte Fetch-Wrapper) → `lib/queries.ts`
+  (react-query Hooks + Query-Keys) → Screens. Server: `routes/*` →
+  `lib/serialize.ts` (snake_case-Row → camelCase-DTO); Schema idempotent in `db.ts`.
+
 ## Letzte Session-Änderungen
 
+- **Daten-Konsole „Chat with your data" (2026-06-18):** Neuer Tab `/konsole` für
+  natürlichsprachige Massen-Korrekturen. Lesen läuft read-only (separate
+  `{readonly:true}`-SQLite-Verbindung, nur `SELECT`/`WITH`); Schreiben NUR über
+  typisierte, zod-validierte Change-Sets, die in der UI mit before→after-Vorschau
+  bestätigt werden — transaktional + Undo (Vorzustands-Snapshot), Audit-Log in
+  `chat_change_sets`. Modell = **MiniMax M3** über den **Anthropic-kompatiblen**
+  Endpunkt (`CHAT_BASE_URL/v1/messages`, Tool-Loop, `thinking`-Blöcke bewahrt,
+  SSE). Schlüssel serverseitig (Default `MINIMAX_API_KEY`, `CHAT_API_KEY` Vorrang).
+  Mutierende Endpunkte CF-Access-geschützt + rate-limitiert. Dateien:
+  `server/src/lib/chat_tools.ts` (Sicherheitsschicht), `…/chat_agent.ts`
+  (Agent-Loop), `routes/chat.ts`, `web/src/screens/ConsoleScreen.tsx` +
+  `web/src/components/console/*`. Details: [docs/changelog.md](docs/changelog.md),
+  [docs/api.md](docs/api.md).
 - **npm-Audit bereinigt (2026-06-17):**
   - `server/package-lock.json`: transitive `tsx → esbuild`-Version von
     `0.28.0` auf `0.28.1` aktualisiert.

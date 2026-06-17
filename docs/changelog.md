@@ -4,6 +4,48 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-06-18 — Daten-Konsole „Chat with your data" (Auftrag `/chat-with-data`)**:
+  - **Feature:** Neuer Tab `/konsole` — eine natürlichsprachige Daten-Konsole für
+    Massen-Korrekturen, die über die normale UI nicht möglich sind (Substanzen
+    zusammenführen, Einnahmen nachtragen/löschen, Zeitpunkte verschieben,
+    Zeitzonen-Fehler korrigieren, in Mengen umbenennen, Nachtmed-Flag setzen) —
+    plus freies Abfragen der Daten.
+  - **Zwei-Phasen-Sicherheitsmodell (`server/src/lib/chat_tools.ts`):**
+    - **Lesen** läuft ausschließlich über eine separate, schreibgeschützte
+      better-sqlite3-Verbindung (`{ readonly: true }` + `query_only`). `run_read_query`
+      akzeptiert nur eine einzelne `SELECT`/`WITH`-Anweisung (Prefix-Check +
+      `prepare`-Einzelstatement + `reader`-Check + ATTACH/PRAGMA-Sperre); `inspect_schema`
+      liefert das Live-Schema. Zeilen auf `CHAT_MAX_ROWS` (Default 500) gedeckelt.
+    - **Schreiben** NUR über `propose_change_set`: das Modell liefert typisierte,
+      zod-validierte Operationen (kein Schreib-SQL). Der Server kompiliert sie zu
+      parametrisierten Queries, rechnet einen Dry-Run (betroffene Zeilen +
+      before→after-Sample) und legt das Change-Set als `proposed` ab.
+  - **Atomar + reversibel:** `POST /api/chat/change-sets/:id/apply` führt alle
+    Operationen in EINER Transaktion aus, speichert einen Vorzustands-Snapshot und
+    setzt `applied`. `…/undo` stellt aus dem Snapshot wieder her (nur das jüngste
+    angewandte Change-Set). Audit-Log über `chat_change_sets` (Tabelle in `db.ts`).
+  - **Modell (`server/src/lib/chat_agent.ts`):** agentische **Anthropic-Messages**-
+    Tool-Schleife gegen den Anthropic-kompatiblen MiniMax-Endpunkt
+    (`{CHAT_BASE_URL=https://api.minimax.io/anthropic}/v1/messages`, `MiniMax-M3`).
+    Agent-Loop serverseitig (Lese-Tools sofort, `propose_change_set` nur Vorschlag),
+    vollständiger `content` inkl. `thinking`-Blöcke (mit `signature`) wird je Runde
+    angehängt, echtes SSE-Streaming an die UI (mit sauberem Nicht-Stream-Fallback).
+    Schlüssel **nur serverseitig**; Default = vorhandener `MINIMAX_API_KEY`,
+    `CHAT_API_KEY` hat Vorrang.
+  - **Auth/Rate-Limit:** Die mutierenden Endpunkte (`message`, `apply`, `undo`,
+    `discard`) sind — wie `POST /api/intakes/text` — per Cloudflare Access geschützt
+    (fail-closed; `CF_ACCESS_DISABLED=true` als Local-Bypass) und rate-limitiert
+    (`CHAT_MIN_INTERVAL_MS`). Lese-Endpunkte (`status`, `change-sets`) sind offen.
+  - **Frontend:** `web/src/screens/ConsoleScreen.tsx` + `components/console/*` —
+    Transkript als Kommando-Log (Monospace JetBrains Mono, neu via
+    `@fontsource-variable`), Change-Set-Karte mit before→after-Diff in gedämpften
+    semantischen Diff-Farben (neue `--diff-*`-Tokens, hell & dunkel), Bestätigen/
+    Verwerfen, Zusatz-Bestätigung ab 100 Zeilen, Undo, Audit-Log-Sheet. Echter
+    Leerzustand mit Beispiel-Kommandos. Tastatur: ⏎ senden, ⇧⏎ neue Zeile, Stop.
+  - **Verifiziert:** `typecheck:all` sauber, Web-Build sauber; Datenebene-Smoke
+    (23/23: read-only-Sperre, Vorschau, apply+undo für merge/delete/backfill/shift)
+    und HTTP-Lifecycle (apply→undo→409, CF-Access fail-closed) gegen `/tmp` grün.
+
 - **2026-06-17 — Deployment auf Docker Compose umgestellt**:
   - **Neuer Produktivpfad:** `docker compose up -d --build` baut ein
     Multi-Stage-Image mit Server und Vite-Frontend und startet `mediary` mit

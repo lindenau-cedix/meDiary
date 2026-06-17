@@ -28,6 +28,17 @@
     --bad: 181 86 63;
     --warn: 189 128 56;
 
+    /* Gedämpfte Diff-Farben (Konsole): Hinzufügen = ruhiges Salbei-Grün,
+       Löschen = gedeckter Ton aus Terrakotta, Ändern = warmes Ocker.
+       Texttöne bewusst tief genug für WCAG-AA (≥4.5:1) auf der Soft-Fläche:
+       add 4.73 · del 5.50 · mod 5.39. */
+    --diff-add: 74 110 80;
+    --diff-add-soft: 226 235 224;
+    --diff-del: 150 62 46;
+    --diff-del-soft: 240 226 221;
+    --diff-mod: 120 86 28;
+    --diff-mod-soft: 240 230 212;
+
     --shadow-soft: 0 1px 2px rgba(60, 50, 40, 0.04), 0 2px 8px rgba(60, 50, 40, 0.05);
     --shadow-raised: 0 2px 4px rgba(60, 50, 40, 0.05), 0 10px 28px rgba(60, 50, 40, 0.09);
     --shadow-float: 0 10px 20px rgba(50, 40, 30, 0.1), 0 24px 56px rgba(50, 40, 30, 0.16);
@@ -57,6 +68,13 @@
     --good: 138 182 129;
     --bad: 219 132 104;
     --warn: 225 165 89;
+
+    --diff-add: 138 178 132;
+    --diff-add-soft: 36 50 40;
+    --diff-del: 208 130 110;
+    --diff-del-soft: 54 38 34;
+    --diff-mod: 206 168 110;
+    --diff-mod-soft: 52 44 30;
 
     --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 8px rgba(0, 0, 0, 0.22);
     --shadow-raised: 0 2px 6px rgba(0, 0, 0, 0.34), 0 12px 32px rgba(0, 0, 0, 0.4);

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion, Reorder, useDragControls } from 'framer-motion';
-import { Settings2, Plus, Check, Clock3, Moon, Sunrise, ChevronRight, WifiOff, AlertCircle, GripVertical, ArrowUpDown, X } from 'lucide-react';
+import { Settings2, SquareTerminal, Plus, Check, Clock3, Moon, Sunrise, ChevronRight, WifiOff, AlertCircle, GripVertical, ArrowUpDown, X } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -263,11 +263,18 @@ export function QuickEntryScreen() {
         eyebrow={`${greeting()} · ${formatFull(today).replace(/,?\s\d{4}$/, '')}`}
         title="Heute"
         action={
-          <Link to="/einstellungen">
-            <IconButton label="Einstellungen">
-              <Settings2 size={20} />
-            </IconButton>
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link to="/konsole">
+              <IconButton label="Daten-Konsole">
+                <SquareTerminal size={20} />
+              </IconButton>
+            </Link>
+            <Link to="/einstellungen">
+              <IconButton label="Einstellungen">
+                <Settings2 size={20} />
+              </IconButton>
+            </Link>
+          </div>
         }
       />
 

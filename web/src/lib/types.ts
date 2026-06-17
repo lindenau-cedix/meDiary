@@ -301,3 +301,68 @@ export interface DreamLatest extends Partial<Dream> {
   exists: boolean;
   available: boolean;
 }
+
+// ───────────────────────── Daten-Konsole (Chat with your data) ─────────────────────────
+
+export type ChangeSetStatus = 'proposed' | 'applied' | 'undone' | 'discarded';
+
+/** Eine before→after-Zeile der Change-Set-Vorschau. */
+export interface DiffRow {
+  table: 'intakes' | 'substances';
+  id: number | null;
+  op: 'update' | 'delete' | 'create';
+  label: string;
+  before: Record<string, string | null> | null;
+  after: Record<string, string | null> | null;
+  changedKeys: string[];
+}
+
+export interface OperationPreview {
+  type: string;
+  label: string;
+  affected: number;
+  warning?: string;
+}
+
+export interface ChangeSetPreview {
+  operations: OperationPreview[];
+  totalAffected: number;
+  samples: DiffRow[];
+  sampleTruncated: boolean;
+}
+
+/** Ein vorgeschlagenes/angewandtes Change-Set der Daten-Konsole. */
+export interface ChangeSet {
+  id: number;
+  createdAt: string;
+  appliedAt: string | null;
+  undoneAt: string | null;
+  status: ChangeSetStatus;
+  prompt: string;
+  title: string;
+  summary: string | null;
+  affected: number;
+  operations: unknown[];
+  preview: ChangeSetPreview | null;
+}
+
+export interface ChatStatus {
+  available: boolean;
+  model: string | null;
+}
+
+export interface ChangeSetsResponse {
+  changeSets: ChangeSet[];
+  latestAppliedId: number | null;
+  available: boolean;
+}
+
+/** Ein Eintrag im (client-seitigen) Konsolen-Transkript. */
+export type TranscriptRole = 'user' | 'assistant';
+
+export interface ToolEvent {
+  phase: 'start' | 'result';
+  name: string;
+  info?: string;
+  summary?: string;
+}

@@ -11,6 +11,7 @@ import { DiaryScreen } from './screens/DiaryScreen';
 import { PlanScreen } from './screens/PlanScreen';
 import { TrendsScreen } from './screens/TrendsScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { ConsoleScreen } from './screens/ConsoleScreen';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -40,6 +41,7 @@ export function App() {
                 <Route path="tagebuch" element={<DiaryScreen />} />
                 <Route path="plan" element={<PlanScreen />} />
                 <Route path="werte" element={<TrendsScreen />} />
+                <Route path="konsole" element={<ConsoleScreen />} />
                 <Route path="einstellungen" element={<SettingsScreen />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>

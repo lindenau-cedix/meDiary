@@ -32,10 +32,19 @@ export default {
         good: c('--good'),
         bad: c('--bad'),
         warn: c('--warn'),
+        // Gedämpfte, überlegte Diff-Farben für die Daten-Konsole — bewusst KEIN
+        // grell-grün/-rot, sondern an die warme „Apotheken"-Palette angelehnt.
+        'diff-add': c('--diff-add'),
+        'diff-add-soft': c('--diff-add-soft'),
+        'diff-del': c('--diff-del'),
+        'diff-del-soft': c('--diff-del-soft'),
+        'diff-mod': c('--diff-mod'),
+        'diff-mod-soft': c('--diff-mod-soft'),
       },
       fontFamily: {
         display: ['"Fraunces Variable"', 'Georgia', 'serif'],
         sans: ['"Hanken Grotesk Variable"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        mono: ['"JetBrains Mono Variable"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       borderRadius: {
         '4xl': '2rem',

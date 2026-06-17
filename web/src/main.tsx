@@ -1,5 +1,6 @@
 import '@fontsource-variable/fraunces';
 import '@fontsource-variable/hanken-grotesk';
+import '@fontsource-variable/jetbrains-mono';
 import './index.css';
 
 import { StrictMode } from 'react';

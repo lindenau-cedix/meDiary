@@ -259,6 +259,77 @@ export const config = {
      */
     thinking: parseMinimaxThinking(process.env.DREAM_THINKING),
   },
+  /**
+   * „Daten-Konsole" (Chat with your data) — agentische Natürlichsprache-Konsole
+   * für Massenkorrekturen, die über die normale UI nicht möglich sind
+   * (Substanzen zusammenführen, Einnahmen rückwirkend nachtragen/löschen,
+   * Zeitzonen-Verschiebungen korrigieren …). Anders als das „Träumen"
+   * (OpenAI-Wire-Format) nutzt die Konsole den **Anthropic-kompatiblen**
+   * MiniMax-Endpunkt (`/v1/messages` mit Tool-Use), weil die Agent-Schleife
+   * (read-Tools sofort ausführen, `propose_change_set` nur vorschlagen) das
+   * Messages-Tool-Format braucht.
+   *
+   * Der Schlüssel wird ausschließlich serverseitig verwendet (NIE an den
+   * Client). Ohne Key liefert `GET /api/chat/status` `available:false` und die
+   * UI zeigt einen klaren Hinweis; `POST /api/chat/message` antwortet 503.
+   * Default-Key ist der ohnehin gesetzte `MINIMAX_API_KEY`, sodass die Konsole
+   * mit dem bestehenden MiniMax-Abo ohne Zusatzkonfiguration läuft; ein
+   * separater `CHAT_API_KEY` hat Vorrang.
+   */
+  chat: {
+    apiKey: process.env.CHAT_API_KEY?.trim() || process.env.MINIMAX_API_KEY?.trim() || null,
+    /** Modell-ID; via CHAT_MODEL überschreibbar (Default MiniMax-M3). */
+    model: process.env.CHAT_MODEL?.trim() || 'MiniMax-M3',
+    /**
+     * Anthropic-kompatible Basis-URL (Default https://api.minimax.io/anthropic;
+     * CN-Region: https://api.minimaxi.com/anthropic). Trailing slash entfernt.
+     * Der Client hängt `/v1/messages` an.
+     */
+    baseUrl: (process.env.CHAT_BASE_URL?.trim() || 'https://api.minimax.io/anthropic').replace(/\/$/, ''),
+    /** Max. Output-Tokens pro Modell-Runde (CHAT_MAX_TOKENS, Default 8000). */
+    maxTokens: (() => {
+      const n = Number(process.env.CHAT_MAX_TOKENS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 8000;
+    })(),
+    /**
+     * „thinking"-Parameter (CHAT_THINKING). Default `{ type: 'adaptive' }`
+     * (gültig auf Anthropic & MiniMax; siehe parseThinking). Aktiviertes Denken
+     * verbessert die Planung der Operationen merklich. `off` schaltet es ab.
+     */
+    thinking: parseThinking(process.env.CHAT_THINKING),
+    /**
+     * Harter Timeout pro Modell-Call in ms (CHAT_HTTP_TIMEOUT_MS, Default 120000).
+     * Node's `fetch` hat keinen Default-Timeout; ohne harten Abbruch könnte ein
+     * hängender Call die SSE-Antwort dauerhaft offen halten.
+     */
+    timeoutMs: (() => {
+      const n = Number(process.env.CHAT_HTTP_TIMEOUT_MS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 120000;
+    })(),
+    /** Max. Agent-Runden (Tool-Loop-Durchläufe) pro Anfrage (CHAT_MAX_STEPS, Default 12). */
+    maxSteps: (() => {
+      const n = Number(process.env.CHAT_MAX_STEPS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 12;
+    })(),
+    /** Zeilen-Obergrenze für `run_read_query` (CHAT_MAX_ROWS, Default 500). */
+    maxRows: (() => {
+      const n = Number(process.env.CHAT_MAX_ROWS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 500;
+    })(),
+    /** Mindestabstand zwischen zwei Chat-Anfragen in ms (CHAT_MIN_INTERVAL_MS, Default 1500). */
+    minIntervalMs: (() => {
+      const n = Number(process.env.CHAT_MIN_INTERVAL_MS);
+      return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 1500;
+    })(),
+    /**
+     * Zeilen-Schwelle, ab der ein Change-Set als „groß" gilt und in der UI eine
+     * zusätzliche Bestätigung verlangt (CHAT_LARGE_OP_THRESHOLD, Default 100).
+     */
+    largeOpThreshold: (() => {
+      const n = Number(process.env.CHAT_LARGE_OP_THRESHOLD);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 100;
+    })(),
+  },
   /** Nächtliches „Träumen" — Scheduler & manueller Trigger. */
   dream: {
     /** Uhrzeit "HH:MM" (lokale Wand­uhr = Europe/Berlin). Default 04:20. */

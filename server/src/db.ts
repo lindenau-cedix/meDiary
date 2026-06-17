@@ -90,6 +90,34 @@ CREATE TABLE IF NOT EXISTS dreams (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_dreams_date ON dreams(date);
+
+-- Daten-Konsole („Chat with your data"): Audit-Log & Undo für die per
+-- Natürlichsprache vorgeschlagenen Massen-Operationen. Jede Zeile ist EIN
+-- Change-Set (Stapel typisierter Operationen). Nichts wird angewandt, solange
+-- status='proposed'; beim Bestätigen werden alle Operationen in EINER
+-- Transaktion ausgeführt, ein Vorzustands-Snapshot (undo_snapshot) gespeichert
+-- und status='applied' gesetzt. „Undo" stellt aus dem Snapshot wieder her.
+--   prompt        die auslösende Natürlichsprache-Anweisung (Audit)
+--   title/summary kurze Beschreibung (vom Modell)
+--   operations    JSON-Array der typisierten, validierten Operationen
+--   preview       JSON des Dry-Runs (betroffene Zeilen + before→after-Sample)
+--   undo_snapshot JSON der Vorzustands-Zeilen (erst bei status='applied')
+--   affected      Anzahl betroffener Zeilen (zum Anzeigen/Schwelle)
+CREATE TABLE IF NOT EXISTS chat_change_sets (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  created_at    TEXT    NOT NULL,
+  applied_at    TEXT,
+  undone_at     TEXT,
+  status        TEXT    NOT NULL DEFAULT 'proposed',
+  prompt        TEXT    NOT NULL,
+  title         TEXT    NOT NULL,
+  summary       TEXT,
+  operations    TEXT    NOT NULL,
+  preview       TEXT,
+  undo_snapshot TEXT,
+  affected      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_chat_change_sets_status ON chat_change_sets(status);
 `);
 
 // Migration: Schemaumbenennung der Habit-Spalten von "PC-Nutzung" auf
@@ -166,6 +194,8 @@ export interface IntakeRow {
   amount: string | null;
   notes: string | null;
   created_at: string;
+  /** Batch-/Herkunftsmarker (Import, Begleitsubstanz, Konsole) — per Migration ergänzt. */
+  source_event_id: string | null;
 }
 
 export interface PlanVersionRow {
@@ -217,6 +247,26 @@ export interface DreamRow {
   status: string;
   created_at: string;
   updated_at: string;
+}
+
+export type ChatChangeSetStatus = 'proposed' | 'applied' | 'undone' | 'discarded';
+
+export interface ChatChangeSetRow {
+  id: number;
+  created_at: string;
+  applied_at: string | null;
+  undone_at: string | null;
+  status: ChatChangeSetStatus;
+  prompt: string;
+  title: string;
+  summary: string | null;
+  /** JSON-Array der typisierten Operationen (siehe lib/chat_tools.ts). */
+  operations: string;
+  /** JSON des Dry-Run-Previews (betroffene Zeilen + before→after-Sample). */
+  preview: string | null;
+  /** JSON der Vorzustands-Zeilen für „Undo" (erst bei status='applied'). */
+  undo_snapshot: string | null;
+  affected: number;
 }
 
 // ---------- Traum-Helfer ----------
@@ -421,3 +471,76 @@ export const createPlanVersion = db.transaction(
     return db.prepare(`SELECT * FROM plan_versions WHERE id = ?`).get(versionId) as PlanVersionRow;
   },
 );
+
+// ---------- Daten-Konsole: Change-Set-Helfer ----------
+
+/** Legt ein vorgeschlagenes (noch nicht angewandtes) Change-Set an. */
+export function insertChangeSet(input: {
+  prompt: string;
+  title: string;
+  summary: string | null;
+  operations: unknown;
+  preview: unknown;
+  affected: number;
+}): ChatChangeSetRow {
+  const now = nowLocalISO();
+  const info = db
+    .prepare(
+      `INSERT INTO chat_change_sets (created_at, status, prompt, title, summary, operations, preview, affected)
+       VALUES (?, 'proposed', ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      now,
+      input.prompt,
+      input.title,
+      input.summary,
+      JSON.stringify(input.operations),
+      JSON.stringify(input.preview),
+      input.affected,
+    );
+  return changeSetById(Number(info.lastInsertRowid))!;
+}
+
+export function changeSetById(id: number): ChatChangeSetRow | null {
+  return (
+    (db.prepare(`SELECT * FROM chat_change_sets WHERE id = ?`).get(id) as ChatChangeSetRow | undefined) ?? null
+  );
+}
+
+/** Change-Sets (neueste zuerst). Optional nach Status filtern. */
+export function listChangeSets(opts?: { limit?: number; status?: ChatChangeSetStatus }): ChatChangeSetRow[] {
+  const where = opts?.status ? `WHERE status = @status` : '';
+  const limit = opts?.limit && opts.limit > 0 ? `LIMIT ${Math.floor(opts.limit)}` : 'LIMIT 50';
+  return db
+    .prepare(`SELECT * FROM chat_change_sets ${where} ORDER BY id DESC ${limit}`)
+    .all(opts?.status ? { status: opts.status } : {}) as ChatChangeSetRow[];
+}
+
+/**
+ * Das jüngste tatsächlich angewandte Change-Set (für die „Undo"-Schaltfläche).
+ * Maßgeblich ist die höchste id mit status='applied' — nur dieses darf
+ * rückgängig gemacht werden (kein Undo „über" eine neuere Anwendung hinweg).
+ */
+export function latestAppliedChangeSet(): ChatChangeSetRow | null {
+  return (
+    (db
+      .prepare(`SELECT * FROM chat_change_sets WHERE status = 'applied' ORDER BY id DESC LIMIT 1`)
+      .get() as ChatChangeSetRow | undefined) ?? null
+  );
+}
+
+export function markChangeSetApplied(id: number, undoSnapshot: unknown, affected: number): void {
+  db.prepare(
+    `UPDATE chat_change_sets
+       SET status = 'applied', applied_at = ?, undo_snapshot = ?, affected = ?
+     WHERE id = ?`,
+  ).run(nowLocalISO(), JSON.stringify(undoSnapshot), affected, id);
+}
+
+export function markChangeSetUndone(id: number): void {
+  db.prepare(`UPDATE chat_change_sets SET status = 'undone', undone_at = ? WHERE id = ?`).run(nowLocalISO(), id);
+}
+
+export function markChangeSetDiscarded(id: number): void {
+  db.prepare(`UPDATE chat_change_sets SET status = 'discarded' WHERE id = ? AND status = 'proposed'`).run(id);
+}

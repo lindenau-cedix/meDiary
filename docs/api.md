@@ -38,6 +38,13 @@
 | `POST` | `/api/dreams/generate` | Manueller Trigger (`{ date?, force? }`); **token-primär** (`X-Dream-Token`), fail-closed (403 ohne Auth, 429 Rate-Limit, 503 ohne `MINIMAX_API_KEY`, 409 wenn schon eine läuft) |
 | `GET` | `/api/dreams/:date` | Einzelner Traum (immer 200, `exists: false`, wenn leer) |
 | `DELETE` | `/api/dreams/:date` | Traum löschen (204 / 404) |
+| `GET` | `/api/chat/status` | Daten-Konsole: `{ available, model }` (`available:false` ohne Key) |
+| `GET` | `/api/chat/change-sets?limit=` | Change-Set-Audit-Log (neueste zuerst); `{ changeSets[], latestAppliedId, available }` |
+| `GET` | `/api/chat/change-sets/:id` | Einzelnes Change-Set (`{ changeSet, latestAppliedId }`, 404) |
+| `POST` | `/api/chat/message` | **SSE** — Natürlichsprache-Anfrage (`{ message, history? }`); streamt `token`/`thinking`/`tool`/`changeset`/`done`/`error`. **CF-Access**, rate-limitiert, 503 ohne Key |
+| `POST` | `/api/chat/change-sets/:id/apply` | Change-Set anwenden (transaktional + Undo-Snapshot); 409 wenn nicht `proposed`. **CF-Access** |
+| `POST` | `/api/chat/change-sets/:id/undo` | Jüngstes angewandtes Change-Set rückgängig machen; 409 sonst. **CF-Access** |
+| `POST` | `/api/chat/change-sets/:id/discard` | Vorgeschlagenes Change-Set verwerfen; 409 wenn nicht `proposed`. **CF-Access** |
 
 `POST /api/intakes` liefert `{ intake, nightMed, assessmentDate, assessmentExists, createdSubstance, companions }` — `createdSubstance: true` heißt, der Name war neu und wurde als QuickPick angelegt; `companions` (`{ intake, createdSubstance }[]`) sind die automatisch miterfassten Begleit-Einnahmen aus `Mit:`-Defaults (leer, wenn keine).
 

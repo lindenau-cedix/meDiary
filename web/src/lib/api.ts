@@ -21,6 +21,9 @@ import type {
   DreamListResponse,
   DreamLatest,
   Dream,
+  ChatStatus,
+  ChangeSet,
+  ChangeSetsResponse,
 } from './types';
 
 const API_BASE_KEY = 'mediary.apiBase';
@@ -247,4 +250,123 @@ export const api = {
     get: (date: string) => request<Habit>(`/api/habit/${date}`),
     remove: (date: string) => request<void>(`/api/habit/${date}`, { method: 'DELETE' }),
   },
+
+  /**
+   * Daten-Konsole („Chat with your data"). `message()` streamt per SSE (eigene
+   * Funktion `streamChatMessage`); die Change-Set-Aktionen laufen über `request`.
+   */
+  chat: {
+    status: () => request<ChatStatus>('/api/chat/status'),
+    changeSets: (limit?: number) => request<ChangeSetsResponse>(`/api/chat/change-sets${qs({ limit })}`),
+    apply: (id: number) =>
+      request<{ changeSet: ChangeSet; affected: number; latestAppliedId: number | null }>(
+        `/api/chat/change-sets/${id}/apply`,
+        { method: 'POST' },
+      ),
+    undo: (id: number) =>
+      request<{ changeSet: ChangeSet; latestAppliedId: number | null }>(`/api/chat/change-sets/${id}/undo`, {
+        method: 'POST',
+      }),
+    discard: (id: number) =>
+      request<{ changeSet: ChangeSet }>(`/api/chat/change-sets/${id}/discard`, { method: 'POST' }),
+  },
 };
+
+// ───────────────────────── Chat-SSE-Streaming ─────────────────────────
+
+export interface ChatStreamHandlers {
+  onToken?: (text: string) => void;
+  onThinking?: (text: string) => void;
+  onTool?: (e: { phase: 'start' | 'result'; name: string; info?: string; summary?: string }) => void;
+  onChangeSet?: (cs: ChangeSet) => void;
+  onDone?: (d: { finalText: string; proposals: number }) => void;
+  onError?: (msg: string) => void;
+}
+
+/**
+ * Sendet eine Konsolen-Nachricht und konsumiert die SSE-Antwort des Servers
+ * (`event:`/`data:`-Paare). Der gemeinsame `request`-Helfer taugt dafür nicht
+ * (JSON-only), daher eigener Reader. `signal` bricht den Stream ab.
+ */
+export async function streamChatMessage(
+  body: { message: string; history?: { role: 'user' | 'assistant'; text: string }[] },
+  handlers: ChatStreamHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(apiUrl('/api/chat/message'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e) {
+    handlers.onError?.('Server nicht erreichbar. Verbindung & Server-Adresse prüfen.');
+    void e;
+    return;
+  }
+
+  if (!res.ok || !res.body) {
+    const data = await parseResponseText(res);
+    handlers.onError?.(errorMessage(data, res.status));
+    return;
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const dispatch = (event: string, dataStr: string) => {
+    let data: Record<string, unknown> = {};
+    try {
+      data = dataStr ? JSON.parse(dataStr) : {};
+    } catch {
+      return;
+    }
+    switch (event) {
+      case 'token':
+        handlers.onToken?.(String(data.text ?? ''));
+        break;
+      case 'thinking':
+        handlers.onThinking?.(String(data.text ?? ''));
+        break;
+      case 'tool':
+        handlers.onTool?.(data as { phase: 'start' | 'result'; name: string; info?: string; summary?: string });
+        break;
+      case 'changeset':
+        handlers.onChangeSet?.((data as { changeSet: ChangeSet }).changeSet);
+        break;
+      case 'done':
+        handlers.onDone?.({ finalText: String(data.finalText ?? ''), proposals: Number(data.proposals ?? 0) });
+        break;
+      case 'error':
+        handlers.onError?.(String(data.error ?? 'Unbekannter Fehler'));
+        break;
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let sep: number;
+      while ((sep = buffer.indexOf('\n\n')) !== -1) {
+        const rawEvent = buffer.slice(0, sep);
+        buffer = buffer.slice(sep + 2);
+        let event = 'message';
+        const dataLines: string[] = [];
+        for (const line of rawEvent.split('\n')) {
+          const l = line.replace(/\r$/, '');
+          if (l.startsWith('event:')) event = l.slice(6).trim();
+          // Mehrere data:-Zeilen werden gemäß SSE-Spec mit \n verbunden.
+          else if (l.startsWith('data:')) dataLines.push(l.slice(5).replace(/^ /, ''));
+        }
+        dispatch(event, dataLines.join('\n'));
+      }
+    }
+  } catch (e) {
+    if (!signal?.aborted) handlers.onError?.((e as Error).message);
+  }
+}

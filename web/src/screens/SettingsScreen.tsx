@@ -1,4 +1,5 @@
 import { useRef, useState, type ChangeEvent } from 'react';
+import { Link } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Sun,
@@ -19,6 +20,8 @@ import {
   Upload,
   FileSpreadsheet,
   AlertTriangle,
+  SquareTerminal,
+  ChevronRight,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -192,6 +195,28 @@ export function SettingsScreen() {
                 <span className="block text-xs text-ink-muted">Liste zum Antippen, Farben, Nachtmedikation</span>
               </span>
             </button>
+          </Card>
+        </section>
+
+        {/* Daten-Konsole */}
+        <section>
+          <SectionLabel className="px-1 mb-2.5">Daten-Konsole</SectionLabel>
+          <Card className="overflow-hidden">
+            <Link
+              to="/konsole"
+              className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-surface2"
+            >
+              <span className="grid size-9 place-items-center rounded-xl bg-surface2 text-primary">
+                <SquareTerminal size={18} />
+              </span>
+              <span className="flex-1">
+                <span className="block font-medium text-ink">Chat mit deinen Daten</span>
+                <span className="block text-xs text-ink-muted">
+                  Massen-Korrekturen in Worten — Vorschau &amp; Bestätigung vor jeder Änderung
+                </span>
+              </span>
+              <ChevronRight size={18} className="text-ink-faint" />
+            </Link>
           </Card>
         </section>
 
