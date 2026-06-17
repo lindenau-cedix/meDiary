@@ -1,43 +1,50 @@
-import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import {
-  BookOpen,
-  Sparkles,
-  RefreshCw,
-  List,
-  Pencil,
-  Check,
-  X,
-  AlertCircle,
-  Moon,
-  Sun,
-} from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { List, Moon, MoonStar, Sun, ChevronDown, Sparkles } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
-import { TextArea } from '../components/ui/inputs';
-import { EmptyState, LoadingScreen, Badge, SectionLabel } from '../components/ui/feedback';
-import { useToast } from '../components/Toaster';
+import { EmptyState, LoadingScreen } from '../components/ui/feedback';
+import { DreamProse } from '../components/DreamProse';
+import { Starfield } from '../components/Starfield';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
-import { formatDayLabel } from '../lib/format';
-import { useDiaryNotes, useDiary, useGenerateDiary, useSaveDiary, useMetrics } from '../lib/queries';
-import { ApiError } from '../lib/api';
-import type { DiaryEntry } from '../lib/types';
+import { formatDayLabel, formatFull, relativeDays } from '../lib/format';
+import { useDiaryNotes, useDreams, useMetrics } from '../lib/queries';
+import type { Dream } from '../lib/types';
 
-type Mode = 'short' | 'full';
+type Mode = 'info' | 'traum';
 
 export function DiaryScreen() {
-  const [mode, setMode] = useState<Mode>('short');
+  const [params, setParams] = useSearchParams();
+  const initial: Mode = params.get('view') === 'traum' ? 'traum' : 'info';
+  const [mode, setMode] = useState<Mode>(initial);
+
+  // Der Startup-Dialog navigiert mit ?view=traum hierher — auch wenn der Tab
+  // schon offen ist, soll dann der Traum-Untertab erscheinen.
+  useEffect(() => {
+    const v = params.get('view');
+    if (v === 'traum') setMode('traum');
+    else if (v === 'info') setMode('info');
+  }, [params]);
+
+  const change = (m: Mode) => {
+    haptics.select();
+    setMode(m);
+    // URL-Param aufräumen, damit ein Reload nicht im falschen Tab landet.
+    if (params.has('view')) {
+      params.delete('view');
+      setParams(params, { replace: true });
+    }
+  };
 
   return (
     <>
       <PageHeader
         title="Tagebuch"
-        eyebrow="aus deinen Notizen"
-        action={<ModeToggle mode={mode} onChange={setMode} />}
+        eyebrow={mode === 'traum' ? 'nächtliche Auswertung' : 'aus deinen Notizen'}
+        action={<ModeToggle mode={mode} onChange={change} />}
       />
-      {mode === 'short' ? <ShortDiary /> : <FullDiary />}
+      {mode === 'info' ? <ShortDiary /> : <DreamHistory />}
     </>
   );
 }
@@ -47,16 +54,13 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
     <div className="flex rounded-2xl bg-surface2 p-0.5 ring-1 ring-line">
       {(
         [
-          { key: 'short', label: 'Kurz', Icon: List },
-          { key: 'full', label: 'Voll', Icon: BookOpen },
+          { key: 'info', label: 'Info', Icon: List },
+          { key: 'traum', label: 'Traum', Icon: Moon },
         ] as const
       ).map(({ key, label, Icon }) => (
         <button
           key={key}
-          onClick={() => {
-            haptics.select();
-            onChange(key);
-          }}
+          onClick={() => onChange(key)}
           className={cx(
             'press inline-flex items-center gap-1.5 rounded-[14px] px-3 h-9 text-[13px] font-semibold transition-colors',
             mode === key ? 'bg-surface text-ink shadow-soft' : 'text-ink-muted hover:text-ink',
@@ -82,7 +86,7 @@ function fmtHours(unixDelta: number): string {
   return `${h.toFixed(1)} h`;
 }
 
-// ───────────────────────── Kurzversion: Liste der Notizen ─────────────────────────
+// ───────────────────────── Info: Liste der Notizen (Roh-Log) ─────────────────────────
 
 function ShortDiary() {
   const { data, isLoading } = useDiaryNotes();
@@ -166,202 +170,151 @@ function ShortDiary() {
   );
 }
 
-// ───────────────────────── Vollversion: KI-Tagebuch ─────────────────────────
+// ───────────────────────── Traum: Historie der nächtlichen Auswertungen ─────────────────────────
 
-function FullDiary() {
-  const toast = useToast();
-  const { data, isLoading, error } = useDiary();
-  const generate = useGenerateDiary();
-  const save = useSaveDiary();
+const monthFmt = new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' });
+function monthLabel(date: string): string {
+  return monthFmt.format(new Date(`${date}T12:00:00`));
+}
 
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState('');
+function DreamHistory() {
+  const { data, isLoading } = useDreams();
 
-  if (isLoading) return <LoadingScreen />;
-  if (!data) {
-    // Statt eines leeren Tabs: Offline-/Fehler-Hinweis (wie im Heute-Tab).
-    const offline = error instanceof ApiError && error.status === 0;
+  if (isLoading) return <DreamSkeleton />;
+
+  const dreams = data?.dreams ?? [];
+  const available = data?.available ?? false;
+
+  if (dreams.length === 0) {
     return (
-      <EmptyState
-        icon={<AlertCircle size={26} />}
-        title={offline ? 'Server nicht erreichbar' : 'Tagebuch nicht ladbar'}
-        description={
-          offline
-            ? 'Adresse in den Einstellungen prüfen.'
-            : (error as Error | null)?.message ?? 'Bitte später erneut versuchen.'
-        }
-      />
-    );
-  }
-
-  const { available, entries, pendingDays, noteworthyDays, model, lastGeneratedAt } = data;
-  const busy = generate.isPending;
-
-  const onGenerate = async (scope: 'missing' | 'all') => {
-    if (scope === 'all' && entries.length > 0) {
-      if (!window.confirm('Alle Tagebuch-Einträge neu generieren? Vorhandener (auch manuell bearbeiteter) Text wird überschrieben.')) {
-        return;
-      }
-    }
-    try {
-      const res = await generate.mutateAsync({ scope });
-      haptics.success();
-      const parts = [`${res.generated} Tag${res.generated === 1 ? '' : 'e'} generiert`];
-      if (res.pendingDays.length) parts.push(`${res.pendingDays.length} noch offen`);
-      if (res.errors.length) parts.push(`${res.errors.length} Fehler`);
-      toast.show({
-        tone: res.errors.length ? 'warning' : 'success',
-        message: 'Tagebuch aktualisiert',
-        detail: parts.join(' · '),
-      });
-    } catch (e) {
-      haptics.warning();
-      toast.show({ tone: 'warning', message: 'Generierung fehlgeschlagen', detail: (e as Error).message });
-    }
-  };
-
-  const onSave = async () => {
-    try {
-      await save.mutateAsync(draft);
-      haptics.success();
-      toast.show({ message: 'Tagebuch gespeichert' });
-      setEditing(false);
-    } catch (e) {
-      haptics.warning();
-      toast.show({ tone: 'warning', message: 'Speichern fehlgeschlagen', detail: (e as Error).message });
-    }
-  };
-
-  if (editing) {
-    return (
-      <div className="space-y-3">
-        <SectionLabel>Tagebuch-Datei bearbeiten</SectionLabel>
-        <TextArea value={draft} onChange={(e) => setDraft(e.target.value)} rows={22} className="font-mono text-[13px]" />
-        <div className="flex items-center gap-3">
-          <Button variant="ghost" icon={<X size={17} />} onClick={() => setEditing(false)}>
-            Abbrechen
-          </Button>
-          <div className="flex-1" />
-          <Button icon={<Check size={18} />} onClick={onSave} loading={save.isPending}>
-            Speichern
-          </Button>
-        </div>
+      <div className="space-y-4">
+        <DreamListHeader />
+        <EmptyState
+          icon={<MoonStar size={26} />}
+          iconClassName="dream-night text-[rgb(var(--periwinkle))] ring-1 ring-[rgb(var(--periwinkle))]/20"
+          title="Noch keine Träume"
+          description={
+            available
+              ? 'Die App träumt heute Nacht um 4:20 Uhr — dann erscheint hier die erste Auswertung deines Tages.'
+              : 'Sobald ein MINIMAX_API_KEY hinterlegt ist, erstellt die App jede Nacht um 4:20 Uhr eine Auswertung deines Tages.'
+          }
+        />
       </div>
     );
   }
 
+  // Nach Monat gruppieren (neueste zuerst — dreams kommen bereits absteigend).
+  const groups: { month: string; items: Dream[] }[] = [];
+  for (const d of dreams) {
+    const m = monthLabel(d.date);
+    const last = groups[groups.length - 1];
+    if (last && last.month === m) last.items.push(d);
+    else groups.push({ month: m, items: [d] });
+  }
+
   return (
-    <div className="space-y-4">
-      {/* Statuskarte + Aktionen */}
-      <Card className="p-4 space-y-3">
-        {!available && (
-          <div className="flex items-start gap-3 rounded-2xl bg-warn/10 p-3">
-            <AlertCircle size={18} className="text-warn shrink-0 mt-0.5" />
-            <div className="text-sm">
-              <p className="font-medium text-ink">KI-Generierung nicht konfiguriert</p>
-              <p className="text-ink-muted text-xs leading-snug mt-0.5">
-                Setze <span className="font-mono">ANTHROPIC_API_KEY</span> (und optional{' '}
-                <span className="font-mono">DIARY_MODEL</span>) in der <span className="font-mono">.env</span> des
-                Servers, um Tagebuch-Texte zu erzeugen. Die Kurzversion funktioniert auch ohne.
-              </p>
-            </div>
+    <div className="space-y-6">
+      <DreamListHeader />
+      {groups.map((g) => (
+        <section key={g.month} className="space-y-3">
+          <h2 className="font-display text-lg text-ink/90 px-1 capitalize">{g.month}</h2>
+          <div className="space-y-3">
+            {g.items.map((d) => (
+              <DreamCard key={d.date} dream={d} />
+            ))}
           </div>
-        )}
-
-        <div className="flex flex-wrap items-center gap-2 text-xs text-ink-muted">
-          <Badge tone="primary">{entries.length} generiert</Badge>
-          {pendingDays.length > 0 && <Badge tone="warn">{pendingDays.length} offen</Badge>}
-          <Badge tone="neutral">{noteworthyDays.length} Tage mit Notizen</Badge>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2.5">
-          <Button
-            size="sm"
-            icon={<Sparkles size={16} />}
-            onClick={() => onGenerate('missing')}
-            loading={busy}
-            disabled={!available || pendingDays.length === 0}
-          >
-            {pendingDays.length > 0 ? `${pendingDays.length} offene Tage generieren` : 'Alles aktuell'}
-          </Button>
-          {entries.length > 0 && (
-            <Button
-              size="sm"
-              variant="soft"
-              icon={<RefreshCw size={15} />}
-              onClick={() => onGenerate('all')}
-              loading={busy}
-              disabled={!available}
-            >
-              Alles neu
-            </Button>
-          )}
-          {(entries.length > 0 || data.raw.trim()) && (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<Pencil size={15} />}
-              onClick={() => {
-                setDraft(data.raw);
-                setEditing(true);
-              }}
-            >
-              Bearbeiten
-            </Button>
-          )}
-        </div>
-
-        {(lastGeneratedAt || model) && (
-          <p className="text-[11px] text-ink-faint">
-            {lastGeneratedAt && <>Zuletzt generiert {formatDayLabel(lastGeneratedAt.slice(0, 10))} · </>}
-            Modell {model}
-          </p>
-        )}
-      </Card>
-
-      {/* Generierte Einträge */}
-      {entries.length === 0 ? (
-        <EmptyState
-          icon={<BookOpen size={26} />}
-          title="Noch kein Tagebuch erzeugt"
-          description={
-            available
-              ? 'Tippe oben auf „offene Tage generieren", um aus deinen Notizen einen Tagebuch-Text zu erstellen.'
-              : 'Sobald ein API-Key hinterlegt ist, kannst du hier aus deinen Notizen ein Tagebuch generieren.'
-          }
-          action={
-            !available ? (
-              <Link to="/einstellungen">
-                <Button size="sm" variant="soft">
-                  Einstellungen
-                </Button>
-              </Link>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="space-y-4">
-          {entries.map((entry) => (
-            <DiaryEntryCard key={entry.date} entry={entry} />
-          ))}
-        </div>
-      )}
+        </section>
+      ))}
     </div>
   );
 }
 
-function DiaryEntryCard({ entry }: { entry: DiaryEntry }) {
-  const paragraphs = entry.body.split(/\n{2,}/).map((p) => p.replace(/\n/g, ' ').trim()).filter(Boolean);
+/** Listenkopf mit dezentem Nacht-Akzent (kleiner Halo + Sternchen). */
+function DreamListHeader() {
   return (
-    <Card className="p-4">
-      <h2 className="font-display text-lg text-ink mb-2">{entry.heading || formatDayLabel(entry.date)}</h2>
-      <div className="space-y-2.5">
-        {paragraphs.map((p, i) => (
-          <p key={i} className="text-[15px] leading-relaxed text-ink-muted">
-            {p}
+    <div className="relative overflow-hidden rounded-3xl dream-night dream-grain px-5 py-4 ring-1 ring-[rgb(var(--periwinkle))]/20">
+      <Starfield count={8} className="opacity-80" />
+      <div className="relative flex items-center gap-3">
+        <span className="grid place-items-center size-9 rounded-2xl bg-[rgb(var(--periwinkle))]/15 dream-accent">
+          <Moon size={18} />
+        </span>
+        <div className="min-w-0">
+          <p className="font-display text-[17px] dream-ink leading-tight">Träume</p>
+          <p className="text-[12px] dream-ink-soft leading-snug">
+            Jede Nacht eine ruhige Auswertung deines Tages — Muster, Trends, Punkte fürs Arztgespräch.
           </p>
-        ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const COLLAPSE_AT = 680; // Zeichen — längere Träume werden eingeklappt
+
+function DreamCard({ dream }: { dream: Dream }) {
+  // `long` aus dem aktuellen Inhalt ableiten (nicht nur beim Mount), damit ein
+  // Refetch/Regenerieren, der die Länge über/unter COLLAPSE_AT schiebt, die
+  // Karte nicht in einem veralteten Zustand „klemmt" (geklappt ohne
+  // Weiterlesen-Button). `expanded` ist nur die explizite Nutzer-Aktion.
+  const long = dream.content.length > COLLAPSE_AT;
+  const [expanded, setExpanded] = useState(false);
+  const open = !long || expanded;
+
+  return (
+    <Card className="relative overflow-hidden p-0">
+      {/* zarte Indigo-Kante links als Nacht-Signatur */}
+      <span className="absolute inset-y-0 left-0 w-[3px] bg-[rgb(var(--periwinkle))]/45" aria-hidden />
+      <div className="p-4 pl-5">
+        <div className="flex items-baseline justify-between gap-3 mb-2.5">
+          <h3 className="font-display text-[18px] text-ink leading-tight">{formatFull(dream.date)}</h3>
+          <span className="text-[11px] text-ink-faint shrink-0">{relativeDays(dream.date)}</span>
+        </div>
+
+        <div className="relative">
+          <div
+            className={cx('relative', !open && 'max-h-[10.5rem] overflow-hidden')}
+            style={!open ? { maskImage: 'linear-gradient(to bottom, black 62%, transparent)', WebkitMaskImage: 'linear-gradient(to bottom, black 62%, transparent)' } : undefined}
+          >
+            <DreamProse content={dream.content} tone="surface" />
+          </div>
+        </div>
+
+        {long && (
+          <button
+            onClick={() => {
+              haptics.select();
+              setExpanded((o) => !o);
+            }}
+            className="press mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-primary"
+          >
+            {expanded ? 'Weniger' : 'Weiterlesen'}
+            <ChevronDown size={15} className={cx('transition-transform', expanded && 'rotate-180')} />
+          </button>
+        )}
       </div>
     </Card>
+  );
+}
+
+function DreamSkeleton() {
+  return (
+    <div className="space-y-6">
+      <DreamListHeader />
+      <div className="space-y-3">
+        {[0, 1, 2].map((i) => (
+          <Card key={i} className="p-4 pl-5">
+            <div className="h-5 w-40 rounded-full bg-surface2 mb-3 animate-pulse" />
+            <div className="space-y-2">
+              {[0, 1, 2].map((j) => (
+                <div key={j} className="h-3.5 rounded-full bg-surface2/70 animate-pulse" style={{ width: `${90 - j * 12}%` }} />
+              ))}
+            </div>
+          </Card>
+        ))}
+      </div>
+      <p className="flex items-center justify-center gap-2 text-xs text-ink-faint">
+        <Sparkles size={13} className="text-ink-faint" /> Träume werden geladen …
+      </p>
+    </div>
   );
 }

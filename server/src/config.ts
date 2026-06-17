@@ -65,6 +65,38 @@ function resolveFromRoot(p: string): string {
 }
 
 /**
+ * Pfad zu `system_prompt.md` (System-Prompt für das nächtliche „Träumen").
+ * Wird zur Laufzeit bei JEDER Generierung frisch gelesen (kein Cache), damit
+ * der Nutzer den Prompt ändern kann, ohne den Server neu zu starten.
+ *
+ * Auflösung (erster existierender Treffer gewinnt):
+ *   1. DREAM_SYSTEM_PROMPT_PATH aus der .env (absolut oder relativ zu cwd).
+ *   2. <cwd>/system_prompt.md            — Dev: Repo-Root; Prod: ~/mediary (WorkingDirectory).
+ *   3. <SERVER_ROOT>/system_prompt.md    — neben dem Build (build.sh kopiert es dorthin).
+ *   4. <SERVER_ROOT>/../system_prompt.md — Dev-Fallback (server/ → Repo-Root).
+ * Existiert keiner, gilt (2) als Default — die Generierung wirft dann einen
+ * klaren Fehler („system_prompt.md nicht gefunden").
+ */
+function findSystemPromptPath(): string {
+  if (process.env.DREAM_SYSTEM_PROMPT_PATH) {
+    return resolveFromRoot(process.env.DREAM_SYSTEM_PROMPT_PATH);
+  }
+  const candidates = [
+    path.resolve(process.cwd(), 'system_prompt.md'),
+    path.join(SERVER_ROOT, 'system_prompt.md'),
+    path.resolve(SERVER_ROOT, '..', 'system_prompt.md'),
+  ];
+  for (const c of candidates) {
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch {
+      /* ignore */
+    }
+  }
+  return candidates[0];
+}
+
+/**
  * `thinking`-Parameter für die Tagebuch-Generierung (DIARY_THINKING).
  *  - leer / `adaptive` / `on` / `true`  → `{ type: 'adaptive' }` (Default)
  *  - `off` / `none` / `disabled` / `false` / `0` → kein thinking-Feld (weggelassen)
@@ -84,6 +116,27 @@ function parseThinking(raw: string | undefined): { type: string; budget_tokens?:
   const n = Number(v);
   if (Number.isFinite(n) && n > 0) return { type: 'enabled', budget_tokens: Math.floor(n) };
   return { type: 'adaptive' }; // Unbekannter Wert → sicherer Default
+}
+
+/**
+ * `thinking`-Parameter für **MiniMax M3** (OpenAI-kompatibler
+ * `/chat/completions`-Endpunkt). Laut MiniMax-Doku akzeptiert M3 für `thinking.type`
+ * AUSSCHLIESSLICH `'adaptive'` oder `'disabled'` (KEIN `budget_tokens` wie die
+ * Anthropic-Messages-API — daher eine eigene, doku-treue Funktion statt
+ * `parseThinking`). Wird das Feld weggelassen, ist Thinking standardmäßig AN;
+ * wir senden es deshalb IMMER explizit, damit `DREAM_THINKING=off` verlässlich
+ * abschaltet (sonst bliebe Thinking trotz „off" an).
+ *  - leer / `adaptive` / `on` / `true` / Zahl / unbekannt → `{ type: 'adaptive' }` (Default)
+ *  - `off` / `none` / `disabled` / `false` / `0` / `no`    → `{ type: 'disabled' }`
+ *
+ * Quelle: platform.minimax.io „OpenAI SDK" / Chat-Completions-Referenz:
+ * „Controls MiniMax-M3 thinking. type can be disabled or adaptive; when omitted,
+ * thinking is on by default."
+ */
+function parseMinimaxThinking(raw: string | undefined): { type: 'adaptive' | 'disabled' } {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (['off', 'none', 'disabled', 'false', '0', 'no'].includes(v)) return { type: 'disabled' };
+  return { type: 'adaptive' };
 }
 
 export const config = {
@@ -160,6 +213,100 @@ export const config = {
     })(),
     /** `thinking`-Parameter (DIARY_THINKING, Default `{ type: 'adaptive' }`); siehe parseThinking(). */
     thinking: parseThinking(process.env.DIARY_THINKING),
+  },
+  /**
+   * MiniMax M3 (OpenAI-kompatibler Endpunkt) für das nächtliche „Träumen"
+   * (die tägliche Auswertung). Anders als die Anthropic-kompatible Diary-
+   * Integration nutzt MiniMax hier den **OpenAI-Wire-Format**-Endpunkt
+   * `POST {baseUrl}/chat/completions` mit `Authorization: Bearer` und Antwort
+   * in `choices[0].message.content`. Ohne `apiKey` läuft der Scheduler nicht
+   * an und der manuelle Trigger liefert 503.
+   */
+  minimax: {
+    apiKey: process.env.MINIMAX_API_KEY?.trim() || null,
+    /** Modell-ID; via MINIMAX_MODEL überschreibbar (Default MiniMax-M3). */
+    model: process.env.MINIMAX_MODEL?.trim() || 'MiniMax-M3',
+    /** Basis-URL (Default https://api.minimax.io/v1); trailing slash entfernt. */
+    baseUrl: (process.env.MINIMAX_BASE_URL?.trim() || 'https://api.minimax.io/v1').replace(/\/$/, ''),
+    /**
+     * Maximale Output-Tokens (DREAM_MAX_TOKENS). Großzügig, weil M3 ein
+     * Reasoning-Modell ist und sein Denken in dieses Budget fällt — zu knapp
+     * würde die eigentliche Auswertung abschneiden. Bei Accounts mit niedrigerem
+     * Output-Limit ggf. herabsetzen (die API meldet eine zu hohe Vorgabe klar).
+     */
+    maxTokens: (() => {
+      const n = Number(process.env.DREAM_MAX_TOKENS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 40000;
+    })(),
+    /** Sampling-Temperatur (DREAM_TEMPERATURE, Default 0.6 wie im Referenz-Call). */
+    temperature: (() => {
+      const n = Number(process.env.DREAM_TEMPERATURE);
+      return Number.isFinite(n) && n >= 0 ? n : 0.6;
+    })(),
+    /**
+     * Harter Timeout pro MiniMax-Call (DREAM_HTTP_TIMEOUT_MS, Default 120000 =
+     * 2 min). Node's `fetch` hat keinen Default-Timeout für hängende/halb-offene
+     * Verbindungen; ohne harten Abbruch könnte ein hängender Call den
+     * `withDreamLock`-Guard dauerhaft blockieren (Scheduler armt nie neu).
+     */
+    timeoutMs: (() => {
+      const n = Number(process.env.DREAM_HTTP_TIMEOUT_MS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 120000;
+    })(),
+    /**
+     * `thinking`-Switch für die Traum-Generierung (Env **DREAM_THINKING**).
+     * Default `{ type: 'adaptive' }` (Doku-konform für M3, verbessert die
+     * Analyse). `DREAM_THINKING=off` → `{ type: 'disabled' }` (explizit, da
+     * Weglassen bei M3 = AN). Siehe `parseMinimaxThinking`.
+     */
+    thinking: parseMinimaxThinking(process.env.DREAM_THINKING),
+  },
+  /** Nächtliches „Träumen" — Scheduler & manueller Trigger. */
+  dream: {
+    /** Uhrzeit "HH:MM" (lokale Wand­uhr = Europe/Berlin). Default 04:20. */
+    time: (process.env.DREAM_TIME?.trim() || '04:20'),
+    /** Zeitzone (informativ; der Host läuft in Europe/Berlin wie der Rest der App). */
+    tz: process.env.DREAM_TZ?.trim() || 'Europe/Berlin',
+    /** true (Default) = Scheduler beim Serverstart aktivieren (wenn ein Key da ist). */
+    schedulerEnabled: process.env.DREAM_SCHEDULER_DISABLED !== 'true',
+    /**
+     * Anzahl jüngster Konsum-Tage, die beim Serverstart auf fehlende Träume
+     * geprüft und nachgeholt werden (DREAM_CATCHUP_DAYS, Default 7; 0 = aus).
+     * Fängt Neustarts über das 04:20-Fenster hinweg und nachgetragene Daten ab.
+     */
+    catchUpDays: (() => {
+      const n = Number(process.env.DREAM_CATCHUP_DAYS);
+      return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 7;
+    })(),
+    /**
+     * Mindestabstand (ms) zwischen zwei Generierungen über den HTTP-Trigger
+     * (DREAM_MIN_INTERVAL_MS, Default 10000). Einfacher Rate-Limit-Schutz gegen
+     * Token-Kosten-Missbrauch (generate→DELETE→generate-Schleife); der
+     * In-Process-Scheduler ist davon nicht betroffen.
+     */
+    minIntervalMs: (() => {
+      const n = Number(process.env.DREAM_MIN_INTERVAL_MS);
+      return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 10000;
+    })(),
+    /**
+     * Optionales Token für den manuellen Trigger-Endpoint
+     * (POST /api/dreams/generate), verglichen in konstanter Zeit. **Primäres
+     * Auth-Mittel.** Der In-Process-Scheduler braucht es NICHT — er ruft
+     * `generateDream` direkt auf, ohne über HTTP zu gehen.
+     */
+    triggerToken: process.env.DREAM_TRIGGER_TOKEN?.trim() || null,
+    /**
+     * Loopback (127.0.0.1) als Auth akzeptieren (DREAM_TRUST_LOOPBACK, Default
+     * **false** = fail-closed). **Wichtig:** Hinter einem Reverse-Proxy /
+     * cloudflared-Tunnel auf demselben Host kommt JEDE externe Anfrage über
+     * 127.0.0.1 herein — dann wäre der Trigger weltoffen. Darum ist Loopback
+     * standardmäßig KEINE Auth; ein `DREAM_TRIGGER_TOKEN` ist Pflicht. Nur für
+     * echte Nur-lokal-Deployments (kein Tunnel/Proxy davor) auf true setzen —
+     * analog zu CF_ACCESS_DISABLED als bewusster Dev/Local-Bypass.
+     */
+    trustLoopback: process.env.DREAM_TRUST_LOOPBACK === 'true',
+    /** Pfad zu system_prompt.md (frisch je Generierung gelesen). */
+    systemPromptPath: findSystemPromptPath(),
   },
   /**
    * Cloudflare Access (Zero Trust) für geschützte Endpunkte (z. B.

@@ -275,3 +275,29 @@ export interface DiaryGenerateResult extends DiaryState {
   skippedExisting: number;
   errors: { date: string; error: string }[];
 }
+
+// ───────────────────────── Träume (nächtliche Auswertung) ─────────────────────────
+
+/** Ein „Traum" = die tägliche KI-Auswertung (system_prompt.md → MiniMax M3). */
+export interface Dream {
+  date: string;
+  content: string;
+  model: string;
+  status: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface DreamListResponse {
+  dreams: Dream[];
+  /** MINIMAX_API_KEY hinterlegt? (sonst träumt der Server nicht) */
+  available: boolean;
+  /** Läuft gerade eine Generierung? */
+  busy: boolean;
+}
+
+/** Antwort von GET /api/dreams/latest (Startup-Dialog). */
+export interface DreamLatest extends Partial<Dream> {
+  exists: boolean;
+  available: boolean;
+}

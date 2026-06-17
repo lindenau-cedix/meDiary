@@ -15,6 +15,8 @@ export const qk = {
   metrics: () => ['metrics'] as const,
   diary: () => ['diary'] as const,
   diaryNotes: (params?: object) => ['diary', 'notes', params ?? {}] as const,
+  dreams: (params?: object) => ['dreams', params ?? {}] as const,
+  dreamLatest: () => ['dreams', 'latest'] as const,
 };
 
 // ---------- Substanzen ----------
@@ -189,6 +191,14 @@ export function useSaveDiary() {
     mutationFn: (content: string) => api.diary.save(content),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['diary'] }),
   });
+}
+
+// ---------- Träume (nächtliche Auswertung) ----------
+export function useDreams(params?: { from?: string; to?: string; limit?: number }) {
+  return useQuery({ queryKey: qk.dreams(params), queryFn: () => api.dreams.list(params), staleTime: 30_000 });
+}
+export function useLatestDream() {
+  return useQuery({ queryKey: qk.dreamLatest(), queryFn: () => api.dreams.latest(), staleTime: 60_000 });
 }
 
 export type { Plan };

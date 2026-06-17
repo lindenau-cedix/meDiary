@@ -5,6 +5,7 @@ import type {
   PlanItemRow,
   AssessmentRow,
   HabitRow,
+  DreamRow,
 } from '../db.js';
 import { METRIC_KEYS } from './metrics.js';
 import { consumptionDay } from './time.js';
@@ -94,6 +95,17 @@ export function serializeHabit(r: HabitRow) {
     date: r.date,
     wakeFirstUnix: r.wake_first_unix,
     wakeLastUnix: r.wake_last_unix,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function serializeDream(r: DreamRow) {
+  return {
+    date: r.date,
+    content: r.content,
+    model: r.model,
+    status: r.status,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

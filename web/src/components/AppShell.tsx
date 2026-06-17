@@ -1,9 +1,11 @@
 import { Outlet, useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { BottomNav } from './BottomNav';
+import { DreamStartupDialog } from './DreamStartupDialog';
 
 export function AppShell() {
   const { pathname } = useLocation();
+  const reduce = useReducedMotion();
   return (
     <div className="min-h-dvh flex flex-col">
       {/* Statusleisten-Bereich (Notch / Android-Statusbar) */}
@@ -12,15 +14,17 @@ export function AppShell() {
         <div className="mx-auto max-w-app px-4 pb-safe-nav pt-2">
           <motion.div
             key={pathname}
-            initial={{ opacity: 0, y: 8 }}
+            initial={reduce ? false : { opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.28, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: reduce ? 0 : 0.28, ease: [0.22, 1, 0.36, 1] }}
           >
             <Outlet />
           </motion.div>
         </div>
       </main>
       <BottomNav />
+      {/* Startup-Dialog: zeigt einmal pro Session den jüngsten Traum. */}
+      <DreamStartupDialog />
     </div>
   );
 }

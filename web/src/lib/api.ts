@@ -18,6 +18,9 @@ import type {
   DiaryState,
   DiaryGenerateResult,
   Habit,
+  DreamListResponse,
+  DreamLatest,
+  Dream,
 } from './types';
 
 const API_BASE_KEY = 'mediary.apiBase';
@@ -216,6 +219,18 @@ export const api = {
       request<DiaryGenerateResult>('/api/diary/generate', { method: 'POST', body: JSON.stringify(body) }),
     save: (content: string) =>
       request<DiaryState>('/api/diary', { method: 'PUT', body: JSON.stringify({ content }) }),
+  },
+
+  /**
+   * Träume — die nächtlichen KI-Auswertungen. Lesen ist offen; das Generieren
+   * läuft serverseitig (Scheduler) bzw. über den geschützten Trigger und ist
+   * hier bewusst NICHT exponiert (die UI zeigt nur die Historie).
+   */
+  dreams: {
+    list: (params?: { from?: string; to?: string; limit?: number }) =>
+      request<DreamListResponse>(`/api/dreams${qs(params)}`),
+    latest: () => request<DreamLatest>('/api/dreams/latest'),
+    get: (date: string) => request<Dream & { exists: boolean }>(`/api/dreams/${date}`),
   },
 
   /**

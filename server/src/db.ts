@@ -76,6 +76,20 @@ CREATE TABLE IF NOT EXISTS daily_habits (
   created_at     TEXT NOT NULL,
   updated_at     TEXT NOT NULL
 );
+
+-- Nächtliches "Träumen": die tägliche KI-Auswertung (system_prompt.md -> MiniMax M3).
+-- Pro Konsum-Tag genau EIN Traum (date als PRIMARY KEY = UNIQUE-Constraint, der
+-- die Idempotenz des Schedulers absichert). content ist der vollständige
+-- Auswertungstext, model das verwendete Modell, status 'ok' (Erfolg).
+CREATE TABLE IF NOT EXISTS dreams (
+  date       TEXT PRIMARY KEY,
+  content    TEXT NOT NULL,
+  model      TEXT NOT NULL,
+  status     TEXT NOT NULL DEFAULT 'ok',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_dreams_date ON dreams(date);
 `);
 
 // Migration: Schemaumbenennung der Habit-Spalten von "PC-Nutzung" auf
@@ -194,6 +208,70 @@ export interface HabitRow {
   wake_last_unix: number | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface DreamRow {
+  date: string;
+  content: string;
+  model: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------- Traum-Helfer ----------
+
+/** Traum eines Konsum-Tages (oder null). */
+export function dreamFor(date: string): DreamRow | null {
+  return (db.prepare(`SELECT * FROM dreams WHERE date = ?`).get(date) as DreamRow | undefined) ?? null;
+}
+
+/** Jüngster Traum (höchstes Datum), oder null. */
+export function latestDream(): DreamRow | null {
+  return (
+    (db.prepare(`SELECT * FROM dreams ORDER BY date DESC LIMIT 1`).get() as DreamRow | undefined) ?? null
+  );
+}
+
+/** Träume in einem Datumsbereich (neueste zuerst). `from`/`to` optional (YYYY-MM-DD). */
+export function listDreams(opts?: { from?: string; to?: string; limit?: number }): DreamRow[] {
+  const where: string[] = [];
+  const params: Record<string, unknown> = {};
+  if (opts?.from) {
+    where.push(`date >= @from`);
+    params.from = opts.from.slice(0, 10);
+  }
+  if (opts?.to) {
+    where.push(`date <= @to`);
+    params.to = opts.to.slice(0, 10);
+  }
+  let sql = `SELECT * FROM dreams ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY date DESC`;
+  if (opts?.limit && opts.limit > 0) sql += ` LIMIT ${Math.floor(opts.limit)}`;
+  return db.prepare(sql).all(params) as DreamRow[];
+}
+
+/** Die `n` jüngsten Träume STRIKT VOR `beforeDate` (für „Träume der letzten 7 Tage"). */
+export function dreamsBefore(beforeDate: string, n: number): DreamRow[] {
+  return db
+    .prepare(`SELECT * FROM dreams WHERE date < ? ORDER BY date DESC LIMIT ?`)
+    .all(beforeDate, Math.max(0, Math.floor(n))) as DreamRow[];
+}
+
+/** Traum anlegen/überschreiben (idempotent pro Konsum-Tag). */
+export function upsertDream(date: string, content: string, model: string, status = 'ok'): DreamRow {
+  const now = nowLocalISO();
+  db.prepare(
+    `INSERT INTO dreams (date, content, model, status, created_at, updated_at)
+     VALUES (@date, @content, @model, @status, @now, @now)
+     ON CONFLICT(date) DO UPDATE SET
+       content = @content, model = @model, status = @status, updated_at = @now`,
+  ).run({ date, content, model, status, now });
+  return dreamFor(date)!;
+}
+
+/** Traum löschen. Gibt true zurück, wenn etwas gelöscht wurde. */
+export function deleteDream(date: string): boolean {
+  return db.prepare(`DELETE FROM dreams WHERE date = ?`).run(date).changes > 0;
 }
 
 // ---------- Plan-Helfer ----------

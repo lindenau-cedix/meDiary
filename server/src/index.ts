@@ -13,6 +13,8 @@ import { defaultsRouter } from './routes/defaults.js';
 import { diaryRouter } from './routes/diary.js';
 import { metaRouter } from './routes/meta.js';
 import { habitRouter } from './routes/habit.js';
+import { dreamsRouter } from './routes/dreams.js';
+import { startDreamScheduler } from './lib/dream_scheduler.js';
 
 // Sicherstellen, dass jede jemals eingetragene Substanz eine QuickPick-Kachel
 // bekommt (z. B. nach Importen). Idempotent, blockiert den Start praktisch nicht.
@@ -39,6 +41,7 @@ app.use('/api/assessments', assessmentsRouter);
 app.use('/api/defaults', defaultsRouter);
 app.use('/api/diary', diaryRouter);
 app.use('/api/habit', habitRouter);
+app.use('/api/dreams', dreamsRouter);
 
 // Optional: gebautes Frontend ausliefern (für Single-Deployment)
 if (config.webDist && fs.existsSync(config.webDist)) {
@@ -61,4 +64,6 @@ app.listen(config.port, () => {
   console.log(`[mediary] API läuft auf http://localhost:${config.port}`);
   console.log(`[mediary] DB: ${config.dbPath}`);
   console.log(`[mediary] DEFAULTS: ${config.defaultsPath}`);
+  // Nächtliches „Träumen" (no-op ohne MINIMAX_API_KEY oder wenn deaktiviert).
+  startDreamScheduler();
 });

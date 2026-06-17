@@ -36,10 +36,13 @@ cp -r "${SCRIPT_DIR}/server/node_modules" "${BUILD_DIR}/"
 cp       "${SCRIPT_DIR}/server/package.json" "${BUILD_DIR}/"
 cp       "${SCRIPT_DIR}/server/package-lock.json" "${BUILD_DIR}/" 2>/dev/null || true
 
-# --- Helm: Start-Skript + DEFAULTS-Template + README ---
+# --- Helm: Start-Skript + DEFAULTS-Template + README + System-Prompt ---
 cp "${SCRIPT_DIR}/start.sh"              "${BUILD_DIR}/"
 cp "${SCRIPT_DIR}/DEFAULTS.md"           "${BUILD_DIR}/"
 cp "${SCRIPT_DIR}/README.md"             "${BUILD_DIR}/" 2>/dev/null || true
+# system_prompt.md (nächtliches „Träumen") — landet in ~/mediary/system_prompt.md,
+# also im WorkingDirectory des Service. config.ts findet es per cwd-Default.
+cp "${SCRIPT_DIR}/system_prompt.md"      "${BUILD_DIR}/" 2>/dev/null || true
 chmod +x "${BUILD_DIR}/start.sh"
 
 echo "==> Build fertig: ${BUILD_DIR}"

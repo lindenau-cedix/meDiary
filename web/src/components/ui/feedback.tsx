@@ -31,16 +31,26 @@ export function EmptyState({
   title,
   description,
   action,
+  iconClassName,
 }: {
   icon?: ReactNode;
   title: string;
   description?: string;
   action?: ReactNode;
+  /** Override für den Icon-Chip (Default `bg-surface2 text-ink-faint`). */
+  iconClassName?: string;
 }) {
   return (
     <div className="flex flex-col items-center text-center gap-3 px-6 py-14">
       {icon && (
-        <div className="grid place-items-center size-14 rounded-3xl bg-surface2 text-ink-faint">{icon}</div>
+        <div
+          className={cx(
+            'grid place-items-center size-14 rounded-3xl',
+            iconClassName ?? 'bg-surface2 text-ink-faint',
+          )}
+        >
+          {icon}
+        </div>
       )}
       <div className="space-y-1">
         <h3 className="font-display text-xl text-ink">{title}</h3>

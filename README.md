@@ -242,6 +242,46 @@ Eintragens, statt eine separate Pflicht-Übung zu sein.
 
 ---
 
+## Nächtliches „Träumen" (Tages-Auswertung per MiniMax M3)
+
+Jede Nacht um **04:20** schickt der Server den Tageskontext (Plan, Einnahmen,
+Wachzeit, Notizen, 11 Skalen) an **MiniMax M3** und speichert die Auswertung als
+„Traum" pro Tag. Ohne API-Key bleibt alles beim Alten — der Scheduler startet
+einfach nicht, die Anzeige funktioniert weiter.
+
+### Auf einer bestehenden (älteren) Instanz aktivieren
+
+1. **Neuen Code ziehen** (`git pull`).
+2. **API-Key in `.env`** (Projekt-Wurzel) eintragen:
+   ```
+   MINIMAX_API_KEY=sk-...
+   # optional:
+   DREAM_TRIGGER_TOKEN=<langes-zufälliges-geheimnis>   # für externen/Cron-Trigger
+   DREAM_TIME=04:20                                     # Uhrzeit des Laufs (lokal)
+   ```
+3. **Deployen:** `npm run deploy`. Der Server legt die `dreams`-Tabelle beim Start
+   **idempotent** an (keine manuelle Migration nötig) und reicht alle `MINIMAX_*` /
+   `DREAM_*`-Variablen automatisch in den systemd-Service durch.
+
+Das war's. Beim nächsten 04:20-Lauf entsteht der erste Traum; verpasste Tage
+(z. B. weil der Rechner nachts aus war) holt ein **Catch-up beim Serverstart**
+für die letzten 7 Tage automatisch nach.
+
+### Sofort testen (ohne auf 04:20 zu warten)
+
+```bash
+npm --prefix server run dream -- --force            # Konsum-Vortag, vorhandenen überschreiben
+npm --prefix server run dream -- --date=2026-06-16  # bestimmter Tag
+```
+
+> Der Schlüssel wird **ausschließlich serverseitig** verwendet, nie im Frontend.
+> Der manuelle HTTP-Trigger `POST /api/dreams/generate` ist fail-closed: er
+> verlangt den `DREAM_TRIGGER_TOKEN` (Header `X-Dream-Token`) — hinter einem
+> Reverse-Proxy/Tunnel zählt „localhost" **nicht** als Authentifizierung.
+> Die vollständige Variablen-Liste steht in `.env.example`.
+
+---
+
 ## API-Referenz (Auszug)
 
 | Methode | Pfad | Zweck |
