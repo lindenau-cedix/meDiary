@@ -56,6 +56,19 @@ meDiary/
 - **Tests:** keine Unit-Tests vorhanden — Verifikation läuft über manuelle
   Smoke-Tests gegen `npm run dev` und die API.
 
+## Letzte Session-Änderungen
+
+- **npm-Audit bereinigt (2026-06-17):**
+  - `server/package-lock.json`: transitive `tsx → esbuild`-Version von
+    `0.28.0` auf `0.28.1` aktualisiert.
+  - `web/package.json` + `web/package-lock.json`: npm-`overrides` für
+    `tar@7.5.16` ergänzt, damit die `@capacitor/cli@6.2.1`-Schwachstellen
+    ohne Capacitor-Major-Upgrade behoben sind.
+- **Verifiziert:** `npm audit` in `server/` und `web/`, `npm run typecheck:all`,
+  `npm run build` und `npm run install:all` laufen sauber mit `0 vulnerabilities`.
+- **Hinweis:** Die verbleibenden npm-`allow-scripts`-Warnungen betreffen
+  Install-Skripte (`better-sqlite3`, `esbuild`) und sind keine Audit-Befunde.
+
 ## Detail-Dokumentation
 
 Die ausführliche Doku ist nach Themen in `docs/` aufgeteilt — gezielt das passende
