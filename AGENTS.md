@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run install:all          # Deps (einmalig)
 npm run dev                  # API :4000 + Web :5173
 npm run typecheck:all        # Server- + Web-TS-Check (exit 0 = sauber)
-npm run deploy               # Bauen + systemd-Service aktualisieren
+docker compose up -d --build # Produktionscontainer bauen + starten
 ```
 
 **Wichtigste Stolperfallen:**
@@ -69,7 +69,7 @@ File lesen, statt alles auf einmal in den Kontext zu laden:
   DB-Schema, Frontend-Struktur.
 - **[docs/api.md](docs/api.md)** — API-Referenz (alle Endpunkte inkl.
   `/api/intakes/text` und `/api/dreams`).
-- **[docs/deployment.md](docs/deployment.md)** — systemd-Deployment, Env-Variablen,
+- **[docs/deployment.md](docs/deployment.md)** — Docker-Compose-Deployment, Env-Variablen,
   iPad/Capacitor-APK.
 - **[docs/pitfalls.md](docs/pitfalls.md)** — Bekannte Stolperfallen.
   **Vor Änderungen lesen.**

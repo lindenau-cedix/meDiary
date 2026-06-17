@@ -17,7 +17,7 @@ dotenv.config();
  * ist `__dirname/..` = `server/` — das ist, was der Code historisch erwartet.
  *
  * Beim Build (TS → JS in `dist/`) liegt `__dirname` aber unter
- * `<install>/dist/` und `__dirname/..` = `<install>/` (z. B. `~/mediary`).
+ * `<runtime-root>/dist/` und `__dirname/..` = `<runtime-root>` (z. B. `/app`).
  * Wenn `package.json` im Parent den Server-Namen trägt, sind wir im
  * Dev-Modus; sonst ist es der Install-Root und wir nehmen ihn als Root.
  *
@@ -48,16 +48,16 @@ export const DEFAULT_DATA_DIR = path.join(os.homedir(), '.local', 'share', 'medi
  * Resolve a path from .env. Precedence:
  *  1. Absolute paths are returned as-is.
  *  2. Relative paths are resolved against process.cwd() (NOT SERVER_ROOT).
- *     Under systemd --user this is the install root, e.g. ~/mediary, so
- *     `WEB_DIST=./web/dist` lands on ~/mediary/web/dist correctly.
+ *     In Docker this is `/app`, so `/app/web/dist` or `./web/dist` resolve
+ *     to the built frontend correctly.
  *
  * Historically this used `SERVER_ROOT`, which is correct for `npm run dev`
  * (code lives in `server/src/`, so `SERVER_ROOT = server/`) but wrong for
  * the built dist (where `__dirname = <install>/dist/`, so
  * `SERVER_ROOT = <install>/`). The fix routes everything through
- * process.cwd() — which is the install root under systemd, and the repo
- * root under `npm run dev`. Both contexts then expect the same relative
- * path in the .env (e.g. `WEB_DIST=./web/dist`).
+ * process.cwd() — which is `/app` in Docker and the repo root under
+ * `npm run dev`. Both contexts then expect relative paths from their runtime
+ * working directory (e.g. `WEB_DIST=./web/dist` outside Docker).
  */
 function resolveFromRoot(p: string): string {
   if (path.isAbsolute(p)) return p;
@@ -71,8 +71,8 @@ function resolveFromRoot(p: string): string {
  *
  * Auflösung (erster existierender Treffer gewinnt):
  *   1. DREAM_SYSTEM_PROMPT_PATH aus der .env (absolut oder relativ zu cwd).
- *   2. <cwd>/system_prompt.md            — Dev: Repo-Root; Prod: ~/mediary (WorkingDirectory).
- *   3. <SERVER_ROOT>/system_prompt.md    — neben dem Build (build.sh kopiert es dorthin).
+ *   2. <cwd>/system_prompt.md            — Dev: Repo-Root; Docker: /app.
+ *   3. <SERVER_ROOT>/system_prompt.md    — neben dem gebauten Server.
  *   4. <SERVER_ROOT>/../system_prompt.md — Dev-Fallback (server/ → Repo-Root).
  * Existiert keiner, gilt (2) als Default — die Generierung wirft dann einen
  * klaren Fehler („system_prompt.md nicht gefunden").
@@ -151,8 +151,7 @@ export const config = {
   })(),
   /**
    * DEFAULTS.md path. Default: ~/.local/share/mediary/DEFAULTS.md
-   * Falls一辈子 der Server als root läuft, gilt immernoch das Home des
-   * startenden Users – systemd setzt via User= den richtigen.
+   * Falls der Server ohne Docker läuft, gilt das Home des startenden Users.
    */
   defaultsPath: (() => {
     if (process.env.DEFAULTS_PATH) return resolveFromRoot(process.env.DEFAULTS_PATH);
@@ -164,10 +163,9 @@ export const config = {
    * Precedence:
    *  1. WEB_DIST aus der .env (relativ zu process.cwd(), absolut wie angegeben).
    *  2. Auto-Erkennung: ein neben dem Server-Build liegendes `web/dist`
-   *     (`SERVER_ROOT/web/dist`). Das Build-Layout (`build.sh`) legt das
-   *     Frontend genau dorthin, also funktioniert `GET /` nach `npm run deploy`
-   *     auch OHNE WEB_DIST in der .env — „Cannot GET /" kann so nicht
-   *     stillschweigend wiederkehren. Im Dev-Modus (`SERVER_ROOT = server/`)
+   *     (`SERVER_ROOT/web/dist`). Das Docker-Image setzt zusätzlich
+   *     `WEB_DIST=/app/web/dist`, sodass `GET /` im Container zuverlässig
+   *     das Frontend ausliefert. Im Dev-Modus (`SERVER_ROOT = server/`)
    *     existiert dieser Pfad nicht, daher läuft die API dort weiter solo,
    *     während Vite das Frontend auf :5173 ausliefert.
    *  3. Sonst null (API solo).

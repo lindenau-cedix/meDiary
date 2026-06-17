@@ -17,6 +17,7 @@ siehe Rezepte unten):
 npm --prefix server run build    # tsc → server/dist
 npm run start                    # node dist/index.js (vorher build)
 npm run build:web                # tsc --noEmit + vite build → web/dist
+npm run build                    # Web + Server bauen
 npm --prefix server run import               # Importer Dry-Run (liest import/)
 npm --prefix server run import -- --commit   # schreibt in die DB (--reset-imported ersetzt Importiertes)
 npm run cap:android              # Capacitor: android/ anlegen + syncen (in web/: cap:sync, cap:open)
@@ -28,21 +29,19 @@ Server-Konfiguration über Env/`.env` (`server/src/config.ts`): `PORT` (4000),
 - `DEFAULTS_PATH` → `~/.local/share/mediary/DEFAULTS.md`
 - `WEB_DIST` → wird nicht gesetzt (API läuft solo)
 
-**`.env`-Datei**: Vorlage in `.env.example`. Alle dort dokumentierten Vars
-(`WEB_DIST`, `PORT`, `DB_PATH`, `DEFAULTS_PATH`, `CF_ACCESS_*`) werden beim
-`npm run deploy` aus `.env` gelesen und in den systemd-Service injected —
-damit lassen sich Deployment-Parameter ändern, ohne die Service-Datei manuell
-zu editieren. `.env` ist in `.gitignore`.
+**`.env`-Datei**: Vorlage in `.env.example`. Docker Compose liest `.env`
+optional ein; für lokale Node-Starts lädt der Server zusätzlich `server/.env`
+über `dotenv`. `.env` ist in `.gitignore`.
 
-**systemd-Deployment** (kein Docker):
+**Docker-Deployment:**
 ```bash
-npm run deploy        # liest .env → baut + installiert nach ~/mediary + startet systemd service
-npm run build         # nur bauen (~/mediary/build/)
+docker compose up -d --build
+docker compose logs -f mediary
 ```
 
-Die DB liegt **außerhalb des Installationsverzeichnisses** in
-`~/.local/share/mediary/` — ein Update des Codes via `npm run deploy`
-berührt die Daten nicht.
+Die produktive DB liegt im Repo-Root unter `./data/mediary.db`. Dieses
+Verzeichnis ist das Live-Datenverzeichnis und darf nicht für Tests benutzt
+werden.
 
 ## Verifikations-Rezepte (was man nach Änderungen prüfen sollte)
 

@@ -82,22 +82,17 @@ WEB_DIST=          # optional: Pfad zu web/dist, um das Frontend mit auszuliefer
 
 ---
 
-## Produktion (ein Server liefert alles aus)
+## Produktion (Docker Compose)
 
 ```bash
-npm run build:web                      # Frontend nach web/dist bauen
-WEB_DIST=../web/dist npm run start      # API + Frontend auf einem Port
+docker compose up -d --build
 ```
 
-Danach ist die komplette App unter <http://localhost:4000> erreichbar.
-
-### Docker (empfohlen)
-
-Ein Container = API **und** Frontend auf Port 4000. Die SQLite-DB liegt im
-Volume `./data`, die `DEFAULTS.md` wird vom Host eingebunden (live editierbar).
+Ein Container liefert API **und** Frontend auf Port 4000 aus. Die SQLite-DB,
+`DEFAULTS.md` und die generierte Tagebuch-Datei liegen im Repo-Root unter
+`./data`. Der Container läuft mit `restart: unless-stopped`.
 
 ```bash
-docker compose up -d --build           # bauen + starten
 docker compose exec mediary node dist/seed.js   # optional: Demodaten
 docker compose logs -f                 # Logs
 ```
@@ -109,9 +104,18 @@ z. B. `sqlite3 ./data/mediary.db ".backup ./data/backup-$(date +%F).db"`.
 `Caddyfile` mit `deine-domain.de { reverse_proxy mediary:4000 }`, beide Dienste
 im selben `docker-compose.yml`, und `mediary` aus den `ports` nehmen (nur intern).
 
+### Lokale Produktion Ohne Docker
+
+```bash
+npm run build
+WEB_DIST=../web/dist DB_PATH=../data/mediary-local.db DEFAULTS_PATH=../DEFAULTS.md npm run start
+```
+
+Danach ist die komplette App unter <http://localhost:4000> erreichbar.
+
 ### Android-APK an den Server koppeln
 
-Egal ob Docker, systemd oder LAN: in der App **Einstellungen → Server** die
+Egal ob Docker oder lokaler LAN-Server: in der App **Einstellungen → Server** die
 Adresse eintragen — `http://<LAN-IP>:4000` im Heimnetz (Klartext ist erlaubt)
 bzw. `https://deine-domain.de` von außen.
 
@@ -136,7 +140,7 @@ aus Markdown vorliegt. Tagessummen/Kontextzeilen und fehlgeloggte Klartext-Korre
 werden gefiltert. **Idempotent** über `source_event_id`; **Dry-Run ist Standard** —
 es wird erst mit `--commit` geschrieben.
 
-**Lokal / systemd:**
+**Lokal (Node):**
 ```bash
 npm --prefix server run import                 # Dry-Run: zeigt nur, was käme
 npm --prefix server run import -- --commit     # tatsächlich schreiben
@@ -259,9 +263,8 @@ einfach nicht, die Anzeige funktioniert weiter.
    DREAM_TRIGGER_TOKEN=<langes-zufälliges-geheimnis>   # für externen/Cron-Trigger
    DREAM_TIME=04:20                                     # Uhrzeit des Laufs (lokal)
    ```
-3. **Deployen:** `npm run deploy`. Der Server legt die `dreams`-Tabelle beim Start
-   **idempotent** an (keine manuelle Migration nötig) und reicht alle `MINIMAX_*` /
-   `DREAM_*`-Variablen automatisch in den systemd-Service durch.
+3. **Neu bauen/starten:** `docker compose up -d --build`. Der Server legt die
+   `dreams`-Tabelle beim Start **idempotent** an (keine manuelle Migration nötig).
 
 Das war's. Beim nächsten 04:20-Lauf entsteht der erste Traum; verpasste Tage
 (z. B. weil der Rechner nachts aus war) holt ein **Catch-up beim Serverstart**

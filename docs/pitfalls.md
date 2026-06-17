@@ -76,23 +76,14 @@
   Für „gilt seit X Tagen bis heute" muss das Wirkungsdatum nach dem der
   bisherigen aktuellen Version liegen (der Normalfall). Bei gleichem
   Wirkungsdatum gewinnt die höhere `id`.
-- **`build.sh`: Vite sucht `index.html` im CWD** — `cd web/` vor dem
-  `vite build`-Aufruf ist zwingend; ohne das scheitert der Build mit
-  „Could not resolve entry module 'index.html'".
+- **Docker-Compose überschreibt Datenpfade:** Für den Container gelten
+  `DB_PATH=/data/mediary.db`, `DEFAULTS_PATH=/data/DEFAULTS.md`,
+  `DIARY_PATH=/data/diary.md` und `WEB_DIST=/app/web/dist`, auch wenn in
+  `.env` ältere lokale Werte stehen. Das stellt sicher, dass Userdaten im
+  Repo-Root unter `./data` landen.
 - **`WEB_DIST`: relative Pfade aus `.env` werden gegen `process.cwd()`
-  aufgelöst** (nicht gegen `SERVER_ROOT` wie ältere Stände). Grund: Im
-  Build ist `__dirname = <install>/dist/`, also `SERVER_ROOT = <install>/`,
-  und `../web/dist` würde **ein** Verzeichnis zu hoch landen
-  (`/home/ubuntu/web/dist` statt `/home/ubuntu/mediary/web/dist`).
-  **Empfohlener Wert in `.env`:** `WEB_DIST=./web/dist` (relativ zu
-  `WorkingDirectory=%h/mediary`) oder absolut `WEB_DIST=/pfad/zu/web/dist`.
-  `../web/dist` funktioniert **nicht**.
-- **`Cannot GET /` ohne WEB_DIST:** Wenn die systemd-Unit keinen
-  `Environment="WEB_DIST=..."` enthält, antwortet der Server auf `GET /`
-  mit Express' Default-404 („Cannot GET /"). API-Endpunkte unter `/api/…`
-  funktionieren weiterhin. Seit 2026-06-14 validiert `deploy.sh` den
-  Env-Inject-Marker und die resultierende Service-Unit fail-loud, sobald
-  der WEB_DIST nicht ankommt — `Cannot GET /` kann also nicht mehr still
-  wiederkehren. Manuelle Reparatur: `Environment="WEB_DIST=./web/dist"`
-  in `~/.config/systemd/user/mediary.service` ergänzen, `systemctl --user
-  daemon-reload && systemctl --user restart mediary`.
+  aufgelöst** (nicht gegen `SERVER_ROOT`). Im Docker-Image ist der feste Wert
+  `/app/web/dist` gesetzt. Für lokale Node-Starts hängt der relative Pfad vom
+  Arbeitsverzeichnis ab: bei `node server/dist/index.js` aus dem Repo-Root
+  `WEB_DIST=./web/dist`, bei `npm run start` über das Root-Skript wegen
+  `npm --prefix server` dagegen `WEB_DIST=../web/dist`.

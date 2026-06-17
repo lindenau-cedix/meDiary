@@ -1,12 +1,14 @@
 # nur Quellcode in den Build-Context — Rest wird im Image neu gebaut
 **/node_modules
 **/dist
+build
 web/android
 web/ios
 server/data
 data
 import
 .git
+.claude
 .gitignore
 *.log
 .env

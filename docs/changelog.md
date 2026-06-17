@@ -4,6 +4,21 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-06-17 — Deployment auf Docker Compose umgestellt**:
+  - **Neuer Produktivpfad:** `docker compose up -d --build` baut ein
+    Multi-Stage-Image mit Server und Vite-Frontend und startet `mediary` mit
+    `restart: unless-stopped`.
+  - **Userdaten im Repo:** Compose mountet `./data` nach `/data`; DB,
+    `DEFAULTS.md` und `diary.md` liegen dort. Beim ersten Containerstart wird
+    die Repository-`DEFAULTS.md` nur kopiert, wenn `/data/DEFAULTS.md` noch
+    fehlt.
+  - **Systemd entfernt:** `deploy.sh`, `mediary.service`, `start.sh`, das
+    alte `build/`-Artefakt und der systemd-orientierte `build.sh` sind weg;
+    `npm run build` baut jetzt schlicht Web und Server.
+  - **Doku aktualisiert:** README, Deployment-/Development-Doku,
+    `.env.example`, Pitfalls und AGENTS verweisen auf Docker Compose statt
+    `npm run deploy`.
+
 - **2026-06-17 — Nächtliches „Träumen" (MiniMax M3) + Traum-Tab + Startup-Dialog + Review-Härtung**:
   - **Feature (Auftrag `/traum`, Phasen 1–4):** Jede Nacht um `DREAM_TIME`
     (Default 04:20 lokal, DST-sicher via lokaler `Date`-Konstruktion in
