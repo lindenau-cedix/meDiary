@@ -6,7 +6,8 @@ dist/
 
 # Daten / SQLite
 server/data/
-data/
+data/*.db
+data/*.db*
 data2/
 # Capacitor / Android
 web/android/
