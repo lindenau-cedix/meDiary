@@ -11,13 +11,16 @@ import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { formatTime, formatDayLabel, dateNDaysAgo } from '../lib/format';
-import { useIntakes, useSubstances, useIntakeMutations } from '../lib/queries';
+import { useIntakes, useSubstances, useIntakeMutations, usePlan } from '../lib/queries';
+import { isPlanIntake, planSubstanceKeys } from '../lib/plan';
 import type { Intake, Substance } from '../lib/types';
 import { History as HistoryIcon } from 'lucide-react';
 
 export function HistoryScreen() {
   const { data: substances = [] } = useSubstances(true);
   const { data: intakes = [], isLoading } = useIntakes({ from: dateNDaysAgo(120), limit: 1000 });
+  const { data: plan } = usePlan();
+  const planKeys = useMemo(() => planSubstanceKeys(plan), [plan]);
   const [filter, setFilter] = useState<number | null>(null);
   const [editing, setEditing] = useState<Intake | null>(null);
 
@@ -76,28 +79,44 @@ export function HistoryScreen() {
                 <span className="text-xs text-ink-faint tabular">{items.length} Einträge</span>
               </div>
               <Card className="divide-y divide-hairline overflow-hidden">
-                {items.map((it) => (
-                  <button
-                    key={it.id}
-                    onClick={() => {
-                      haptics.light();
-                      setEditing(it);
-                    }}
-                    className="w-full flex items-start gap-3 px-3.5 py-3 text-left hover:bg-surface2 transition-colors"
-                  >
-                    <span className="tabular text-sm font-semibold text-ink-muted w-11 shrink-0 pt-0.5">
-                      {formatTime(it.takenAt)}
-                    </span>
-                    <SubstanceSeal name={it.substanceName} color={colorFor(it.substanceId)} size="sm" className="mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-ink truncate">
-                        {it.substanceName}
-                        {it.amount && <span className="font-normal text-ink-muted"> · {it.amount}</span>}
-                      </p>
-                      {it.notes && <p className="text-[13px] text-ink-muted leading-snug mt-0.5 line-clamp-2">{it.notes}</p>}
-                    </div>
-                  </button>
-                ))}
+                {items.map((it) => {
+                  const inPlan = isPlanIntake(it.substanceName, planKeys);
+                  return (
+                    <button
+                      key={it.id}
+                      onClick={() => {
+                        haptics.light();
+                        setEditing(it);
+                      }}
+                      className={cx(
+                        'w-full flex items-start gap-3 px-3.5 py-3 text-left hover:bg-surface2 transition-colors relative',
+                        inPlan
+                          ? 'bg-primary-soft/35 before:absolute before:left-0 before:top-2 before:bottom-2 before:w-1 before:rounded-r-full before:bg-primary'
+                          : '',
+                      )}
+                    >
+                      <span className="tabular text-sm font-semibold text-ink-muted w-11 shrink-0 pt-0.5">
+                        {formatTime(it.takenAt)}
+                      </span>
+                      <SubstanceSeal name={it.substanceName} color={colorFor(it.substanceId)} size="sm" className="mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-ink truncate flex items-center gap-1.5">
+                          <span className="truncate">{it.substanceName}</span>
+                          {inPlan && (
+                            <span
+                              title="Teil des aktuellen Medikationsplans"
+                              className="shrink-0 rounded-full bg-primary/15 text-primary text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5"
+                            >
+                              Plan
+                            </span>
+                          )}
+                          {it.amount && <span className="font-normal text-ink-muted"> · {it.amount}</span>}
+                        </p>
+                        {it.notes && <p className="text-[13px] text-ink-muted leading-snug mt-0.5 line-clamp-2">{it.notes}</p>}
+                      </div>
+                    </button>
+                  );
+                })}
               </Card>
             </section>
           ))}

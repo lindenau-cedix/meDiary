@@ -1,8 +1,8 @@
 import { useState } from 'react';
-import { Plus, Trash2, Moon, Pencil, RotateCcw, Check, X } from 'lucide-react';
+import { Plus, Trash2, Pencil, RotateCcw, Check, X } from 'lucide-react';
 import { Sheet } from './ui/Sheet';
 import { Button } from './ui/Button';
-import { Field, TextInput, Switch } from './ui/inputs';
+import { Field, TextInput } from './ui/inputs';
 import { SubstanceSeal } from './SubstanceSeal';
 import { useToast } from './Toaster';
 import { cx } from '../lib/cx';
@@ -141,17 +141,6 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
           </div>
         </div>
 
-        <label className="flex items-center justify-between gap-3 rounded-2xl bg-surface px-4 py-3 ring-1 ring-line">
-          <span className="flex items-center gap-2.5">
-            <Moon size={18} className="text-accent" />
-            <span className="text-sm">
-              <span className="font-medium text-ink">Nachtmedikation</span>
-              <span className="block text-xs text-ink-muted">Löst nach Einnahme das Tagesbild aus</span>
-            </span>
-          </span>
-          <Switch checked={form.isNightMed} onChange={(v) => setForm({ ...form, isNightMed: v })} />
-        </label>
-
         <Button
           block
           size="lg"
@@ -176,9 +165,8 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
           >
             <SubstanceSeal name={s.name} color={s.color} />
             <button className="flex-1 min-w-0 text-left" onClick={() => edit(s)}>
-              <p className="font-medium text-ink truncate flex items-center gap-1.5">
+              <p className="font-medium text-ink truncate">
                 {s.name}
-                {s.isNightMed && <Moon size={13} className="text-accent shrink-0" />}
               </p>
               {s.defaultDose && <p className="text-xs text-ink-muted">{s.defaultDose}</p>}
             </button>

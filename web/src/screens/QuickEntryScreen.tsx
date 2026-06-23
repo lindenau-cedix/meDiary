@@ -16,6 +16,7 @@ import { haptics } from '../lib/haptics';
 import { greeting, nowLocalInput, consumptionToday, consumptionTodayOffset, formatFull, formatTime } from '../lib/format';
 import { useSubstances, useIntakes, useIntakeMutations, useSubstanceMutations, useDefaults, useCompliance, usePlan } from '../lib/queries';
 import { ApiError } from '../lib/api';
+import { isPlanIntake, planSubstanceKeys, nameKey } from '../lib/plan';
 import type { Substance, PlanSlot, SubstanceDefault, IntakeBatchEntryInput } from '../lib/types';
 
 export function QuickEntryScreen() {
@@ -37,7 +38,12 @@ export function QuickEntryScreen() {
     () => (todayIntakesRaw.data ?? []).filter((it) => it.date === today),
     [todayIntakesRaw.data, today],
   );
+  // Breitere Fenster (90 Tage) für „Sortieren nach Häufigkeit": reicht locker
+  // für die Alltags-Sortierung im Heute-Tab. `limit` deckt mehrere Einnahmen
+  // pro Tag sicher ab.
+  const recentIntakesRaw = useIntakes({ limit: 1500 });
   const { data: plan } = usePlan();
+  const planKeys = useMemo(() => planSubstanceKeys(plan), [plan]);
   const { create, remove, batch, planBatch } = useIntakeMutations();
 
   // Sammel-Einträge "Morgendmedis"/"Nachtmedis": tragen mit einem Tipp alle
@@ -64,12 +70,43 @@ export function QuickEntryScreen() {
   const [manageOpen, setManageOpen] = useState(false);
   const [assessment, setAssessment] = useState<{ open: boolean; date: string }>({ open: false, date: today });
 
-  // Sortier-Modus: Reihenfolge der Kacheln per Drag anpassen.
+  // Sortierung: manuell (Drag & Drop) vs. nach Häufigkeit. `sortMode` ist der
+  // Drag-Editor-Modus (true = gerade am Ziehen); `sortKey` entscheidet, ob die
+  // Kachel-Reihenfolge aus dem Server-`sort_order` oder aus der Einnahmen-
+  // Häufigkeit der letzten ~90 Tage kommt.
+  type SortKey = 'manual' | 'frequency';
   const { reorder } = useSubstanceMutations();
+  const [sortKey, setSortKey] = useState<SortKey>('manual');
   const [sortMode, setSortMode] = useState(false);
   const [ordered, setOrdered] = useState<Substance[]>([]);
   const saveTimer = useRef<number | null>(null);
   const pendingIds = useRef<number[] | null>(null);
+
+  // Häufigkeit der Substanzen aus den letzten ~90 Tagen. ID → Anzahl
+  // Einnahmen (Begleitsubstanzen aus DEFAULTS.md zählen mit, weil sie echte
+  // Einnahmen sind). Substanzen ohne Treffer landen mit 0 ans Ende.
+  const frequencyById = useMemo(() => {
+    const counts = new Map<number, number>();
+    for (const it of recentIntakesRaw.data ?? []) {
+      if (it.substanceId == null) continue;
+      counts.set(it.substanceId, (counts.get(it.substanceId) ?? 0) + 1);
+    }
+    return counts;
+  }, [recentIntakesRaw.data]);
+
+  /** Anzuzeigende Substanz-Liste je nach Sortierung. */
+  const displaySubstances = useMemo(() => {
+    if (sortKey === 'frequency') {
+      return [...substances].sort((a, b) => {
+        const diff = (frequencyById.get(b.id) ?? 0) - (frequencyById.get(a.id) ?? 0);
+        if (diff !== 0) return diff;
+        // Tiebreaker: bisherige manuelle Reihenfolge (sort_order asc), dann Name.
+        if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
+        return a.name.localeCompare(b.name, 'de');
+      });
+    }
+    return substances;
+  }, [sortKey, substances, frequencyById]);
 
   const flushOrder = () => {
     if (saveTimer.current) {
@@ -363,8 +400,8 @@ export function QuickEntryScreen() {
       </Card>
 
       {/* Substanz-Raster */}
-      <div className="mt-5 flex items-center justify-between px-1 mb-2.5">
-        <p className="font-sans text-[13px] font-semibold uppercase tracking-[0.13em] text-ink-faint">
+      <div className="mt-5 flex items-center justify-between px-1 mb-2.5 gap-3">
+        <p className="font-sans text-[13px] font-semibold uppercase tracking-[0.13em] text-ink-faint shrink-0">
           {sortMode ? 'Reihenfolge ziehen' : 'Substanzen wählen'}
         </p>
         {sortMode ? (
@@ -394,6 +431,32 @@ export function QuickEntryScreen() {
         )}
       </div>
 
+      {/* Sortier-Toggle „manuell ↔ nach Häufigkeit" — beeinflusst nur die
+          Reihenfolge der Kacheln. Beim Wechsel auf „Häufigkeit" wird die
+          serverseitige `sort_order` nicht angefasst; ein Klick auf „Sortieren"
+          führt wieder in den manuellen Modus und zeigt den letzten
+          gespeicherten Stand. */}
+      {!sortMode && substances.length > 1 && (
+        <div className="mb-3 inline-flex rounded-full bg-surface2 ring-1 ring-line p-0.5">
+          <SortPill
+            active={sortKey === 'manual'}
+            onClick={() => {
+              haptics.light();
+              setSortKey('manual');
+            }}
+            label="Manuell"
+          />
+          <SortPill
+            active={sortKey === 'frequency'}
+            onClick={() => {
+              haptics.light();
+              setSortKey('frequency');
+            }}
+            label="Häufigkeit"
+          />
+        </div>
+      )}
+
       {sortMode ? (
         <Reorder.Group axis="y" values={ordered} onReorder={onReorder} className="space-y-2">
           {ordered.map((s) => (
@@ -422,12 +485,15 @@ export function QuickEntryScreen() {
               onPress={() => submitBatch('night', 'Nachtmedis')}
             />
           )}
-          {substances.map((s) => (
+          {displaySubstances.map((s) => (
             <SubstanceTile
               key={s.id}
               sub={s}
               selected={selectedIds.includes(s.id)}
               missingDefault={missingDefaults.has(s.name.toLowerCase())}
+              inPlan={planKeys.has(nameKey(s.name))}
+              frequency={frequencyById.get(s.id) ?? 0}
+              sortMode={sortKey === 'frequency'}
               onSelect={() => toggleSelect(s.id)}
               onInstant={() => submitInstant(s)}
             />
@@ -467,16 +533,40 @@ export function QuickEntryScreen() {
             </Link>
           </div>
           <Card className="divide-y divide-hairline overflow-hidden">
-            {todayIntakes.slice(0, 6).map((it) => (
-              <div key={it.id} className="flex items-center gap-3 px-3.5 py-2.5">
-                <span className="tabular text-sm font-semibold text-ink-muted w-11 shrink-0">
-                  {formatTime(it.takenAt)}
-                </span>
-                <SubstanceSeal name={it.substanceName} color={substances.find((s) => s.id === it.substanceId)?.color} size="sm" />
-                <span className="flex-1 min-w-0 text-sm text-ink truncate">{it.substanceName}</span>
-                {it.amount && <span className="text-xs text-ink-muted shrink-0 tabular">{it.amount}</span>}
-              </div>
-            ))}
+            {todayIntakes.slice(0, 6).map((it) => {
+              const inPlan = isPlanIntake(it.substanceName, planKeys);
+              return (
+                <div
+                  key={it.id}
+                  className={cx(
+                    'flex items-center gap-3 px-3.5 py-2.5 relative',
+                    // Plan-Einnahmen tragen einen feinen, linken Akzentbalken
+                    // plus eine wärmere Hintergrund-Tönung; alles andere bleibt
+                    // unverändert. Wir färben bewusst subtil, damit die Liste
+                    // nicht „alarmistisch" wirkt — nur eine optische
+                    // Unterscheidung.
+                    inPlan
+                      ? 'bg-primary-soft/35 before:absolute before:left-0 before:top-1.5 before:bottom-1.5 before:w-1 before:rounded-r-full before:bg-primary'
+                      : '',
+                  )}
+                >
+                  <span className="tabular text-sm font-semibold text-ink-muted w-11 shrink-0">
+                    {formatTime(it.takenAt)}
+                  </span>
+                  <SubstanceSeal name={it.substanceName} color={substances.find((s) => s.id === it.substanceId)?.color} size="sm" />
+                  <span className="flex-1 min-w-0 text-sm text-ink truncate">{it.substanceName}</span>
+                  {inPlan && (
+                    <span
+                      title="Teil des aktuellen Medikationsplans"
+                      className="shrink-0 rounded-full bg-primary/15 text-primary text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5"
+                    >
+                      Plan
+                    </span>
+                  )}
+                  {it.amount && <span className="text-xs text-ink-muted shrink-0 tabular">{it.amount}</span>}
+                </div>
+              );
+            })}
           </Card>
         </div>
       )}
@@ -599,12 +689,18 @@ function SubstanceTile({
   sub,
   selected,
   missingDefault,
+  inPlan,
+  frequency,
+  sortMode,
   onSelect,
   onInstant,
 }: {
   sub: Substance;
   selected: boolean;
   missingDefault?: boolean;
+  inPlan?: boolean;
+  frequency?: number;
+  sortMode?: boolean;
   onSelect: () => void;
   onInstant: () => void;
 }) {
@@ -617,6 +713,17 @@ function SubstanceTile({
       timer.current = null;
     }
   };
+
+  // Tooltip für die Kachel: zeigt Häufigkeit und Plan-Zugehörigkeit, wenn der
+  // Sortier-Modus „Häufigkeit" läuft — damit der Nutzer versteht, warum die
+  // Kachel wo steht.
+  const tooltipParts: string[] = [];
+  if (missingDefault) tooltipParts.push('Kein DEFAULTS-Eintrag – in Einstellungen ergänzen');
+  if (inPlan) tooltipParts.push('Teil des aktuellen Medikationsplans');
+  if (sortMode && typeof frequency === 'number') {
+    tooltipParts.push(`${frequency}× erfasst in den letzten 90 Tagen`);
+  }
+  const title = tooltipParts.length > 0 ? tooltipParts.join(' · ') : undefined;
 
   return (
     <button
@@ -634,10 +741,17 @@ function SubstanceTile({
       }}
       onPointerLeave={clear}
       onPointerCancel={clear}
-      title={missingDefault ? 'Kein DEFAULTS-Eintrag – in Einstellungen ergänzen' : undefined}
+      title={title}
       className={cx(
         'press relative min-h-[5.5rem] rounded-3xl p-3 text-left ring-1 transition-all duration-150 overflow-hidden',
-        selected ? 'ring-2 bg-surface shadow-raised' : 'ring-line bg-surface hover:bg-surface2',
+        // Plan-Substanzen bekommen eine sanfte Tönung + Akzentbalken analog zur
+        // „Heute erfasst"-Liste, damit der Nutzer konsistent erkennt, was zum
+        // Plan gehört und was „on top" erfasst wurde.
+        selected
+          ? 'ring-2 bg-surface shadow-raised'
+          : inPlan
+            ? 'ring-line bg-primary-soft/40 hover:bg-primary-soft/55 before:absolute before:left-0 before:top-3 before:bottom-3 before:w-1 before:rounded-r-full before:bg-primary'
+            : 'ring-line bg-surface hover:bg-surface2',
       )}
       style={selected ? { boxShadow: `0 8px 22px ${(sub.color ?? '#5B7A60')}33`, ['--tw-ring-color' as string]: sub.color ?? '#5B7A60' } : undefined}
     >
@@ -654,12 +768,23 @@ function SubstanceTile({
           <AlertCircle size={11} strokeWidth={2.5} />
         </span>
       )}
+      {inPlan && !missingDefault && (
+        <span
+          className="absolute left-3 top-3 rounded-full bg-primary/20 text-primary text-[9px] font-semibold uppercase tracking-wider px-1.5 py-px"
+          aria-label="Teil des aktuellen Medikationsplans"
+        >
+          Plan
+        </span>
+      )}
       <SubstanceSeal name={sub.name} color={sub.color} />
       <p className="mt-2 font-medium text-[15px] text-ink leading-tight pr-3 flex items-center gap-1">
         <span className="truncate">{sub.name}</span>
         {sub.isNightMed && <Moon size={12} className="text-accent shrink-0" />}
       </p>
       {sub.defaultDose && <p className="text-xs text-ink-muted truncate">{sub.defaultDose}</p>}
+      {sortMode && typeof frequency === 'number' && frequency > 0 && (
+        <p className="mt-0.5 text-[11px] text-ink-faint tabular">{frequency}× letzte 90 T.</p>
+      )}
       <AnimatePresence>
         {selected && (
           <motion.span
@@ -673,6 +798,23 @@ function SubstanceTile({
           </motion.span>
         )}
       </AnimatePresence>
+    </button>
+  );
+}
+
+/** Kompakter Pill-Button für den Sortier-Toggle „manuell / Häufigkeit". */
+function SortPill({ active, onClick, label }: { active: boolean; onClick: () => void; label: string }) {
+  return (
+    <button
+      onClick={onClick}
+      className={cx(
+        'press rounded-full px-3 h-8 text-[12px] font-semibold transition-colors',
+        active
+          ? 'bg-primary text-primary-fg shadow-raised'
+          : 'text-ink-muted hover:text-ink',
+      )}
+    >
+      {label}
     </button>
   );
 }

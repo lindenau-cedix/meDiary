@@ -7,7 +7,7 @@ import { haptics } from '../lib/haptics';
 const tabs = [
   { to: '/', label: 'Heute', Icon: Pill },
   { to: '/verlauf', label: 'Verlauf', Icon: History },
-  { to: '/tagebuch', label: 'Tagebuch', Icon: BookOpen },
+  { to: '/tagebuch', label: 'Träume', Icon: BookOpen },
   { to: '/plan', label: 'Plan', Icon: ClipboardList },
   { to: '/werte', label: 'Werte', Icon: LineChart },
 ];
