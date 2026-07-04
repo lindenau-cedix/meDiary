@@ -20,6 +20,9 @@ docker compose up -d --build # Produktionscontainer bauen + starten
   Smoke-Tests immer mit `DB_PATH=/tmp/mediary-test/…` gegen `/tmp` fahren.
 - **`nameKey()` statt SQLite `lower()`** — `lower('Ö')` ist ASCII-only und bleibt `Ö`.
   Umlaut-Matching nur über JS `nameKey()` (`toLocaleLowerCase('de')`).
+- **Tagesbericht-Default = `dreamTargetDate(now)`** — `POST /api/report/new` ohne
+  Body-`date` schreibt auf den Konsum-Vortag (genau der Tag, über den 42 min
+  später geträumt wird). Der 03:30-Berlin-Cron muss also nichts mitsenden.
 
 ---
 
@@ -31,12 +34,18 @@ Projekt nahtlos weiterbearbeitet.
 Ein sorgfältig gestaltetes **Medikations-Tagebuch**: HTTP-API + SQLite +
 React/Vite-Frontend (PC, iPad, Android-APK). Standard-Notizen aus
 `DEFAULTS.md` werden beim Eintragen automatisch übernommen. Nachtmedikation
-löst ein 11-Skalen-Tagesbild aus. Plan-Versionen mit Diff.
+löst ein 11-Skalen-Tagesbild aus. Plan-Versionen mit Diff. Nächtliches
+„Träumen" wertet den Tag per **MiniMax M3** aus und kennt neben den
+1–10-Skalen + Notizen auch den **Tagesbericht des Hermes-Agents**
+(`POST /api/report/new`, eingeliefert vom 03:30-Berlin-Cron), der im
+Tagebuch-Info-Subtab und in der Traum-Auswertung erscheint.
 
 ```
 meDiary/
 ├── server/   → HTTP-API (Express + TypeScript + better-sqlite3)
+│   └── src/routes/report.ts → POST /api/report/new (Tagesbericht-Upsert)
 ├── web/      → Frontend (React + Vite + Tailwind, Capacitor-fähig)
+│   └── src/screens/DiaryScreen.tsx → Info-Subtab zeigt „Hermes-Agent"-Block
 ├── import/   → Datenquellen für den Importer (Markdown + entries.jsonl)
 ├── DEFAULTS.md  → Standard-Notizen/Mengen pro Substanz (live editierbar)
 ├── SAMPLES.md   → Zeilen-Format für den Freitext-Import (POST /api/intakes/text)
@@ -79,6 +88,12 @@ cd server && rm -rf /tmp/m && mkdir -p /tmp/m
 DB_PATH=/tmp/m/db.sqlite DEFAULTS_PATH=/tmp/m/DEFAULTS.md CF_ACCESS_DISABLED=true \
   PORT=4099 DREAM_SCHEDULER_DISABLED=true npx tsx src/index.ts &
 curl -s localhost:4099/api/health        # weitere Rezepte: docs/development.md
+
+# Tagesbericht-Roundtrip (idempotenter Upsert pro Konsum-Tag):
+curl -sS -X POST localhost:4099/api/report/new \
+  -H 'Content-Type: application/json' \
+  -d '{"report":"Coding-Session: built X, fixed Y.","source":"hermes-cron-0330"}'
+curl -s 'localhost:4099/api/diary/notes'  # erscheint im Info-Subtab als „Hermes-Agent"
 ```
 
 ## Architektur auf einen Blick
@@ -101,13 +116,23 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
   ALLE Nacht-Medis des wirksamen Plans für den Konsumtag erfasst sind
   (`allNightMedsTaken()` in `db.ts`) — nicht schon bei einer einzelnen Nachtmed.
 - **Tagesbericht des Hermes-Agents** (`POST /api/report/new`, eingeliefert vom
-  03:30-Berlin-Cron) fließt in den Traum-Kontext ein — zusätzliche Sektion
-  „Tagesbericht des Hermes-Agents" plus die jüngsten 7 Berichte, damit das
-  nächtliche „Träumen" nicht nur 1–10-Skalen + Notizen kennt, sondern auch
-  welche Agent-/Coding-/Server-Aktivität am Tag stattfand (Default-`date` =
-  `dreamTargetDate(now)`, also Konsum-Vortag — passt zum 04:20-Traum). Ein
-  vorhandener Bericht zählt für `hasContent` (kein Traum-Skip mehr nur wegen
-  leerer Medikations-Sektion).
+  03:30-Berlin-Cron) — ein Freitext-Bericht pro Konsum-Tag, was der Agent am
+  Tag gemacht hat (Coding, Cron, Deploys, Fehler). Fließt an **drei** Stellen:
+  (1) **Traum-Kontext** (`gatherDreamContext` in `lib/dreams.ts`) — eigene
+  Sektion „Tagesbericht des Hermes-Agents" plus die jüngsten 7 Berichte, damit
+  das nächtliche „Träumen" nicht nur 1–10-Skalen + Notizen kennt, sondern auch
+  welche Agent-Aktivität am Tag stattfand. (2) **Tagebuch-Info-Subtab**
+  (`ShortDiary` in `web/src/screens/DiaryScreen.tsx`) — eigener
+  „Hermes-Agent"-Block (Lucide-Icon `Bot`, optionaler Quellenmarker); lange
+  Berichte klappen hinter „Weiterlesen" zusammen (> 600 Zeichen, gleiche
+  Schwelle wie Traum-Karten); Tage mit NUR einem Bericht (ohne Einnahmen /
+  Tagesbild / Wachzeit) zählen als „noteworthy" und erscheinen ebenfalls.
+  (3) **KI-Tagebuch-Prompt** (`buildDayPrompt` in `lib/diary.ts`) — reicht
+  den Bericht an die schreibende KI weiter, damit die generierten Volltexte
+  auch die Agent-Aktivität einbeziehen. Default-`date` = `dreamTargetDate(now)`
+  (Konsum-Vortag) — passt zum 04:20-Traum, 03:30-Cron muss nichts mitsenden.
+  Ein vorhandener Bericht zählt für `hasContent` (kein Traum-Skip mehr nur
+  wegen leerer Medikations-Sektion). Tabelle: `daily_reports` (PK `date`).
 - **Drei KI-Integrationen, drei Wire-Formate** (alle Keys ausschließlich serverseitig):
   KI-Tagebuch = Anthropic-Messages (`lib/anthropic.ts`), nächtliches „Träumen" =
   OpenAI-Chat-Completions (`lib/minimax.ts`), Daten-Konsole = Anthropic-Messages mit

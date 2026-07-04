@@ -29,6 +29,7 @@ meDiary/
 | Plan im Frontend einstellbar | Voll editierbarer Plan-Editor (neue Version) |
 | Einnahmen darstellen | Verlauf, nach Tagen gruppiert, filterbar |
 | Nachtmed → 11 Skalen 1–10 abfragen | Automatisch ausgelöstes Tagesbild-Sheet |
+| **Tagesbericht des Hermes-Agents** | `POST /api/report/new` (03:30-Cron-Upsert pro Konsum-Tag); erscheint im **Tagebuch-Info-Subtab** und im **Traum-Kontext** (sodass M3 Coding/Cron/Deploys des Tages kennt) |
 | Sehr gutes, nicht „billiges" Design | Eigenes „Apotheken"-Designsystem, Light/Dark |
 | PC / iPad / Android, leicht & schnell | Responsives Touch-UI, Safe-Areas, Haptik, APK |
 
@@ -283,6 +284,47 @@ npm --prefix server run dream -- --date=2026-06-16  # bestimmter Tag
 > Reverse-Proxy/Tunnel zählt „localhost" **nicht** als Authentifizierung.
 > Die vollständige Variablen-Liste steht in `.env.example`.
 
+### Tagesbericht des Hermes-Agents → Traum + Info-Subtab
+
+Zusätzlich zu den 11 Skalen und Notizen kennt das nächtliche „Träumen" einen
+**Tagesbericht des Hermes-Agents**: was am Tag mit dem Agent gemacht wurde
+(Coding-Sessions, Cron-Läufe, Deploys, Fehler, …). Der Bericht wird vom
+**03:30-Berlin-Cron** per `POST /api/report/new` eingeliefert und fließt an
+drei Stellen:
+
+1. **Traum-Kontext** — `gatherDreamContext` zieht den Bericht des Ziel-Tags
+   **und** die jüngsten 7 Berichte (`reportsBefore`) als eigene Sektionen
+   in den Traum-Prompt. M3 kann so Muster zwischen Agent-Aktivität und
+   Tagesbefinden herstellen.
+2. **Tagebuch-Info-Subtab** — der Bericht erscheint als eigene
+   „Hermes-Agent"-Sektion (Lucide-Icon `Bot`, mit optionaler Quellenangabe).
+   Lange Berichte (> 600 Zeichen) klappen hinter „Weiterlesen" zusammen —
+   gleiche Schwelle wie die Traum-Karten. Tage mit NUR einem Bericht (keine
+   Einnahmen / kein Tagesbild / keine Wachzeit) erscheinen ebenfalls.
+3. **KI-Tagebuch-Prompt** — `buildDayPrompt` reicht den Bericht an die
+   schreibende KI weiter, sodass die generierten Volltexte auch die
+   Agent-Aktivität einbeziehen können.
+
+Default-`date` = `dreamTargetDate(now)` (Konsum-Vortag) — der 03:30-Cron muss
+also nichts mitsenden und landet exakt auf dem Tag, über den 42 Minuten
+später geträumt wird.
+
+**Cron-Beispiel (in der Hermes-Host-Crontab):**
+
+```bash
+curl -fsS -X POST "${MEDIARY_URL}/api/report/new" \
+  -H 'Content-Type: application/json' \
+  -d "{\"report\":\"$(cat /var/log/hermes/daily-report.md)\",\"source\":\"hermes-cron-0330\"}"
+```
+
+**Manuell eintragen (z. B. ein verlorengegangener Tag):**
+
+```bash
+curl -sS -X POST "${MEDIARY_URL}/api/report/new" \
+  -H 'Content-Type: application/json' \
+  -d '{"date":"2026-07-02","report":"Coding-Session: built X, fixed Y.","source":"manual"}'
+```
+
 ---
 
 ## API-Referenz (Auszug)
@@ -303,7 +345,21 @@ npm --prefix server run dream -- --date=2026-06-16  # bestimmter Tag
 | `GET` | `/api/assessments?from=&to=` | Tagesbilder (für Trends) |
 | `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
-|| `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht (alle Substanzen mit/ohne Eintrag) |
+| `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht (alle Substanzen mit/ohne Eintrag) |
+| `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild + Wachzeit + **Hermes-Agent-Tagesbericht**) |
+| `GET` | `/api/diary` | Zustand des KI-Voll-Tagebuchs |
+| `POST` | `/api/diary/generate` | KI-Volltext generieren |
+| `PUT` | `/api/diary` | Tagebuch-Datei manuell überschreiben |
+| `GET` | `/api/habit?from=&to=` | Tägliche Wachzeit (Liste) |
+| `POST` | `/api/habit/uptime` | Wachzeit melden |
+| `GET` | `/api/dreams?from=&to=&limit=` | Träume (nächtliche Auswertungen) |
+| `POST` | `/api/dreams/generate` | Traum manuell generieren (`X-Dream-Token`) |
+| `POST` | `/api/report/new` | **Tagesbericht des Hermes-Agents** einliefern (`{ date?, report, source? }`); idempotenter Upsert pro Konsum-Tag (Default-`date` = Konsum-Vortag). Fließt in den Traum-Kontext und in den Tagebuch-Info-Subtab. |
+| `GET` | `/api/report?from=&to=&limit=` | Tagesberichte-Liste |
+| `GET` | `/api/report/:date` | Einzelner Tagesbericht |
+| `DELETE` | `/api/report/:date` | Tagesbericht löschen |
+| `GET` | `/api/chat/status` | Daten-Konsole: Verfügbarkeit |
+| `POST` | `/api/chat/message` | **SSE** — Natürlichsprache-Anfrage (CF-Access, rate-limitiert) |
 
 `POST /api/intakes` liefert zusätzlich `{ nightMed, assessmentDate, assessmentExists }` —
 darüber öffnet das Frontend bei Nachtmedikation automatisch das Tagesbild.
@@ -351,3 +407,7 @@ Capacitor-Konfiguration (`cleartext`) bereits erlaubt.
 - `intakes` — Einnahmen (Zeitpunkt, Substanz-Snapshot, Menge, Notizen)
 - `plan_versions` / `plan_items` — versionierter Plan (Morgens/Mittags/Abends/Nachts)
 - `daily_assessments` — Tagesbild je Datum (11 Skalen als JSON)
+- `daily_habits` — tägliche Wachzeit (`wake_first_unix`, `wake_last_unix`)
+- `daily_reports` — **Tagesbericht des Hermes-Agents** pro Konsum-Tag (`report` Freitext, `source` Marker) — eingeliefert per `POST /api/report/new`, fließt in Traum + Info-Subtab + KI-Tagebuch ein
+- `dreams` — nächtliche KI-Auswertung pro Tag
+- `chat_change_sets` — Audit-Log der Daten-Konsole
