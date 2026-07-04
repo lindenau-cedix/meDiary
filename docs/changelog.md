@@ -4,6 +4,55 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-07-04 — Tagesbericht des Hermes-Agents → Traum-Kontext
+  (Auftrag `/add-report-api-route`)**:
+  - **Feature:** Neuer Endpoint `POST /api/report/new` nimmt einen Tagesbericht
+    des Hermes-Agents entgegen („was habe ich heute mit dem Agent gemacht?")
+    und macht ihn für das nächtliche „Träumen" verfügbar — zusätzlich zu den
+    11 Tagesskalen und Freitext-Notizen.
+  - **Info-Subtab:** Der Tagesbericht wird auch im Tagebuch-Info-Subtab
+    (`web/src/screens/DiaryScreen.tsx`) als eigene Sektion „Hermes-Agent"
+    (Lucide-Icon `Bot`, mit optionaler Quellenangabe) gerendert. Lange
+    Berichte (> 600 Zeichen) klappen wie die Traum-Karten hinter einem
+    „Weiterlesen"-Button zusammen — Whitespace normalisiert (`\n{3,}` → `\n\n`),
+    damit mehrzeilige Berichte sauber sitzen. Tage mit NUR einem Bericht
+    (keine Einnahmen / kein Tagesbild / keine Wachzeit) erscheinen ebenfalls
+    im Info-Subtab.
+  - **KI-Tagebuch-Prompt:** `buildDayPrompt` (`server/src/lib/diary.ts`)
+    reicht den Bericht ebenfalls an die schreibende KI weiter — die
+    generierten Tagebuch-Volltexte können so auch die Agent-Aktivität des
+    Tages einbeziehen.
+  - **Cron-Trigger:** Auslöser ist der 03:30-Berlin-Cron auf dem Hermes-Host,
+    der dem meDiary-Server den Bericht des gerade zu Ende gegangenen
+    Konsum-Tags übergibt (Default-`date` = `dreamTargetDate(now)` =
+    Konsum-Vortag). Damit liegen Bericht und Traum exakt auf demselben Tag.
+  - **Schema:** Neue Tabelle `daily_reports` in `server/src/db.ts`
+    (`date` PRIMARY KEY, `report` NOT NULL, `source`, `created_at`,
+    `updated_at`). Idempotenter Upsert pro Tag (`upsertReport`).
+  - **Traum-Kontext:** `gatherDreamContext` (`server/src/lib/dreams.ts`) zieht
+    den heutigen Tagesbericht **und** die jüngsten 7 Berichte (`reportsBefore`)
+    als zwei neue Sektionen in den Traum-Prompt. Damit kann M3 Muster zwischen
+    Agent-Aktivität (Coding-Marathons, Deploy-Stress, Cron-Läufe,
+    Server-Probleme) und dem Tagesbefinden herstellen.
+  - **Skip-Schutz:** `hasContent` zählt einen vorhandenen Bericht jetzt mit —
+    ein Tag mit leerem Medikations-Tagebuch, aber gefülltem Agent-Bericht
+    erzeugt weiterhin einen Traum.
+  - **API-Fläche (`server/src/routes/report.ts`):**
+    - `POST /api/report/new` — Body `{ date?: "YYYY-MM-DD", report: string,
+      source?: string }`. 200 mit serialisiertem Datensatz, 400 bei
+      leerem/zu langem `report` (>64 KiB) oder fehlgeschlagener Validierung.
+    - `GET /api/report?from=&to=&limit=` — Liste (neueste zuerst).
+    - `GET /api/report/:date` — Einzelbericht (immer 200, `exists:false` wenn leer).
+    - `DELETE /api/report/:date` — Löschen (204 / 404).
+  - **Integration:** `serializeReport` in `lib/serialize.ts`, gemountet unter
+    `/api/report` in `index.ts`.
+  - **Auth:** offen (privates Deployment, analog zum Rest der Lese-API; Schreib-
+    Cron läuft auf demselben Host). Falls künftig extern, ist die Andockstelle
+    dieselbe wie `POST /api/intakes/text` (Cloudflare Access → CF-Access-Fail-
+    closed-Bypass per `CF_ACCESS_DISABLED`).
+  - **Doku:** Eintrag in `AGENTS.md` (Architekturpunkt + Session-Änderung),
+    `docs/api.md` (Endpoint-Tabelle) und `docs/architecture.md` (DB-Schema).
+
 - **2026-06-18 — Daten-Konsole „Chat with your data" (Auftrag `/chat-with-data`)**:
   - **Feature:** Neuer Tab `/konsole` — eine natürlichsprachige Daten-Konsole für
     Massen-Korrekturen, die über die normale UI nicht möglich sind (Substanzen

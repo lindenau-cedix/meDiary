@@ -140,6 +140,7 @@ Frontend-UI:
 | `daily_assessments` | Tagesbild (11 Skalen als JSON, Primärschlüssel `date`) |
 | `daily_habits` | Tägliche **Wachzeit** (`wake_first_unix`, `wake_last_unix`, beide nullable) pro Konsum-Tag — siehe Abschnitt „Habit / Wachzeit" |
 | `dreams` | Nächtliche KI-Auswertung („Traum") pro Konsum-Tag (PK `date`, `content`, `model`, `status`, `created_at`, `updated_at`) — siehe Abschnitt „Nächtliches Träumen" / Änderung 2026-06-17 |
+| `daily_reports` | Tagesbericht des Hermes-Agents (PK `date`, `report` Freitext, `source` Marker, `created_at`/`updated_at`) — eingeliefert per `POST /api/report/new` vom 03:30-Berlin-Cron, fließt in den Traum-Kontext ein |
 
 Indices: `idx_intakes_taken_at`, `idx_intakes_source` (Import-Idempotenz),
 `idx_plan_items_version`, `idx_plan_versions_source`, `idx_plan_versions_effective`.

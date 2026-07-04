@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { List, Moon, MoonStar, Sun, ChevronDown, Sparkles } from 'lucide-react';
+import { List, Moon, MoonStar, Sun, ChevronDown, Sparkles, Bot } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { EmptyState, LoadingScreen } from '../components/ui/feedback';
@@ -10,7 +10,7 @@ import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { formatDayLabel, formatFull, relativeDays } from '../lib/format';
 import { useDiaryNotes, useDreams, useMetrics } from '../lib/queries';
-import type { Dream } from '../lib/types';
+import type { DiaryNoteDay, Dream } from '../lib/types';
 
 type Mode = 'info' | 'traum';
 
@@ -163,9 +163,58 @@ function ShortDiary() {
                   </p>
                 </div>
               )}
+            {day.report && <DiaryReportBlock report={day.report} />}
           </Card>
         </section>
       ))}
+    </div>
+  );
+}
+
+/** Zeichengrenze für Vorschau/Weiterlesen — gleich wie Traum-Karten. */
+const REPORT_COLLAPSE_AT = 600;
+
+function DiaryReportBlock({ report }: { report: NonNullable<DiaryNoteDay['report']> }) {
+  // `long` aus dem aktuellen Inhalt ableiten (nicht nur beim Mount) — sonst
+  // kann ein Refetch die Karte in einem veralteten Zustand „klemmen" lassen.
+  const long = report.report.length > REPORT_COLLAPSE_AT;
+  const [expanded, setExpanded] = useState(false);
+  const open = !long || expanded;
+  // Whitespace normalisieren: mehrfach aufeinanderfolgende Leerzeilen werden
+  // zu einer einzigen zusammen­gezogen, damit eingerückte Mehrzeiler im
+  // Vorschau-Clip nicht „ausgefranst" wirken.
+  const normalized = report.report.replace(/\n{3,}/g, '\n\n').trim();
+
+  return (
+    <div className="px-3.5 py-2.5 bg-surface2/40">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-accent flex items-center gap-1 mb-1">
+        <Bot size={12} /> Hermes-Agent{report.source ? ` · ${report.source}` : ''}
+      </p>
+      <div
+        className={cx('relative', !open && 'max-h-[10.5rem] overflow-hidden')}
+        style={
+          !open
+            ? {
+                maskImage: 'linear-gradient(to bottom, black 62%, transparent)',
+                WebkitMaskImage: 'linear-gradient(to bottom, black 62%, transparent)',
+              }
+            : undefined
+        }
+      >
+        <p className="text-[13px] text-ink leading-snug whitespace-pre-wrap">{normalized}</p>
+      </div>
+      {long && (
+        <button
+          onClick={() => {
+            haptics.select();
+            setExpanded((o) => !o);
+          }}
+          className="press mt-1.5 inline-flex items-center gap-1 text-[13px] font-semibold text-primary"
+        >
+          {expanded ? 'Weniger' : 'Weiterlesen'}
+          <ChevronDown size={15} className={cx('transition-transform', expanded && 'rotate-180')} />
+        </button>
+      )}
     </div>
   );
 }

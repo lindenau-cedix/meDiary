@@ -25,7 +25,7 @@
 | `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
 | `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht |
-| `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Liste der Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild + Wachzeit-Habit) |
+| `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Liste der Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild + Wachzeit-Habit + **Hermes-Agent-Tagesbericht**). Tage zählen als „noteworthy", sobald EINE dieser Quellen vorliegt — auch ein reiner Agent-Bericht ohne Medikations-Daten erscheint. |
 | `GET` | `/api/diary` | Zustand des KI-Voll-Tagebuchs (`raw`, `entries[]`, `generatedDays`/`pendingDays`, `available`) |
 | `POST` | `/api/diary/generate` | KI-Volltext generieren (`{ scope?: 'missing'\|'all', from?, to?, max? }`); 503 ohne `ANTHROPIC_API_KEY` |
 | `PUT` | `/api/diary` | Tagebuch-Datei manuell überschreiben (`{ content }`) |
@@ -38,6 +38,10 @@
 | `POST` | `/api/dreams/generate` | Manueller Trigger (`{ date?, force? }`); **token-primär** (`X-Dream-Token`), fail-closed (403 ohne Auth, 429 Rate-Limit, 503 ohne `MINIMAX_API_KEY`, 409 wenn schon eine läuft) |
 | `GET` | `/api/dreams/:date` | Einzelner Traum (immer 200, `exists: false`, wenn leer) |
 | `DELETE` | `/api/dreams/:date` | Traum löschen (204 / 404) |
+| `POST` | `/api/report/new` | Tagesbericht des Hermes-Agents einliefern (`{ date?, report, source? }`); idempotenter Upsert pro Konsum-Tag (Default-`date` = `dreamTargetDate(now)`, also Konsum-Vortag — passt zum 03:30-Berlin-Cron und zum Traum-Ziel um 04:20). Fließt in den Traum-Kontext ein (siehe `gatherDreamContext`). 200 mit `{ date, report, source, createdAt, updatedAt, exists }`; 400 bei leerem/zu langem `report`. |
+| `GET` | `/api/report?from=&to=&limit=` | Tagesberichte-Liste (neueste zuerst); `{ reports[] }` |
+| `GET` | `/api/report/:date` | Einzelner Tagesbericht (immer 200, `exists:false` wenn leer) |
+| `DELETE` | `/api/report/:date` | Tagesbericht löschen (204 / 404) |
 | `GET` | `/api/chat/status` | Daten-Konsole: `{ available, model }` (`available:false` ohne Key) |
 | `GET` | `/api/chat/change-sets?limit=` | Change-Set-Audit-Log (neueste zuerst); `{ changeSets[], latestAppliedId, available }` |
 | `GET` | `/api/chat/change-sets/:id` | Einzelnes Change-Set (`{ changeSet, latestAppliedId }`, 404) |

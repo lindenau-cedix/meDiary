@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { config } from '../config.js';
-import { db, type IntakeRow, type AssessmentRow, type HabitRow } from '../db.js';
+import {
+  db,
+  type IntakeRow,
+  type AssessmentRow,
+  type HabitRow,
+  type DailyReportRow,
+} from '../db.js';
 import { consumptionDay } from './time.js';
 import { METRICS } from './metrics.js';
 import { generateText, anthropicAvailable, anthropicModel } from './anthropic.js';
@@ -42,6 +48,18 @@ export interface DiaryDayHabit {
   wakeLastUnix: number | null;
 }
 
+/**
+ * Tagesbericht des Hermes-Agents (eingeliefert vom 03:30-Berlin-Cron per
+ * POST /api/report/new). Wird im Info-Subtab als eigener Abschnitt angezeigt
+ * UND in den Traum-Kontext gespeist — siehe gatherDreamContext.
+ */
+export interface DiaryDayReport {
+  /** Vollständiger Berichtstext (Markdown oder Plain). */
+  report: string;
+  /** Optionaler Marker (z. B. "hermes-cron-0330"). */
+  source: string | null;
+}
+
 export interface DiaryDay {
   date: string;
   weekday: string; // "Donnerstag"
@@ -49,6 +67,7 @@ export interface DiaryDay {
   intakes: DiaryIntakeEntry[];
   assessment: DiaryDayAssessment | null;
   habit: DiaryDayHabit | null;
+  report: DiaryDayReport | null;
 }
 
 /** Ein generierter Voll-Eintrag aus der .md-Datei. */
@@ -72,10 +91,15 @@ function dayDate(date: string): Date {
 
 /**
  * Alle Konsum-Tage mit Inhalt (mindestens eine Einnahme-Notiz, ein
- * Tagesbild, oder ein PC-Habit-Datensatz). Jeder Tag trägt ALLE Einnahmen
- * des Tages (Kontext für die KI-Generierung) — die Kurzversion-Route
- * filtert auf Notiz-tragende. Absteigend sortiert (neuester Tag zuerst).
- * `from`/`to` (YYYY-MM-DD) grenzen ein.
+ * Tagesbild, ein Wachzeit-Datensatz ODER ein Hermes-Agent-Tagesbericht).
+ * Jeder Tag trägt ALLE Einnahmen des Tages (Kontext für die KI-Generierung)
+ * — die Kurzversion-Route filtert auf Notiz-tragende. Absteigend sortiert
+ * (neuester Tag zuerst). `from`/`to` (YYYY-MM-DD) grenzen ein.
+ *
+ * Ein vorhandener Tagesbericht macht den Tag „noteworthy" — auch wenn keine
+ * Medikations-Daten erfasst wurden (so bekommt z. B. ein Tag ohne Einnahmen,
+ * aber mit Coding-Session trotzdem einen Eintrag im Info-Subtab UND triggert
+ * ggf. einen Traum, da `hasContent` im dreaming einen Report ebenfalls zählt).
  */
 export function gatherDiaryDays(opts?: { from?: string; to?: string }): DiaryDay[] {
   const from = opts?.from?.slice(0, 10);
@@ -86,6 +110,7 @@ export function gatherDiaryDays(opts?: { from?: string; to?: string }): DiaryDay
     .all() as IntakeRow[];
   const assessments = db.prepare(`SELECT * FROM daily_assessments`).all() as AssessmentRow[];
   const habits = db.prepare(`SELECT * FROM daily_habits`).all() as HabitRow[];
+  const reports = db.prepare(`SELECT * FROM daily_reports`).all() as DailyReportRow[];
 
   const byDate = new Map<string, DiaryDay>();
   const ensure = (date: string): DiaryDay => {
@@ -98,6 +123,7 @@ export function gatherDiaryDays(opts?: { from?: string; to?: string }): DiaryDay
         intakes: [],
         assessment: null,
         habit: null,
+        report: null,
       };
       byDate.set(date, d);
     }
@@ -139,10 +165,21 @@ export function gatherDiaryDays(opts?: { from?: string; to?: string }): DiaryDay
     };
   }
 
+  for (const r of reports) {
+    // Auch reine Berichts-Tage (ohne Einnahmen / Tagesbild / Wachzeit) in den
+    // Tag-Pool aufnehmen — der Info-Subtab listet sie, damit du jederzeit
+    // sehen kannst, was der Hermes-Agent an dem Tag gemacht hat.
+    ensure(r.date).report = {
+      report: r.report,
+      source: r.source,
+    };
+  }
+
   let days = [...byDate.values()];
-  // „Inhalt" = mind. eine Einnahme-Notiz, ein Tagesbild, ODER ein Wachzeit-Eintrag.
+  // „Inhalt" = mind. eine Einnahme-Notiz, ein Tagesbild, eine Wachzeit ODER ein
+  // Tagesbericht des Hermes-Agents.
   days = days.filter(
-    (d) => d.intakes.some((i) => i.note) || d.assessment !== null || d.habit !== null,
+    (d) => d.intakes.some((i) => i.note) || d.assessment !== null || d.habit !== null || d.report !== null,
   );
   if (from) days = days.filter((d) => d.date >= from);
   if (to) days = days.filter((d) => d.date <= to);
@@ -302,6 +339,12 @@ function buildDayPrompt(day: DiaryDay): string {
       lines.push(`Gewohnheiten: ${parts.join('; ')}.`);
       lines.push('');
     }
+  }
+  if (day.report) {
+    lines.push(
+      `Hermes-Agent-Bericht${day.report.source ? ` (Quelle: ${day.report.source})` : ''}: ${day.report.report}`,
+    );
+    lines.push('');
   }
   lines.push('Schreibe daraus einen Tagebucheintrag für diesen Tag.');
   return lines.join('\n');

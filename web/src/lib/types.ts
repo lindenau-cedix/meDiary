@@ -221,6 +221,18 @@ export interface DiaryDayHabit {
   wakeLastUnix: number | null;
 }
 
+/**
+ * Tagesbericht des Hermes-Agents (eingeliefert vom 03:30-Berlin-Cron per
+ * POST /api/report/new). Wird im Info-Subtab als eigener Abschnitt angezeigt
+ * UND in den Traum-Kontext gespeist — siehe gatherDreamContext.
+ */
+export interface DiaryDayReport {
+  /** Vollständiger Berichtstext (Markdown oder Plain). */
+  report: string;
+  /** Optionaler Marker (z. B. "hermes-cron-0330"). */
+  source: string | null;
+}
+
 // ───────────────────────── Habit (Wachzeit & Co.) ─────────────────────────
 
 /** Tages-Habit-Eintrag (z. B. Wachzeit, gemeldet per /api/habit/uptime). */
@@ -241,6 +253,7 @@ export interface DiaryNoteDay {
   intakes: DiaryIntakeNote[];
   assessment: DiaryDayAssessment | null;
   habit: DiaryDayHabit | null;
+  report: DiaryDayReport | null;
 }
 
 export interface DiaryNotesResponse {

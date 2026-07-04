@@ -6,6 +6,8 @@ import {
   planItemsFor,
   dreamFor,
   dreamsBefore,
+  reportFor,
+  reportsBefore,
   upsertDream,
   type IntakeRow,
   type AssessmentRow,
@@ -109,6 +111,11 @@ export interface DreamContext {
 /**
  * Baut den strukturierten Kontext (deutsches Markdown) für die Auswertung des
  * Konsum-Tages `date`. Vollständigkeit vor Kürzung (M3 hat großes Kontextfenster).
+ *
+ * Eingelesen werden (in dieser Reihenfolge): Medikationsplan (Soll),
+ * Einnahmen (Ist), außerplanmäßiger Konsum, Wachzeit, Tagesnotizen,
+ * 11 Tagesskalen, **Tagesbericht des Hermes-Agents (siehe /api/report/new)**,
+ * die 7 jüngsten Träume und die 7 jüngsten Agent-Berichte.
  */
 export function gatherDreamContext(date: string): DreamContext {
   const lines: string[] = [];
@@ -231,6 +238,21 @@ export function gatherDreamContext(date: string): DreamContext {
   }
   lines.push('');
 
+  // ── Tagesbericht des Hermes-Agents (POST /api/report/new, 03:30-Cron) ──
+  // Wird vom Hermes-Agent kurz nach Mitternacht eingeliefert und beschreibt,
+  // was der Agent an diesem Konsum-Tag getan hat (Coding-Sessions, Cron-Läufe,
+  // Deploys, Fehler …). Liefert zusätzlichen Kontext: welche Software-/Server-
+  // Aktivität mit den Skalen/Notizen des Tages zusammenfiel.
+  const todayReport = reportFor(date);
+  lines.push(`## Tagesbericht des Hermes-Agents`);
+  if (!todayReport) {
+    lines.push('Kein Tagesbericht für diesen Tag (Cron läuft erst um 03:30 — wenn er fehlt, lief der Agent nicht oder die Zustellung schlug fehl).');
+  } else {
+    if (todayReport.source) lines.push(`(Quelle: ${todayReport.source})`);
+    lines.push(todayReport.report.trim());
+  }
+  lines.push('');
+
   // ── Die 7 jüngsten Auswertungen (nicht zwingend 7 Kalendertage — leere
   //    Tage erzeugen keinen Traum, daher können sie weiter zurückreichen). ──
   const previous = dreamsBefore(date, 7);
@@ -250,11 +272,33 @@ export function gatherDreamContext(date: string): DreamContext {
   }
   lines.push('');
 
+  // ── Die 7 jüngsten Hermes-Agent-Tagesberichte (analog zu den Träumen):
+  //    ermöglichen dem Modell, Muster zwischen Agent-Aktivität und Befinden
+  //    über die Woche hinweg zu sehen (Coding-Marathons, Deploy-Stress,
+  //    Server-Ausfälle …). ──
+  const recentReports = reportsBefore(date, 7);
+  lines.push(`## Tagesberichte des Hermes-Agents (jüngste 7 Tage)`);
+  lines.push(
+    'Was der Hermes-Agent an diesen Tagen getan hat (Coding, Cron-Läufe, Deploys, Fehler). ' +
+      'Beziehe dich auf Muster daraus, wenn sie für die Auswertung relevant sind.',
+  );
+  lines.push('');
+  if (recentReports.length === 0) {
+    lines.push('_Noch keine früheren Tagesberichte vorhanden._');
+  } else {
+    for (const r of recentReports) {
+      lines.push(`### ${labelOf(r.date)} (${r.date})${r.source ? ` — ${r.source}` : ''}`);
+      lines.push(r.report.trim());
+      lines.push('');
+    }
+  }
+  lines.push('');
+
   lines.push(
     `Erstelle nun die Auswertung für **${labelOf(date)}** gemäß deinen Vorgaben (Rolle, Epistemik, Anti-Wiederholung, Ausgabeformat).`,
   );
 
-  const hasContent = intakes.length > 0 || hasScores || (habit != null);
+  const hasContent = intakes.length > 0 || hasScores || habit != null || todayReport != null;
   return { date, label: labelOf(date), prompt: lines.join('\n'), hasContent };
 }
 

@@ -100,6 +100,14 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
   Plan galt wann". Das **Tagesbild** (11-Skalen-Assessment) wird ausgelöst, sobald
   ALLE Nacht-Medis des wirksamen Plans für den Konsumtag erfasst sind
   (`allNightMedsTaken()` in `db.ts`) — nicht schon bei einer einzelnen Nachtmed.
+- **Tagesbericht des Hermes-Agents** (`POST /api/report/new`, eingeliefert vom
+  03:30-Berlin-Cron) fließt in den Traum-Kontext ein — zusätzliche Sektion
+  „Tagesbericht des Hermes-Agents" plus die jüngsten 7 Berichte, damit das
+  nächtliche „Träumen" nicht nur 1–10-Skalen + Notizen kennt, sondern auch
+  welche Agent-/Coding-/Server-Aktivität am Tag stattfand (Default-`date` =
+  `dreamTargetDate(now)`, also Konsum-Vortag — passt zum 04:20-Traum). Ein
+  vorhandener Bericht zählt für `hasContent` (kein Traum-Skip mehr nur wegen
+  leerer Medikations-Sektion).
 - **Drei KI-Integrationen, drei Wire-Formate** (alle Keys ausschließlich serverseitig):
   KI-Tagebuch = Anthropic-Messages (`lib/anthropic.ts`), nächtliches „Träumen" =
   OpenAI-Chat-Completions (`lib/minimax.ts`), Daten-Konsole = Anthropic-Messages mit
@@ -113,6 +121,33 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
 
 ## Letzte Session-Änderungen
 
+- **Tagesbericht des Hermes-Agents → Traum-Kontext + Info-Subtab (2026-07-04):**
+  Neuer Endpoint `POST /api/report/new` (Body `{ date?, report, source? }`,
+  idempotenter Upsert pro Konsum-Tag, Default-`date` = `dreamTargetDate(now)`).
+  Tabelle `daily_reports` (PK `date`). `gatherDreamContext` (`lib/dreams.ts`)
+  zieht den Tagesbericht des Ziel-Tags **und** die jüngsten 7 Berichte als
+  eigene Sektionen in den Traum-Prompt — das nächtliche „Träumen" kennt jetzt
+  auch, was der Hermes-Agent am Tag gemacht hat (Coding, Cron, Deploys,
+  Fehler). `hasContent` berücksichtigt einen vorhandenen Bericht, damit der
+  Traum-Skip nicht mehr rein auf Grund leerer Medikations-Sektionen greift.
+  Im **Tagebuch-Info-Subtab** (`web/src/screens/DiaryScreen.tsx`) erscheint
+  der Bericht als eigene Sektion „Hermes-Agent" (Lucide-Icon `Bot`, mit
+  optionaler Quellenangabe); lange Berichte klappen hinter
+  „Weiterlesen" (> 600 Zeichen, gleiche Schwelle wie Traum-Karten) zusammen.
+  Tage mit NUR einem Bericht zählen als „noteworthy" und erscheinen auch
+  ohne Einnahmen / Tagesbild / Wachzeit. `buildDayPrompt` (`lib/diary.ts`)
+  reicht den Bericht zusätzlich an die KI-Tagebuch-Generierung weiter.
+  Dateien: `server/src/routes/report.ts`, `server/src/db.ts`,
+  `server/src/lib/dreams.ts`, `server/src/lib/diary.ts`,
+  `server/src/lib/serialize.ts`, `server/src/index.ts`,
+  `server/src/routes/diary.ts`, `web/src/lib/types.ts`,
+  `web/src/screens/DiaryScreen.tsx`, `docs/api.md`, `docs/architecture.md`,
+  `docs/changelog.md`. Cron-Beispiel für den 03:30-Berlin-Trigger:
+  ```bash
+  curl -fsS -X POST "${MEDIARY_URL}/api/report/new" \
+    -H 'Content-Type: application/json' \
+    -d "{\"report\":\"$(cat /var/log/hermes/daily-report.md)\",\"source\":\"hermes-cron-0330\"}"
+  ```
 - **Daten-Konsole „Chat with your data" (2026-06-18):** Neuer Tab `/konsole` für
   natürlichsprachige Massen-Korrekturen. Lesen läuft read-only (separate
   `{readonly:true}`-SQLite-Verbindung, nur `SELECT`/`WITH`); Schreiben NUR über

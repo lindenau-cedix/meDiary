@@ -16,8 +16,8 @@ export const diaryRouter = Router();
 
 /**
  * Kurzversion: reine Liste der Notizen je Konsum-Tag (Einnahme-Notizen +
- * Tagesbild + PC-Habit). Liest nur, schreibt nie in die DB. `?from=&to=`
- * (YYYY-MM-DD) grenzt ein.
+ * Tagesbild + PC-Habit + Hermes-Agent-Tagesbericht). Liest nur, schreibt nie
+ * in die DB. `?from=&to=` (YYYY-MM-DD) grenzt ein.
  */
 diaryRouter.get('/notes', (req, res) => {
   const from = typeof req.query.from === 'string' ? req.query.from : undefined;
@@ -30,6 +30,7 @@ diaryRouter.get('/notes', (req, res) => {
     intakes: d.intakes.filter((i) => i.note),
     assessment: d.assessment,
     habit: d.habit,
+    report: d.report,
   }));
   res.json({ days });
 });

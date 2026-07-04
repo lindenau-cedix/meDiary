@@ -118,6 +118,23 @@ CREATE TABLE IF NOT EXISTS chat_change_sets (
   affected      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_chat_change_sets_status ON chat_change_sets(status);
+
+-- Tagesbericht des Hermes-Agents (was der Agent an diesem Konsum-Tag getan hat).
+-- Wird vom 03:30-Berlin-Cron per POST /api/report/new eingeliefert und fließt in
+-- den Traum-Kontext (gatherDreamContext) ein, damit das naechtliche Traeumen
+-- nicht nur 1-10-Skalen + Notizen, sondern auch die Agent-Aktivitaeten des Tages
+-- kennt. Pro Konsum-Tag genau EIN Bericht (date = PK -> idempotente UPSERT).
+--   report      Freitext (Markdown oder Plain) - was der Agent an diesem Tag
+--               gemacht hat (Coding-Sessions, Cron-Laeufe, Deploys, Fehler ...)
+--   source      optionaler Marker, wer den Bericht eingeliefert hat
+--               (z. B. "hermes-cron-0330" - hilft beim Debugging)
+CREATE TABLE IF NOT EXISTS daily_reports (
+  date       TEXT PRIMARY KEY,
+  report     TEXT NOT NULL,
+  source     TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `);
 
 // Migration: Schemaumbenennung der Habit-Spalten von "PC-Nutzung" auf
@@ -249,6 +266,14 @@ export interface DreamRow {
   updated_at: string;
 }
 
+export interface DailyReportRow {
+  date: string;
+  report: string;
+  source: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export type ChatChangeSetStatus = 'proposed' | 'applied' | 'undone' | 'discarded';
 
 export interface ChatChangeSetRow {
@@ -322,6 +347,65 @@ export function upsertDream(date: string, content: string, model: string, status
 /** Traum löschen. Gibt true zurück, wenn etwas gelöscht wurde. */
 export function deleteDream(date: string): boolean {
   return db.prepare(`DELETE FROM dreams WHERE date = ?`).run(date).changes > 0;
+}
+
+// ---------- Tagesbericht (Hermes-Agent) — Helfer ----------
+
+/** Tagesbericht für ein Datum (oder null). */
+export function reportFor(date: string): DailyReportRow | null {
+  return (
+    (db.prepare(`SELECT * FROM daily_reports WHERE date = ?`).get(date) as DailyReportRow | undefined) ?? null
+  );
+}
+
+/** Tagesberichte in einem Datumsbereich (neueste zuerst). `from`/`to` optional. */
+export function listReports(opts?: { from?: string; to?: string; limit?: number }): DailyReportRow[] {
+  const where: string[] = [];
+  const params: Record<string, unknown> = {};
+  if (opts?.from) {
+    where.push(`date >= @from`);
+    params.from = opts.from.slice(0, 10);
+  }
+  if (opts?.to) {
+    where.push(`date <= @to`);
+    params.to = opts.to.slice(0, 10);
+  }
+  let sql = `SELECT * FROM daily_reports ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY date DESC`;
+  if (opts?.limit && opts.limit > 0) sql += ` LIMIT ${Math.floor(opts.limit)}`;
+  return db.prepare(sql).all(params) as DailyReportRow[];
+}
+
+/**
+ * Die `n` jüngsten Berichte STRIKT VOR `beforeDate` (für „Berichte der letzten
+ * 7 Tage" im Traum-Kontext). Liefert die Reports in absteigender Datums-Reihenfolge.
+ */
+export function reportsBefore(beforeDate: string, n: number): DailyReportRow[] {
+  return db
+    .prepare(`SELECT * FROM daily_reports WHERE date < ? ORDER BY date DESC LIMIT ?`)
+    .all(beforeDate, Math.max(0, Math.floor(n))) as DailyReportRow[];
+}
+
+/**
+ * Tagesbericht anlegen/überschreiben (idempotent pro Konsum-Tag).
+ * `report` muss ein nicht-leerer String sein; `source` ist optional und dient
+ * der Nachvollziehbarkeit (z. B. "hermes-cron-0330").
+ */
+export function upsertReport(date: string, report: string, source: string | null): DailyReportRow {
+  const now = nowLocalISO();
+  db.prepare(
+    `INSERT INTO daily_reports (date, report, source, created_at, updated_at)
+     VALUES (@date, @report, @source, @now, @now)
+     ON CONFLICT(date) DO UPDATE SET
+       report = @report,
+       source = @source,
+       updated_at = @now`,
+  ).run({ date, report, source, now });
+  return reportFor(date)!;
+}
+
+/** Tagesbericht löschen. Gibt true zurück, wenn etwas gelöscht wurde. */
+export function deleteReport(date: string): boolean {
+  return db.prepare(`DELETE FROM daily_reports WHERE date = ?`).run(date).changes > 0;
 }
 
 // ---------- Plan-Helfer ----------

@@ -6,6 +6,7 @@ import type {
   AssessmentRow,
   HabitRow,
   DreamRow,
+  DailyReportRow,
 } from '../db.js';
 import { METRIC_KEYS } from './metrics.js';
 import { consumptionDay } from './time.js';
@@ -106,6 +107,16 @@ export function serializeDream(r: DreamRow) {
     content: r.content,
     model: r.model,
     status: r.status,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function serializeReport(r: DailyReportRow) {
+  return {
+    date: r.date,
+    report: r.report,
+    source: r.source,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
