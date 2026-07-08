@@ -6,6 +6,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # meDiary — Medikations-Tagebuch
 
+## Letzter Durchlauf (2026-07-08)
+
+**Aufgabe (Issue #4):** Im „Heute"-Tab gab es Sammel-Shortcuts nur für
+Morgen- und Nachtmedikation, nicht für die beiden Tages-Dosen.
+
+**Gefunden:** Backend (`PlanSlot = morning|noon|evening|night`,
+`plan-batch`-Endpoint, `PLAN_SLOTS`) und Typen (`web/src/lib/types.ts`,
+Plan-Item mit `noon`/`evening`) unterstützten alle vier Slots bereits
+vollständig. Nur der Frontend-`QuickEntryScreen` rendert `PlanBatchTile`
+ausschließlich für `morning` und `night`.
+
+**Geändert:** `web/src/screens/QuickEntryScreen.tsx` — zwei neue Counts
+(`noonCount`, `eveningCount`) und zwei neue Sammel-Kacheln „Mittagsmedis"
+(Icon `Sun`, `submitBatch('noon', …)`) und „Abendmedis" (Icon `Sunset`,
+`submitBatch('evening', …)`), eingereiht zwischen Morgen und Nacht. Icons
+`Sun`/`Sunset` aus `lucide-react` importiert. Kacheln erscheinen nur, wenn
+der wirksame Plan für den Slot etwas hinterlegt hat (`count > 0`), analog
+zu den bestehenden Shortcuts.
+
+**Verifikation:** `npm run typecheck:all` grün; `Sun`/`Sunset` als
+lucide-react-Exports bestätigt. Keine Backend-Änderung nötig.
+
 ## TL;DR für eilige KI-Instanzen
 
 ```bash

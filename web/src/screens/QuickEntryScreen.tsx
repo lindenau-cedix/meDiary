@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, motion, Reorder, useDragControls } from 'framer-motion';
-import { Settings2, SquareTerminal, Plus, Check, Clock3, Moon, Sunrise, ChevronRight, WifiOff, AlertCircle, GripVertical, ArrowUpDown, X } from 'lucide-react';
+import { Settings2, SquareTerminal, Plus, Check, Clock3, Moon, Sunrise, Sun, Sunset, ChevronRight, WifiOff, AlertCircle, GripVertical, ArrowUpDown, X } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -49,6 +49,8 @@ export function QuickEntryScreen() {
   // Sammel-Einträge "Morgendmedis"/"Nachtmedis": tragen mit einem Tipp alle
   // Substanzen des aktuell wirksamen Plans für den jeweiligen Slot ein.
   const morningCount = useMemo(() => (plan?.items ?? []).filter((i) => i.morning?.trim()).length, [plan]);
+  const noonCount = useMemo(() => (plan?.items ?? []).filter((i) => i.noon?.trim()).length, [plan]);
+  const eveningCount = useMemo(() => (plan?.items ?? []).filter((i) => i.evening?.trim()).length, [plan]);
   const nightCount = useMemo(() => (plan?.items ?? []).filter((i) => i.night?.trim()).length, [plan]);
 
   // Substanz-Namen, für die DEFAULTS.md keinen Eintrag hat.
@@ -473,6 +475,26 @@ export function QuickEntryScreen() {
               color="#E0944A"
               pending={planBatch.isPending}
               onPress={() => submitBatch('morning', 'Morgendmedis')}
+            />
+          )}
+          {noonCount > 0 && (
+            <PlanBatchTile
+              label="Mittagsmedis"
+              count={noonCount}
+              icon={<Sun size={20} strokeWidth={2.2} />}
+              color="#D9B441"
+              pending={planBatch.isPending}
+              onPress={() => submitBatch('noon', 'Mittagsmedis')}
+            />
+          )}
+          {eveningCount > 0 && (
+            <PlanBatchTile
+              label="Abendmedis"
+              count={eveningCount}
+              icon={<Sunset size={20} strokeWidth={2.2} />}
+              color="#C06E4E"
+              pending={planBatch.isPending}
+              onPress={() => submitBatch('evening', 'Abendmedis')}
             />
           )}
           {nightCount > 0 && (
