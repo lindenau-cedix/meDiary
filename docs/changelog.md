@@ -4,6 +4,64 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-07-09 — Android-Home-Screen-Widget „meDiary-Sample" (1×1)**:
+  - **Feature:** 1×1-Widget, das per Tap eine vorkonfigurierte Einnahme
+    an `POST /api/intakes` schickt und einen Toast einblendet
+    (`Erfasst: Quetiapin 50 mg`). Mehrere Instanzen, jede mit eigener
+    Bindung (Substanz + Menge + Tageszeit). Konfiguration über die
+    Android-Standard-Widget-Config-Activity (System-Flow „Widget
+    hinzufügen" oder Long-Press → Konfigurieren).
+  - **Endpoint-Wahl:** `POST /api/intakes` (single, **nicht** hinter
+    `requireCloudflareAccess`) statt `POST /api/intakes/text` — pro
+    Widget wird genau eine Substanz gebunden, das
+    Freitext-Parsing-Multiline-Handling ist unnötig, und der Endpoint
+    ist im LAN-Deployment mit `CF_ACCESS_DISABLED=true` direkt
+    erreichbar. Server-seitig greifen `Mit:`-Begleitsubstanzen und
+    DEFAULTS-Standarddosis wie beim in-app `submitInstant`-Button.
+  - **Authentifizierung:** `ApiClient.attachCookie()` reicht den
+    `CF_Authorization`-Cookie aus dem WebView-CookieManager sowohl als
+    `Cookie`-Header als auch kanonisch als
+    `Cf-Access-Jwt-Assertion`-Header durch. Bei HTTP 401 öffnet das
+    Widget die App (`MainActivity`), damit der WebView sich neu
+    einloggt; danach funktioniert das Widget wieder.
+  - **API-Base-Spiegelung:** Neues Capacitor-Plugin
+    `app.mediary.bridge.WidgetBridgePlugin` mit Methode `setApiBase()`,
+    das die URL in `SharedPreferences("mediary_widgets")` schreibt. Das
+    Web ruft das Plugin nach jedem `getApiBase()`/`setApiBase()` auf
+    (`web/src/lib/widgetBridge.ts` + Patch in `web/src/lib/api.ts`),
+    damit die Widgets die URL kennen, **bevor** der Nutzer die App je
+    geöffnet hat. Im Browser-Betrieb no-op.
+  - **Native Quellen:** Liegen in `web/android-native-src/` (NICHT
+    Teil des Capacitor-Scaffolds) — fünf Kotlin-Klassen plus ein
+    Bridge-Plugin, XML-Layouts, Drawables, Provider-Metadaten,
+    Strings/Colors und ein `install.sh`, das die Quellen idempotent
+    nach `cap add android` in `web/android/app/src/main/` mergt
+    (Kotlin → `java/`, XML → `res/`, Manifest-Fragment
+    `Config-Activity` + `Provider-Receiver` wird vor `</application>`
+    eingefügt, `androidx.appcompat:appcompat:1.7.0` +
+    `com.squareup.okhttp3:okhttp:4.12.0` werden in `app/build.gradle`
+    ergänzt, falls noch nicht vorhanden).
+  - **Dateien:**
+    `web/android-native-src/{README.md,install.sh,manifest-fragment.xml}`,
+    `web/android-native-src/app/src/main/java/app/mediary/widget/{SampleWidgetProvider,SampleWidgetConfigActivity,SampleSendReceiver,ApiClient,SampleWidgetPrefs}.kt`,
+    `web/android-native-src/app/src/main/java/app/mediary/bridge/WidgetBridgePlugin.kt`,
+    `web/android-native-src/app/src/main/res/{xml/sample_widget_info,layout/widget_sample,layout/activity_widget_config,drawable/widget_background,drawable/widget_preview}.xml`,
+    `web/android-native-src/app/src/main/res/values/{strings,colors}.xml`,
+    `web/src/lib/widgetBridge.ts`,
+    `web/src/lib/api.ts` (2 Stellen).
+    Doku: `docs/deployment.md` (neuer Abschnitt „Android-Widget"),
+    `docs/architecture.md` (Verzeichnisbaum erweitert),
+    `docs/pitfalls.md` (kurzer Eintrag zu Deep-Doze und fehlendem
+    Preview des letzten Eintrags).
+  - **Verifikation:** Da das Sandbox-Environment kein JDK und kein
+    Android-SDK hat, wurde der `gradlew assembleDebug`-Build nicht
+    hier ausgeführt. Die Install-Prozedur ist in
+    `web/android-native-src/README.md` Schritt für Schritt
+    dokumentiert; wer ein Android-Gerät + SDK hat, kann mit
+    `./android-native-src/install.sh && npm run build && npm run cap:sync
+    && cd android && ./gradlew assembleDebug` die APK bauen und
+    installieren.
+
 - **2026-07-04 — Tagesbericht des Hermes-Agents → Traum-Kontext
   (Auftrag `/add-report-api-route`)**:
   - **Feature:** Neuer Endpoint `POST /api/report/new` nimmt einen Tagesbericht

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Ergänzungen für meDiary-Sample-Widget.
+
+  Diese Datei ist als Additiv gedacht — der bestehende Capacitor-
+  Scaffold legt bereits eine strings.xml an. Beim Install-Skript
+  werden die <string>-Einträge per `xmllint` oder manuell in die
+  bestehende Datei gemergt (siehe android-native-src/install.sh).
+-->
+<resources>
+    <string name="widget_label">meDiary-Sample</string>
+    <string name="widget_config_label">Sample auswählen</string>
+    <string name="widget_config_title">Welches Sample?</string>
+    <string name="widget_config_substance_hint">Substanz</string>
+    <string name="widget_config_amount_hint">Menge (optional)</string>
+    <string name="widget_config_slot_hint">Tageszeit</string>
+    <string name="widget_config_save">Widget anlegen</string>
+    <string name="widget_config_no_api_base">Bitte zuerst die meDiary-App öffnen, damit die Server-Adresse gesetzt wird.</string>
+    <string name="widget_config_loading">Substanzen werden geladen …</string>
+    <string name="widget_config_load_failed">Substanzen konnten nicht geladen werden. Verbindung prüfen.</string>
+    <string name="widget_config_pick_substance">Bitte eine Substanz wählen.</string>
+
+    <string name="widget_toast_success">Erfasst: %1$s</string>
+    <string name="widget_toast_offline">Server nicht erreichbar</string>
+    <string name="widget_toast_unauth">Bitte App öffnen (Login abgelaufen)</string>
+    <string name="widget_toast_no_api_base">Bitte zuerst die meDiary-App öffnen</string>
+    <string name="widget_toast_unknown">Fehler: %1$s</string>
+
+    <string name="widget_slot_morning">Morgens (08:00)</string>
+    <string name="widget_slot_noon">Mittags (13:00)</string>
+    <string name="widget_slot_evening">Abends (19:00)</string>
+    <string name="widget_slot_night">Nachts (22:30)</string>
+    <string name="widget_slot_now">Jetzt (aktuelle Zeit)</string>
+</resources>

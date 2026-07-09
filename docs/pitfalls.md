@@ -87,3 +87,19 @@
   Arbeitsverzeichnis ab: bei `node server/dist/index.js` aus dem Repo-Root
   `WEB_DIST=./web/dist`, bei `npm run start` über das Root-Skript wegen
   `npm --prefix server` dagegen `WEB_DIST=../web/dist`.
+- **Android-Sample-Widget reagiert nicht im Deep-Doze / Doze-Standby** —
+  auf stock Android funktioniert der `BroadcastReceiver` mit `goAsync()`
+  ohne Probleme, solange das Gerät nicht aggressiv in Standby geht
+  (manche Custom-ROMs/Sparemodus-Apps). Die Tap-Verzögerung beträgt
+  in der Praxis maximal wenige Sekunden, weil der Home-Screen-Tap den
+  App-Prozess aufweckt. Akzeptabel.
+- **Android-Sample-Widget zeigt KEINEN Preview des letzten Eintrags.**
+  Die Kachel zeigt ausschließlich die **konfigurierte** Substanz + Menge,
+  nicht die *zuletzt erfasste* Einnahme. Wer den Tap-Verlauf sehen
+  will, muss die App öffnen (`Heute`-Tab). Bewusste Vereinfachung in v1.
+- **Android-Sample-Widget: kein Undo vom Homescreen-Tap.** Der in-app
+  `Rückgängig`-Toast (`QuickEntryScreen.tsx`) ist die einzige
+  Korrekturmöglichkeit bei einem Mistap. Wird der verpasst, bleibt der
+  Eintrag stehen (löschbar über die Verlauf-Liste). Multi-Substance-
+  Zeilen brauchen mehrere Widgets nebeneinander; eine
+  „Roh-Freitext"-Variante (`POST /api/intakes/text`) bleibt für v2.

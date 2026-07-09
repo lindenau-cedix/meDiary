@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  RemoteViews-Layout für die 1×1-Kachel. RemoteViews unterstützt nur
+  eine eingeschränkte View-Auswahl (TextView, ImageView, FrameLayout,
+  LinearLayout, …). Die Hintergrundfarbe wird zur Laufzeit per
+  `setInt(R.id.widget_root, "setBackgroundColor", …)` gesetzt; die
+  rounded-corner-Form liegt in `widget_background.xml`.
+
+  Zwei TextViews übereinander: Substanzname (bold, 11sp) und Menge
+  (9sp, leicht transparent). `maxLines=1` + `ellipsize=end` für sehr
+  lange Substanznamen.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:padding="6dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:gravity="center">
+
+        <TextView
+            android:id="@+id/widget_substance"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:gravity="center"
+            tools:text="Quetiapin"
+            xmlns:tools="http://schemas.android.com/tools" />
+
+        <TextView
+            android:id="@+id/widget_amount"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:textColor="#FFFFFFCC"
+            android:textSize="9sp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:gravity="center"
+            tools:text="50 mg"
+            xmlns:tools="http://schemas.android.com/tools" />
+    </LinearLayout>
+</FrameLayout>

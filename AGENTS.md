@@ -6,27 +6,42 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # meDiary — Medikations-Tagebuch
 
-## Letzter Durchlauf (2026-07-08)
+## Letzter Durchlauf (2026-07-09)
 
-**Aufgabe (Issue #4):** Im „Heute"-Tab gab es Sammel-Shortcuts nur für
-Morgen- und Nachtmedikation, nicht für die beiden Tages-Dosen.
+**Aufgabe:** „Add widgets to the android version, which are 1x1 Buttons
+for a Shortcut for adding a sample."
 
-**Gefunden:** Backend (`PlanSlot = morning|noon|evening|night`,
-`plan-batch`-Endpoint, `PLAN_SLOTS`) und Typen (`web/src/lib/types.ts`,
-Plan-Item mit `noon`/`evening`) unterstützten alle vier Slots bereits
-vollständig. Nur der Frontend-`QuickEntryScreen` rendert `PlanBatchTile`
-ausschließlich für `morning` und `night`.
+**Gemacht:** Neues 1×1-Home-Screen-Widget „meDiary-Sample" in der
+Capacitor-APK. Pro Widget-Instanz eine Bindung (Substanz + Menge +
+Tageszeit-Slot), Tap → `POST /api/intakes` + Toast. Konfiguration
+über die Android-Standard-Widget-Config-Activity. Authentifizierung
+über den `CF_Authorization`-Cookie aus dem WebView-CookieManager;
+bei 401 öffnet das Widget die App. API-URL wird über das neue
+Capacitor-Plugin `WidgetBridgePlugin` aus dem WebView in
+`SharedPreferences` gespiegelt, damit das Widget die URL kennt,
+**bevor** der Nutzer die App öffnen musste.
 
-**Geändert:** `web/src/screens/QuickEntryScreen.tsx` — zwei neue Counts
-(`noonCount`, `eveningCount`) und zwei neue Sammel-Kacheln „Mittagsmedis"
-(Icon `Sun`, `submitBatch('noon', …)`) und „Abendmedis" (Icon `Sunset`,
-`submitBatch('evening', …)`), eingereiht zwischen Morgen und Nacht. Icons
-`Sun`/`Sunset` aus `lucide-react` importiert. Kacheln erscheinen nur, wenn
-der wirksame Plan für den Slot etwas hinterlegt hat (`count > 0`), analog
-zu den bestehenden Shortcuts.
+**Architektur-Entscheidung:** `POST /api/intakes` (single, offen, kein
+CF-Access-Auth) statt `POST /api/intakes/text` (CF-Access-required).
+Pro Widget genau eine Substanz — Text-Parser-Overhead unnötig, und im
+LAN-Deployment mit `CF_ACCESS_DISABLED=true` direkt erreichbar.
+`Mit:`-Begleitsubstanzen und DEFAULTS-Standarddosis greifen serverseitig
+genauso wie beim in-app `submitInstant`-Button.
 
-**Verifikation:** `npm run typecheck:all` grün; `Sun`/`Sunset` als
-lucide-react-Exports bestätigt. Keine Backend-Änderung nötig.
+**Wo der Code liegt:** Da `web/android/` per `.gitignore` ausgeschlossen
+ist (Capacitor regeneriert das Verzeichnis), liegen die nativen Quellen
+in **`web/android-native-src/`** und werden vom mitgelieferten
+`install.sh` (idempotent) nach `npx cap add android` in den
+Capacitor-Scaffold gemergt. **Erst `cap add android` laufen lassen,
+dann `./android-native-src/install.sh`** — sonst zeigt das Merge-Skript
+einen klaren Fehler.
+
+**Verifikation:** Statische Prüfung — alle `R.*`-Referenzen in den
+fünf Kotlin-Klassen haben passende XML-Definitionen, die
+`AndroidManifest.xml`-Einträge sind im Skript-Output korrekt,
+`install.sh` hat gültige Bash-Syntax, alle XML-Dateien parsen sauber.
+**`gradlew assembleDebug` konnte in dieser Sandbox nicht laufen** (kein
+JDK/Android-SDK), das ist im README der Komponente dokumentiert.
 
 ## TL;DR für eilige KI-Instanzen
 
@@ -45,6 +60,9 @@ docker compose up -d --build # Produktionscontainer bauen + starten
 - **Tagesbericht-Default = `dreamTargetDate(now)`** — `POST /api/report/new` ohne
   Body-`date` schreibt auf den Konsum-Vortag (genau der Tag, über den 42 min
   später geträumt wird). Der 03:30-Berlin-Cron muss also nichts mitsenden.
+- **`web/android/` ist gitignored** — Capacitor-Scaffold wird lokal generiert
+  und ist nicht im Repo. Native Quellen für das Widget liegen in
+  `web/android-native-src/`.
 
 ---
 
@@ -54,25 +72,30 @@ Projekt nahtlos weiterbearbeitet.
 ## Was ist meDiary?
 
 Ein sorgfältig gestaltetes **Medikations-Tagebuch**: HTTP-API + SQLite +
-React/Vite-Frontend (PC, iPad, Android-APK). Standard-Notizen aus
-`DEFAULTS.md` werden beim Eintragen automatisch übernommen. Nachtmedikation
-löst ein 11-Skalen-Tagesbild aus. Plan-Versionen mit Diff. Nächtliches
-„Träumen" wertet den Tag per **MiniMax M3** aus und kennt neben den
-1–10-Skalen + Notizen auch den **Tagesbericht des Hermes-Agents**
-(`POST /api/report/new`, eingeliefert vom 03:30-Berlin-Cron), der im
-Tagebuch-Info-Subtab und in der Traum-Auswertung erscheint.
+React/Vite-Frontend (PC, iPad, Android-APK inkl. 1×1-Homescreen-Widget).
+Standard-Notizen aus `DEFAULTS.md` werden beim Eintragen automatisch
+übernommen. Nachtmedikation löst ein 11-Skalen-Tagesbild aus.
+Plan-Versionen mit Diff. Nächtliches „Träumen" wertet den Tag per
+**MiniMax M3** aus und kennt neben den 1–10-Skalen + Notizen auch den
+**Tagesbericht des Hermes-Agents** (`POST /api/report/new`, eingeliefert
+vom 03:30-Berlin-Cron), der im Tagebuch-Info-Subtab und in der
+Traum-Auswertung erscheint.
 
 ```
 meDiary/
-├── server/   → HTTP-API (Express + TypeScript + better-sqlite3)
-│   └── src/routes/report.ts → POST /api/report/new (Tagesbericht-Upsert)
-├── web/      → Frontend (React + Vite + Tailwind, Capacitor-fähig)
-│   └── src/screens/DiaryScreen.tsx → Info-Subtab zeigt „Hermes-Agent"-Block
-├── import/   → Datenquellen für den Importer (Markdown + entries.jsonl)
-├── DEFAULTS.md  → Standard-Notizen/Mengen pro Substanz (live editierbar)
-├── SAMPLES.md   → Zeilen-Format für den Freitext-Import (POST /api/intakes/text)
+├── server/                  → HTTP-API (Express + TypeScript + better-sqlite3)
+│   └── src/routes/          → endpoints: intakes, plan, dreams, chat, report, …
+├── web/                     → Frontend (React + Vite + Tailwind, Capacitor-fähig)
+│   ├── src/screens/         → 7 Screens (QuickEntry, History, Plan, Diary, Trends, Console, Settings)
+│   └── android-native-src/  → Native Android-Widget-Quellen (NICHT in git getrackt;
+│                              web/android/ ist via .gitignore ausgeschlossen und
+│                              wird bei `cap add android` lokal generiert)
+├── import/                  → Datenquellen für den Importer (Markdown + entries.jsonl)
+├── DEFAULTS.md              → Standard-Notizen/Mengen pro Substanz (live editierbar)
+├── SAMPLES.md               → Zeilen-Format für den Freitext-Import (POST /api/intakes/text)
+├── docs/                    → Detaillierte Doku (development, architecture, api, deployment, pitfalls, changelog)
 ├── README.md
-└── AGENTS.md    (du bist hier — CLAUDE.md ist ein Symlink auf diese Datei)
+└── AGENTS.md                (du bist hier — CLAUDE.md ist ein Symlink auf diese Datei)
 ```
 
 ## Tech-Stack
@@ -81,11 +104,15 @@ meDiary/
   Dev: `tsx watch`, Build: `tsc → dist/`.
 - **Web:** React 18, Vite 6, Tailwind 3, framer-motion, lucide-react,
   @tanstack/react-query, react-router-dom. Build: `vite build → web/dist`.
-- **APK:** Capacitor 6 (`@capacitor/core` + `android`).
+- **APK:** Capacitor 6 (`@capacitor/core` + `android`) plus natives
+  1×1-Home-Screen-Widget (Kotlin/OkHttp, Quellen in
+  `web/android-native-src/`, gemergt nach `web/android/app/src/main/`
+  durch `install.sh`).
 - **DB:** SQLite, Schema wird idempotent in `server/src/db.ts` angelegt
   (inkl. `source_event_id` für Import-Idempotenz).
-- **Tests:** keine Unit-Tests vorhanden — Verifikation läuft über manuelle
-  Smoke-Tests gegen `npm run dev` und die API.
+- **Tests:** **kein Test-Runner** — Verifikation läuft über
+  `npm run typecheck:all` + manuelle Smoke-Tests gegen `npm run dev`
+  und die API.
 
 ## Befehle
 
@@ -102,6 +129,10 @@ Smoke-Tests gegen eine **Wegwerf-DB unter `/tmp`** (NIE `./data` — das ist die
 | Produktion (Docker) | `docker compose up -d --build` |
 | Seed / Import (tsx-Skripte) | `npm --prefix server run seed` · `… run import` |
 | Einzelnes Skript/Modul fahren | `cd server && DB_PATH=/tmp/x/db CF_ACCESS_DISABLED=true npx tsx src/<file>.ts` |
+| Android-Plattform anlegen | `cd web && npm install && npx cap add android` |
+| Native Widget-Quellen mergen | `cd web && ./android-native-src/install.sh` (nach `cap add android`) |
+| APK bauen | `cd web/android && ANDROID_HOME=/path/to/Sdk ./gradlew assembleDebug` |
+| APK installieren | `adb install -r app/build/outputs/apk/debug/app-debug.apk` |
 
 **Smoke-Test-Rezept** (eigener Server gegen `/tmp`, dann ein Endpunkt):
 
@@ -162,12 +193,40 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
 - **Auth = Cloudflare Access** (`lib/cloudflare_access.ts`, fail-closed), bewusst NUR
   auf mutierenden Endpunkten (`POST /api/intakes/text`, `/api/chat/*`-Writes); der Rest
   der API ist offen (privates Deployment). `CF_ACCESS_DISABLED=true` = Local-Bypass.
+- **Android-Homescreen-Widget** (`web/android-native-src/`, gemergt nach
+  `web/android/app/src/main/` durch `install.sh`) — 1×1-Kachel, Tap
+  feuert `ACTION_SEND_SAMPLE`-Broadcast → `SampleSendReceiver` →
+  `POST /api/intakes` → Toast. Pro Widget eine Bindung in
+  `SharedPreferences("mediary_widgets")` (Substanz + Menge + Slot);
+  mehrere Instanzen unabhängig. `ApiClient.attachCookie()` reicht den
+  `CF_Authorization`-Cookie aus dem WebView-CookieManager als
+  `Cookie:`- und `Cf-Access-Jwt-Assertion:`-Header durch. Die
+  API-URL spiegelt das Web über das Capacitor-Plugin
+  `WidgetBridgePlugin` in die Prefs, damit das Widget auch ohne
+  vorherigen App-Start funktioniert.
 - **Datenfluss Web:** `lib/api.ts` (typisierte Fetch-Wrapper) → `lib/queries.ts`
   (react-query Hooks + Query-Keys) → Screens. Server: `routes/*` →
   `lib/serialize.ts` (snake_case-Row → camelCase-DTO); Schema idempotent in `db.ts`.
 
 ## Letzte Session-Änderungen
 
+- **Android-Home-Screen-Widget „meDiary-Sample" (1×1) (2026-07-09):**
+  1×1-Widget, Tap schickt `POST /api/intakes` und blendet Toast ein.
+  Konfiguration über Android-Standard-Widget-Config-Activity (Spinner
+  + Menge + Tageszeit). `web/android-native-src/` enthält die fünf
+  Kotlin-Klassen + Bridge-Plugin + XML-Ressourcen; `install.sh` mergt
+  sie nach `cap add android` idempotent in den Capacitor-Scaffold.
+  Authentifizierung: `CF_Authorization`-Cookie aus dem WebView
+  (`CookieManager`) wird weitergereicht; bei 401 öffnet das Widget die
+  App. API-URL-Spiegelung: `web/src/lib/widgetBridge.ts` + Patch in
+  `web/src/lib/api.ts` rufen das native `WidgetBridgePlugin.setApiBase()`
+  nach jedem `getApiBase()`/`setApiBase()` auf. **Endpoint-Wahl:**
+  `POST /api/intakes` (offen, kein CF-Access) — pro Widget genau eine
+  Substanz, kein Bedarf für `/text`-Multiline-Parser. **Bekannte
+  Limitationen** (v1): Single-Substance, App muss für Erst-URL einmal
+  offen gewesen sein, kein Preview des letzten Eintrags, kein
+  Undo vom Tap. Vollständige Datei-Liste + Diffs in
+  `docs/changelog.md` und `docs/deployment.md`.
 - **Tagesbericht des Hermes-Agents → Traum-Kontext + Info-Subtab (2026-07-04):**
   Neuer Endpoint `POST /api/report/new` (Body `{ date?, report, source? }`,
   idempotenter Upsert pro Konsum-Tag, Default-`date` = `dreamTargetDate(now)`).
@@ -180,7 +239,7 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
   Im **Tagebuch-Info-Subtab** (`web/src/screens/DiaryScreen.tsx`) erscheint
   der Bericht als eigene Sektion „Hermes-Agent" (Lucide-Icon `Bot`, mit
   optionaler Quellenangabe); lange Berichte klappen hinter
-  „Weiterlesen" (> 600 Zeichen, gleiche Schwelle wie Traum-Karten) zusammen.
+  „Weiterlesen" zusammen (> 600 Zeichen, gleiche Schwelle wie Traum-Karten).
   Tage mit NUR einem Bericht zählen als „noteworthy" und erscheinen auch
   ohne Einnahmen / Tagesbild / Wachzeit. `buildDayPrompt` (`lib/diary.ts`)
   reicht den Bericht zusätzlich an die KI-Tagebuch-Generierung weiter.
@@ -233,7 +292,7 @@ File lesen, statt alles auf einmal in den Kontext zu laden:
 - **[docs/api.md](docs/api.md)** — API-Referenz (alle Endpunkte inkl.
   `/api/intakes/text` und `/api/dreams`).
 - **[docs/deployment.md](docs/deployment.md)** — Docker-Compose-Deployment, Env-Variablen,
-  iPad/Capacitor-APK.
+  iPad/Capacitor-APK, **Android-Widget-Installationsprozedur**.
 - **[docs/pitfalls.md](docs/pitfalls.md)** — Bekannte Stolperfallen.
   **Vor Änderungen lesen.**
 - **[docs/roadmap.md](docs/roadmap.md)** — Offene Punkte / Next Steps.

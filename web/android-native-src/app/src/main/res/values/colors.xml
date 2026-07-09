@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Slot-Farben — Werte stammen aus `web/src/screens/QuickEntryScreen.tsx`
+  (PlanBatchTile), damit das Widget farblich zum Rest der App passt.
+  Substanz-Farbe aus `GET /api/substances` hat Vorrang, die Slot-Farbe
+  ist nur Fallback, wenn die Substanz keine Farbe hat.
+-->
+<resources>
+    <color name="widget_slot_morning">#E0944A</color>
+    <color name="widget_slot_noon">#D9B441</color>
+    <color name="widget_slot_evening">#C06E4E</color>
+    <color name="widget_slot_night">#6E62B6</color>
+    <color name="widget_slot_now">#5B7A60</color>
+</resources>

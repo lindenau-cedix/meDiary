@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Provider-Metadaten für das 1×1-Home-Screen-Widget „meDiary-Sample".
+
+  1×1-Zelle heißt: minWidth/minHeight deutlich kleiner als die typische
+  Launcher-Zelle (~70dp), damit der Picker genau eine Zelle belegt. Auf
+  modernen Launchern reicht `targetCellWidth`/`targetCellHeight` = 1 als
+  explizite Größenangabe (Android 12+); `minWidth`/`minHeight` bleibt
+  der Fallback für ältere Launcher.
+
+  updatePeriodMillis = 0 → keine Auto-Refresh-Schleife. Das Widget
+  rendert nur bei Bedarf (onUpdate nach Add, onAppWidgetOptionsChanged,
+  oder nach Konfig-Änderung über `SampleWidgetProvider.updateAppWidget`).
+
+  `configure` startet `SampleWidgetConfigActivity` als ersten Schritt
+  beim Platzieren — das System legt das Widget erst an, NACHDEM die
+  Activity mit RESULT_OK zurückkehrt.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="40dp"
+    android:minHeight="40dp"
+    android:targetCellWidth="1"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_sample"
+    android:previewImage="@drawable/widget_preview"
+    android:resizeMode="none"
+    android:widgetCategory="home_screen"
+    android:configure="app.mediary.widget.SampleWidgetConfigActivity" />

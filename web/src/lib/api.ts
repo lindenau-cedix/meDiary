@@ -25,19 +25,32 @@ import type {
   ChangeSet,
   ChangeSetsResponse,
 } from './types';
+import { mirrorApiBaseToWidgets } from './widgetBridge';
 
 const API_BASE_KEY = 'mediary.apiBase';
 
-/** Basis-URL der API. In der APK zur Laufzeit konfigurierbar (Einstellungen). */
+/**
+ * Basis-URL der API. In der APK zur Laufzeit konfigurierbar (Einstellungen).
+ *
+ * Spiegelung: Auf Capacitor-Plattformen wird der Wert zusätzlich an den
+ * nativen `WidgetBridgePlugin` weitergereicht, damit die
+ * Android-Homescreen-Widgets (Sample-Widget) die URL kennen, ohne dass
+ * der Nutzer die App jemals geöffnet haben muss. Im Browser ist das ein
+ * No-Op (siehe `widgetBridge.ts`).
+ */
 export function getApiBase(): string {
   const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(API_BASE_KEY) : null;
   const env = (import.meta.env.VITE_API_BASE as string | undefined) ?? '';
-  return (stored ?? env ?? '').replace(/\/$/, '');
+  const url = (stored ?? env ?? '').replace(/\/$/, '');
+  if (url) void mirrorApiBaseToWidgets(url);
+  return url;
 }
 
 export function setApiBase(url: string): void {
   if (url) localStorage.setItem(API_BASE_KEY, url.replace(/\/$/, ''));
   else localStorage.removeItem(API_BASE_KEY);
+  const normalized = url.replace(/\/$/, '');
+  if (normalized) void mirrorApiBaseToWidgets(normalized);
 }
 
 export class ApiError extends Error {

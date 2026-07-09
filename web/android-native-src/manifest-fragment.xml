@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Fragment für web/android/app/src/main/AndroidManifest.xml.
+
+  Wird vom install.sh-Skript per `xmllint`/sed in den
+  <application>-Tag der vom Capacitor-Scaffold generierten
+  AndroidManifest.xml eingefügt. Siehe android-native-src/README.md
+  für die genaue Vorgehensweise.
+
+  Erwarteter Bestandteil der Original-Manifest (von Capacitor):
+
+      <application
+          android:allowBackup="true"
+          android:icon="@mipmap/ic_launcher"
+          android:label="@string/app_name"
+          android:roundIcon="@mipmap/ic_launcher_round"
+          android:supportsRtl="true"
+          android:theme="@style/AppTheme">
+        <activity
+            android:configChanges="..."
+            android:name="app.mediary.MainActivity"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBarLaunch"
+            android:launchMode="singleTask"
+            android:exported="true">
+          <intent-filter>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+          </intent-filter>
+        </activity>
+
+        ... HIER WIRD EINGEFÜGT ...
+
+        <provider .../>
+      </application>
+-->
+<widget-entries>
+    <activity
+        android:name="app.mediary.widget.SampleWidgetConfigActivity"
+        android:exported="true"
+        android:label="@string/widget_config_label"
+        android:theme="@style/Theme.AppCompat.Light.DarkActionBar" />
+
+    <receiver
+        android:name="app.mediary.widget.SampleWidgetProvider"
+        android:exported="true"
+        android:label="@string/widget_label">
+        <intent-filter>
+            <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            <action android:name="app.mediary.widget.ACTION_SEND_SAMPLE" />
+        </intent-filter>
+        <meta-data
+            android:name="android.appwidget.provider"
+            android:resource="@xml/sample_widget_info" />
+    </receiver>
+</widget-entries>

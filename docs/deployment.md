@@ -113,3 +113,50 @@ Das APK liegt in `web/android/app/build/outputs/apk/debug/app-debug.apk`.
 App-ID: `app.mediary`, App-Name: `meDiary`.
 
 Für iPad/iOS: `npx cap add ios` (macOS mit Xcode erforderlich).
+
+### Android-Widget „meDiary-Sample" (1×1)
+
+Die APK enthält zusätzlich ein 1×1-Home-Screen-Widget. Tippen erfasst
+eine vorkonfigurierte Einnahme per `POST /api/intakes` und blendet
+einen Toast ein — ohne dass die App geöffnet wird. Konfiguration
+über die Android-Standard-Widget-Config-Activity (System-Flow „Widget
+hinzufügen" → meDiary → 1×1-Kachel auf den Homescreen ziehen).
+
+Die nativen Quellen liegen in `web/android-native-src/` (Kotlin,
+Layouts, Drawables, Strings, Manifest-Fragment, Build-Skript). Sie
+werden vom mitgelieferten `install.sh` nach `cap add android` in das
+Capacitor-Scaffold gemergt:
+
+```bash
+# Einmalig pro Maschine:
+cd web
+npm install
+npx cap add android
+./android-native-src/install.sh    # idempotent
+
+# Web-Build + Sync + APK:
+npm run build
+npm run cap:sync
+cd android
+ANDROID_HOME=/path/to/Sdk ./gradlew assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+**Authentifizierung:** Der `CF_Authorization`-Cookie aus dem
+WebView-CookieManager wird beim POST mitgeschickt (sowohl als
+`Cookie`-Header als auch kanonisch als `Cf-Access-Jwt-Assertion`).
+Lokale Deployments mit `CF_ACCESS_DISABLED=true` brauchen keinen
+Cookie. Bei abgelaufenem Cookie (HTTP 401) öffnet das Widget die App
+(`MainActivity`), damit der WebView sich neu einloggt.
+
+**Mehrere Instanzen:** Jede Widget-Instanz hat eine eigene Bindung
+(Substanz + Menge + Tageszeit-Slot) in `SharedPreferences("mediary_widgets")`.
+Beliebig viele Kacheln, jede mit eigenem Tap-Verhalten.
+
+**API-Base spiegeln:** `web/src/lib/widgetBridge.ts` registriert das
+native `WidgetBridgePlugin`; `api.ts` ruft `setApiBase()` nach jedem
+`getApiBase()`/`setApiBase()` auf, damit die Widgets die URL kennen,
+**bevor** der Nutzer die App jemals öffnen musste.
+
+Details, Datei-Liste, Endpoint-Wahl-Begründung:
+`web/android-native-src/README.md` und `docs/changelog.md`.

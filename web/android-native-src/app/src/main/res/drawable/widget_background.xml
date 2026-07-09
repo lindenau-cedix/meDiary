@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Hintergrundform für die Widget-Kachel. Definiert nur die
+  abgerundeten Ecken (12dp); die Füllfarbe setzt der Provider zur
+  Laufzeit pro Instanz (Substanz-Farbe aus `GET /api/substances`,
+  Fallback = Slot-Farbe aus `colors.xml`).
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <corners android:radius="12dp" />
+</shape>

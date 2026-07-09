@@ -166,6 +166,20 @@ web/src/
 │   ├── time.ts                 # DAY_BOUNDARY, consumptionDay, consumptionToday, parseLocal, nowLocalInput
 │   ├── format.ts               # re-exportiert time-Helfer, greeting, formatTime, formatDayLabel, …
 │   ├── colors.ts, theme.tsx    # Design-Tokens / Theme-Persistenz
-│   └── haptics.ts, native.ts   # Capacitor-Haptik
+│   ├── haptics.ts, native.ts   # Capacitor-Haptik
+│   └── widgetBridge.ts         # Capacitor-Plugin-Wrapper: spiegelt API-URL
+│                               #   ins native SharedPreferences (für Android-Widget)
 └── index.css                   # CSS-Variablen, Tailwind-Layer
+
+web/android-native-src/          # Native Android-Widget-Quellen (KEIN Teil
+                                # des Capacitor-Scaffolds). Vom mitgelieferten
+                                # install.sh nach `cap add android` nach
+                                # web/android/app/src/main/ gemergt:
+                                #   widget/SampleWidgetProvider.kt        (AppWidgetProvider)
+                                #   widget/SampleWidgetConfigActivity.kt (Konfigurations-UI)
+                                #   widget/SampleSendReceiver.kt          (Tap → POST /api/intakes + Toast)
+                                #   widget/ApiClient.kt                   (OkHttp + CF-Cookie-Spiegelung)
+                                #   widget/SampleWidgetPrefs.kt           (SharedPreferences-Schema)
+                                #   bridge/WidgetBridgePlugin.kt          (Capacitor-Plugin für API-URL-Mirror)
+                                #   res/{xml,layout,drawable,values}/    (Provider-Metadaten, Layouts, …)
 ```
