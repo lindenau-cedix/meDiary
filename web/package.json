@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit",
     "prebuild": "node scripts/ensure-deps.mjs",
     "build": "tsc --noEmit && vite build",
+    "postinstall": "node scripts/patch-capacitor-cli.mjs",
     "preview": "vite preview",
     "cap:sync": "cap sync",
     "cap:android": "cap add android && cap sync android",
