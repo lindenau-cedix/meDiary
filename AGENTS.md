@@ -6,70 +6,64 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # meDiary — Medikations-Tagebuch
 
-## Letzter Durchlauf (2026-07-09) — Issue #5 Root-Cause-Analyse
+## Letzter Durchlauf (2026-07-09) — Issue #5 endgültig gefixt (self-healing prebuild)
 
-**Aufgabe:** Dashboard reproduziert exakt den Build-Fehler aus
-Issue #5 (`Rollup failed to resolve import
-"@fontsource-variable/jetbrains-mono/wght.css"` aus `web/src/main.tsx`,
-Vite 6.4.3, Build failed in 328 ms) **trotz** des Subpath-Fixes aus
-dem vorherigen „Letzter Durchlauf"-Block. Der dortige Block behauptete,
-der Subpath-Import habe das Problem behoben — er hat es nicht.
+**Aufgabe:** `mediary-web build` schlug **erneut** mit
+`Rollup failed to resolve import
+"@fontsource-variable/jetbrains-mono/wght.css"` aus `web/src/main.tsx`
+fehl (Vite 6.4.3, „Build failed in 432ms") — der **dritte** Lauf auf
+dasselbe Symptom. Die zwei vorherigen Blöcke haben die Ursache korrekt
+benannt (stale `node_modules`), aber **nur eine manuelle Handlung**
+(`npm install`) empfohlen, die die Build-Automation offensichtlich nie
+ausführt — deshalb kehrte der Fehler jedes Mal zurück.
 
-**Diagnose:** Tarball `@fontsource-variable/jetbrains-mono@5.2.8`
-aus dem öffentlichen npm-Register heruntergeladen, `package.json` und
-Inhalt inspiziert:
+**Entscheidender Hinweis aus der Fehlermeldung:** `✓ 2 modules
+transformed`, **dann** scheitert jetbrains-mono. Die zwei älteren Fonts
+(fraunces/hanken-grotesk `^5.1.0`) lösen also sauber auf — **nur** das
+später hinzugefügte jetbrains-mono (`^5.2.8`) fehlt. Das ist der
+Fingerabdruck eines `node_modules`, das **vor** dem Hinzufügen von
+jetbrains-mono installiert und danach nie neu installiert wurde (Code
+gepullt, `npm install` vergessen). Es ist **nicht** das ganze
+`@fontsource-variable`-Verzeichnis (sonst würde schon fraunces failen).
 
-- `exports`-Feld hat **beide** Pattern `"./*"` und `"./*.css"`,
-  beide zeigen auf `./*.css`.
-- `wght.css` (und `wght-italic.css`, `index.css`) liegen im
-  Paket-Root — also genau dort, wohin `"./*.css"` auflöst.
-- **Bare-Import** `'@fontsource-variable/jetbrains-mono'` löst
-  per `"."` → `index.css` auf und ist gleichwertig gültig.
-- Build im **frischen** `web/node_modules/` läuft mit **beiden**
-  Import-Formen sauber durch, identische Bundle-Hashes.
+**Belegt (in dieser Sandbox):**
+- Code + Lockfile sind **korrekt**: frisches `npm ci` aus dem
+  committeten `web/package-lock.json` legt `jetbrains-mono/wght.css`
+  sauber ab; Build grün, identische Hashes. Der Docker-Pfad (`npm ci`)
+  ist ebenfalls fine.
+- `exports`-Feld von jetbrains-mono@5.2.8 hat `"./*.css"` → `./*.css`,
+  `wght.css` liegt im Paket-Root — Import-Pfad ist gültig. Der
+  Import in `main.tsx` ist **nicht** die Ursache und blieb unverändert.
 
-**Eigentliche Ursache:** Wenn das Verzeichnis
-`node_modules/@fontsource-variable/jetbrains-mono/` fehlt
-(alter Cache, partielle `npm ci`-Installation, vergessenes
-`npm install` im frischen Worktree), schlägt Rollup bei **beiden**
-Import-Varianten mit derselben „failed to resolve import"-
-Meldung fehl — getestet durch
-`rm -rf node_modules/@fontsource-variable && npm run build`. Es gibt
-**keinen Robustheits-Unterschied** zwischen Subpath- und Bare-Form.
-Der vorige Durchlauf hat die Symptom-Meldung interpretiert, nicht
-die Ursache.
-
-**Gemacht:** `web/src/main.tsx` **unverändert gelassen** (Subpath-
-Imports `'@fontsource-variable/*/wght.css'` stehen weiter drin).
-Begründung: (1) bereitsiger konsistenter Stil mit dem Rest des
-Import-Blocks, (2) beide Formen gleichwertig, (3) kein
-Robustheits-Vorteil einer Form gegenüber der anderen. Die
-tatsächliche Lösung ist `npm run install:all` bzw.
-`npm --prefix web install` — der dokumentierte Schnellstart-Pfad
-aus `README.md`/`AGENTS.md`.
+**Gemacht (der eigentliche Fix — self-healing statt manuellem Schritt):**
+- **`web/scripts/ensure-deps.mjs`** (neu): Guard, der `node_modules`
+  gegen `dependencies` + `devDependencies` aus `package.json` prüft
+  (existiert `node_modules/<name>/package.json`?). Fehlt etwas oder
+  fehlt `node_modules` ganz → automatisch `npm ci` (bzw. `npm install`
+  ohne Lockfile). Nur Node-Builtins, da `node_modules` unvollständig
+  sein kann.
+- **`web/package.json`**: `"prebuild": "node scripts/ensure-deps.mjs"`.
+  npm ruft `prebuild` automatisch **vor** jedem `build` auf — der Build
+  repariert sich jetzt selbst, statt zu scheitern und einen manuellen
+  `npm install` zu verlangen, den niemand ausführt.
 
 **Verifikation:**
-- `npm install` in `web/`: 249 Packages, 4 s, `0 vulnerabilities`.
-- `npm run typecheck`: exit 0.
-- `npm run build`: 6.50 s, exit 0, identische Bundle-Hashes wie in
-  der vorherigen Verifikation (`dist/assets/index-BOJichzu.js`
-  487 kB, `index-D1Yay6F7.css` 46.63 kB).
-- **Negativtest**: nach `rm -rf node_modules/@fontsource-variable`
-  schlägt der Build mit der gemeldeten Fehlermeldung fehl — bestätigt,
-  dass das fehlende Paket die Ursache ist und beide Import-Formen
-  gleich failen.
+- `npm run build` mit vollständigen Deps: `prebuild` still (No-op),
+  `✓ built in 5.86s`, exit 0.
+- **Reproduktion + Heilung**: `rm -rf
+  node_modules/@fontsource-variable/jetbrains-mono` (exakt der
+  gemeldete Zustand) → `npm run build` erkennt
+  `missing: @fontsource-variable/jetbrains-mono`, fährt `npm ci`,
+  restauriert `wght.css`, `✓ built in 5.90s`, exit 0. **Vor** dem Fix
+  produzierte genau dieser Zustand die gemeldete Rollup-Fehlermeldung.
+- `npm run typecheck:all`: exit 0 (Server + Web).
 
-**Hinweis für die nächste KI-Instanz:** Falls Issue #5 nochmal
-aufgerollt wird, **zuerst** `ls node_modules/@fontsource-variable/`
-prüfen. Wenn das Verzeichnis leer ist, ist `npm install` der Fix —
-nicht der Import-Pfad. `npm run install:all` aus dem Repo-Root ist
-der kanonische Einstieg und installiert die Schriftpakete zuverlässig.
-
-**Letzte Tasks-Block-Bereinigung:** Der vorige „Letzter Durchlauf"-
-Block (Subpath-„Fix") wurde gemäß Dashboard-Regel überschrieben; ein
-dedizierter Lösch-Schritt ist nicht nötig, da jeder Lauf den Block
-**vollständig** ersetzt. Die Diagnose-Erkenntnis ist die wichtige
-Lessons-Learned-Information, nicht der gescheiterte „Fix".
+**Hinweis für die nächste KI-Instanz:** Falls Issue #5 doch nochmal
+auftaucht, ist die Automation vermutlich mit einem Bild-Snapshot
+unterwegs, das `prebuild` umgeht (z. B. Vite direkt statt via
+`npm run build`) — dann `ls node_modules/@fontsource-variable/`
+prüfen. Der `prebuild`-Guard deckt jeden Aufruf über `npm run build`
+sowie den Root-`npm run build` (delegiert an `web`) ab.
 
 ## Vorheriger Durchlauf (2026-07-09) — Android-Home-Screen-Widget „meDiary-Sample"
 
