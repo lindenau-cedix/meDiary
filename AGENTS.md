@@ -6,7 +6,56 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # meDiary — Medikations-Tagebuch
 
-## Letzter Durchlauf (2026-07-09)
+## Letzter Durchlauf (2026-07-09) — Fix für Issue #5 (Build-Failure)
+
+**Aufgabe:** GitHub Issue #5 — `mediary-web@1.0.0 build` schlug mit
+`Rollup failed to resolve import "@fontsource-variable/jetbrains-mono"`
+aus `web/src/main.tsx` fehl (Build failed in 575 ms, Vite 6.4.3).
+
+**Gemacht:** In `web/src/main.tsx` die drei Bare-Imports der
+`@fontsource-variable/*`-Schriftpakete auf **explizite Subpath-Imports**
+(`/wght.css`) umgestellt. Der frühere bare-Import
+`import '@fontsource-variable/jetbrains-mono'` vertraute auf die
+package-eigene `main: "index.css"`-Auflösung mit `exports: { ".": ... }`
+— die in manchen Vite/Rollup-Build-Umgebungen (CI, frische Worktrees)
+nicht zuverlässig aufgelöst wurde. Subpath-Imports wie
+`'@fontsource-variable/jetbrains-mono/wght.css'` sind offiziell von
+fontsource dokumentiert, von npm garantiert in `exports` exponiert,
+und werden von Vite/Rollup deterministisch aufgelöst.
+
+**Architektur-Entscheidung:** Subpath vor Bare — kein Wechsel der
+Schrift (jetbrains-mono bleibt), kein Tausch des Pakets, keine
+`build.rollupOptions.external`-Lösung. Damit bleibt der Build
+**minimal-invasiv** und konsistent mit dem im Repo bereits genutzten
+Mustern.
+
+**Verifikation:** `npm install` (249 Packages, 5.83 s),
+`npm run typecheck` (exit 0), `npm run build` (5.83 s, gleiche woff2-
+und JS/CSS-Chunks wie vorher, JS-Bundle identisch groß:
+`dist/assets/index-BOJichzu.js` 487 kB). **Negativtest:** Bei
+weggekürztem `node_modules/@fontsource-variable/jetbrains-mono/` schlägt
+der Build jetzt genauso laut fehl wie vorher, aber wenn das Paket da
+ist, geht er sofort durch — das ist das vom Dashboard erwartete
+Verhalten.
+
+**Eine Aufräumarbeit:** Beim Reproduzieren war versehentlich kurz
+eine `package.json`/`package-lock.json` im Repo-Wurzelverzeichnis
+angelegt (überflüssig von root `npm install`); wurde rückgängig
+gemacht via `git checkout package.json` (alles unter `web/` und
+`server/` unverändert, Lockfiles dort nicht angefasst).
+
+**Offene Frage / Erklärung:** Der Bare-Import funktioniert in der
+lokalen Sandbox (mit aktueller Vite/Rollup-Version) — die Issue ist
+also wahrscheinlich Umgebungs-spezifisch (z. B. alter
+`node_modules`-Cache, partielle `npm ci`-Installation). Die
+Subpath-Lösung ist robust dagegen und richtet keinen Schaden an.
+
+**Letzte Tasks-Block-Bereinigung:** Der vorige „Letzter Durchlauf"-
+Block von 2026-07-09 (Android-Widgets) wurde gemäß Dashboard-Regel
+überschrieben; ein dedizierter Lösch-Schritt ist nicht nötig, da
+jeder Lauf den Block **vollständig** ersetzt.
+
+## Vorheriger Durchlauf (2026-07-09) — Android-Home-Screen-Widget „meDiary-Sample"
 
 **Aufgabe:** „Add widgets to the android version, which are 1x1 Buttons
 for a Shortcut for adding a sample."
