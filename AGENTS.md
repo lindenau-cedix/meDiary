@@ -6,54 +6,70 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # meDiary — Medikations-Tagebuch
 
-## Letzter Durchlauf (2026-07-09) — Fix für Issue #5 (Build-Failure)
+## Letzter Durchlauf (2026-07-09) — Issue #5 Root-Cause-Analyse
 
-**Aufgabe:** GitHub Issue #5 — `mediary-web@1.0.0 build` schlug mit
-`Rollup failed to resolve import "@fontsource-variable/jetbrains-mono"`
-aus `web/src/main.tsx` fehl (Build failed in 575 ms, Vite 6.4.3).
+**Aufgabe:** Dashboard reproduziert exakt den Build-Fehler aus
+Issue #5 (`Rollup failed to resolve import
+"@fontsource-variable/jetbrains-mono/wght.css"` aus `web/src/main.tsx`,
+Vite 6.4.3, Build failed in 328 ms) **trotz** des Subpath-Fixes aus
+dem vorherigen „Letzter Durchlauf"-Block. Der dortige Block behauptete,
+der Subpath-Import habe das Problem behoben — er hat es nicht.
 
-**Gemacht:** In `web/src/main.tsx` die drei Bare-Imports der
-`@fontsource-variable/*`-Schriftpakete auf **explizite Subpath-Imports**
-(`/wght.css`) umgestellt. Der frühere bare-Import
-`import '@fontsource-variable/jetbrains-mono'` vertraute auf die
-package-eigene `main: "index.css"`-Auflösung mit `exports: { ".": ... }`
-— die in manchen Vite/Rollup-Build-Umgebungen (CI, frische Worktrees)
-nicht zuverlässig aufgelöst wurde. Subpath-Imports wie
-`'@fontsource-variable/jetbrains-mono/wght.css'` sind offiziell von
-fontsource dokumentiert, von npm garantiert in `exports` exponiert,
-und werden von Vite/Rollup deterministisch aufgelöst.
+**Diagnose:** Tarball `@fontsource-variable/jetbrains-mono@5.2.8`
+aus dem öffentlichen npm-Register heruntergeladen, `package.json` und
+Inhalt inspiziert:
 
-**Architektur-Entscheidung:** Subpath vor Bare — kein Wechsel der
-Schrift (jetbrains-mono bleibt), kein Tausch des Pakets, keine
-`build.rollupOptions.external`-Lösung. Damit bleibt der Build
-**minimal-invasiv** und konsistent mit dem im Repo bereits genutzten
-Mustern.
+- `exports`-Feld hat **beide** Pattern `"./*"` und `"./*.css"`,
+  beide zeigen auf `./*.css`.
+- `wght.css` (und `wght-italic.css`, `index.css`) liegen im
+  Paket-Root — also genau dort, wohin `"./*.css"` auflöst.
+- **Bare-Import** `'@fontsource-variable/jetbrains-mono'` löst
+  per `"."` → `index.css` auf und ist gleichwertig gültig.
+- Build im **frischen** `web/node_modules/` läuft mit **beiden**
+  Import-Formen sauber durch, identische Bundle-Hashes.
 
-**Verifikation:** `npm install` (249 Packages, 5.83 s),
-`npm run typecheck` (exit 0), `npm run build` (5.83 s, gleiche woff2-
-und JS/CSS-Chunks wie vorher, JS-Bundle identisch groß:
-`dist/assets/index-BOJichzu.js` 487 kB). **Negativtest:** Bei
-weggekürztem `node_modules/@fontsource-variable/jetbrains-mono/` schlägt
-der Build jetzt genauso laut fehl wie vorher, aber wenn das Paket da
-ist, geht er sofort durch — das ist das vom Dashboard erwartete
-Verhalten.
+**Eigentliche Ursache:** Wenn das Verzeichnis
+`node_modules/@fontsource-variable/jetbrains-mono/` fehlt
+(alter Cache, partielle `npm ci`-Installation, vergessenes
+`npm install` im frischen Worktree), schlägt Rollup bei **beiden**
+Import-Varianten mit derselben „failed to resolve import"-
+Meldung fehl — getestet durch
+`rm -rf node_modules/@fontsource-variable && npm run build`. Es gibt
+**keinen Robustheits-Unterschied** zwischen Subpath- und Bare-Form.
+Der vorige Durchlauf hat die Symptom-Meldung interpretiert, nicht
+die Ursache.
 
-**Eine Aufräumarbeit:** Beim Reproduzieren war versehentlich kurz
-eine `package.json`/`package-lock.json` im Repo-Wurzelverzeichnis
-angelegt (überflüssig von root `npm install`); wurde rückgängig
-gemacht via `git checkout package.json` (alles unter `web/` und
-`server/` unverändert, Lockfiles dort nicht angefasst).
+**Gemacht:** `web/src/main.tsx` **unverändert gelassen** (Subpath-
+Imports `'@fontsource-variable/*/wght.css'` stehen weiter drin).
+Begründung: (1) bereitsiger konsistenter Stil mit dem Rest des
+Import-Blocks, (2) beide Formen gleichwertig, (3) kein
+Robustheits-Vorteil einer Form gegenüber der anderen. Die
+tatsächliche Lösung ist `npm run install:all` bzw.
+`npm --prefix web install` — der dokumentierte Schnellstart-Pfad
+aus `README.md`/`AGENTS.md`.
 
-**Offene Frage / Erklärung:** Der Bare-Import funktioniert in der
-lokalen Sandbox (mit aktueller Vite/Rollup-Version) — die Issue ist
-also wahrscheinlich Umgebungs-spezifisch (z. B. alter
-`node_modules`-Cache, partielle `npm ci`-Installation). Die
-Subpath-Lösung ist robust dagegen und richtet keinen Schaden an.
+**Verifikation:**
+- `npm install` in `web/`: 249 Packages, 4 s, `0 vulnerabilities`.
+- `npm run typecheck`: exit 0.
+- `npm run build`: 6.50 s, exit 0, identische Bundle-Hashes wie in
+  der vorherigen Verifikation (`dist/assets/index-BOJichzu.js`
+  487 kB, `index-D1Yay6F7.css` 46.63 kB).
+- **Negativtest**: nach `rm -rf node_modules/@fontsource-variable`
+  schlägt der Build mit der gemeldeten Fehlermeldung fehl — bestätigt,
+  dass das fehlende Paket die Ursache ist und beide Import-Formen
+  gleich failen.
+
+**Hinweis für die nächste KI-Instanz:** Falls Issue #5 nochmal
+aufgerollt wird, **zuerst** `ls node_modules/@fontsource-variable/`
+prüfen. Wenn das Verzeichnis leer ist, ist `npm install` der Fix —
+nicht der Import-Pfad. `npm run install:all` aus dem Repo-Root ist
+der kanonische Einstieg und installiert die Schriftpakete zuverlässig.
 
 **Letzte Tasks-Block-Bereinigung:** Der vorige „Letzter Durchlauf"-
-Block von 2026-07-09 (Android-Widgets) wurde gemäß Dashboard-Regel
-überschrieben; ein dedizierter Lösch-Schritt ist nicht nötig, da
-jeder Lauf den Block **vollständig** ersetzt.
+Block (Subpath-„Fix") wurde gemäß Dashboard-Regel überschrieben; ein
+dedizierter Lösch-Schritt ist nicht nötig, da jeder Lauf den Block
+**vollständig** ersetzt. Die Diagnose-Erkenntnis ist die wichtige
+Lessons-Learned-Information, nicht der gescheiterte „Fix".
 
 ## Vorheriger Durchlauf (2026-07-09) — Android-Home-Screen-Widget „meDiary-Sample"
 
