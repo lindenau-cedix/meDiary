@@ -8,6 +8,7 @@ import { DreamProse } from './DreamProse';
 import { useLatestDream } from '../lib/queries';
 import { formatFull } from '../lib/format';
 import { haptics } from '../lib/haptics';
+import { consumptionToday } from '../lib/time';
 
 /**
  * Startup-Dialog: zeigt beim App-/Session-Start EINMAL den jüngsten Traum in
@@ -15,15 +16,24 @@ import { haptics } from '../lib/haptics';
  * Sternchen), während die App dahinter weichgezeichnet und abgedunkelt wird.
  *
  * Verhalten:
- *  - genau einmal pro Session (sessionStorage-Flag),
+ *  - genau einmal pro Konsum-Tag (Tagesgrenze 03:30 Europe/Berlin, identisch
+ *    zur Server-Seite via `consumptionToday()`). Wird die App nach 03:30
+ *    erneut geöffnet, erscheint der Dialog wieder.
  *  - nur, wenn überhaupt ein Traum existiert (sonst: nichts),
  *  - schließbar per Scrim-Klick, „✕"/„Schließen", Escape ODER Primäraktion
  *    „Im Traum-Tab öffnen" (navigiert in den Traum-Tab),
  *  - a11y: aria-modal, Fokus-Falle, Escape, Fokus-Rückgabe,
  *  - prefers-reduced-motion: nur kurzes Fade, kein Drift/Scale/Atmen.
+ *
+ * Persistierung: sessionStorage[`mediary.lastDreamDialogDate`] = der
+ * Konsum-Tag, an dem der Dialog zuletzt gezeigt wurde. Beim Mount wird
+ * der aktuelle Konsum-Tag mit dem gespeicherten verglichen — nur bei
+ * Ungleichheit (oder leerem Wert) erscheint der Dialog. Das übersteht
+ * Tab-Restarts am selben Tag (kein erneuter Dialog) und triggert nach
+ * dem 03:30-Rollover korrekt wieder.
  */
 
-const SESSION_KEY = 'mediary.dreamDialogShown';
+const SESSION_KEY = 'mediary.lastDreamDialogDate';
 
 export function DreamStartupDialog() {
   const { data, isLoading } = useLatestDream();
@@ -34,15 +44,17 @@ export function DreamStartupDialog() {
   const cardRef = useRef<HTMLDivElement>(null);
   const previouslyFocused = useRef<HTMLElement | null>(null);
 
-  // Entscheidung „zeigen?" — nur einmal pro Session, nur wenn ein Traum da ist.
+  // Entscheidung „zeigen?" — nur einmal pro Konsum-Tag (03:30-Grenze),
+  // nur wenn ein Traum da ist.
   useEffect(() => {
     if (isLoading || !data) return;
-    if (sessionStorage.getItem(SESSION_KEY)) return;
-    if (data.exists && data.content) {
-      sessionStorage.setItem(SESSION_KEY, '1');
-      previouslyFocused.current = document.activeElement as HTMLElement | null;
-      setOpen(true);
-    }
+    if (!data.exists || !data.content) return;
+    const today = consumptionToday();
+    const lastShown = sessionStorage.getItem(SESSION_KEY);
+    if (lastShown === today) return;
+    sessionStorage.setItem(SESSION_KEY, today);
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    setOpen(true);
   }, [isLoading, data]);
 
   const close = useCallback(() => {
