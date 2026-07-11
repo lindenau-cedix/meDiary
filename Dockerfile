@@ -8,6 +8,12 @@ RUN apt-get update \
 
 COPY server/package*.json ./server/
 COPY web/package*.json ./web/
+# web/scripts/ muss VOR `npm ci` da sein — web/package.json hat einen
+# `postinstall`-Hook (`patch-capacitor-cli.mjs`), der das Capacitor-CLI
+# für die tar@7-Override-Kompatibilität fixt. Ohne dieses Copy bricht
+# `npm ci` im Container mit "Cannot find module" ab, lokal gibt es das
+# Problem nicht, weil npm dort package.json + scripts/ zusammen sieht.
+COPY web/scripts/ ./web/scripts/
 
 RUN npm --prefix server ci
 RUN npm --prefix web ci
