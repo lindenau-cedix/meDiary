@@ -358,6 +358,27 @@ export async function retryFailedDeliveries(): Promise<{
     return { retried: 0, sent: 0, abandoned: 0 };
   }
 
+  // Boot-Race-Fix: Der Boot-Retry-Sweep läuft direkt nach app.listen(), also
+  // fast gleichzeitig zum feuer-und-vergess `whatsapp.connect()` weiter oben.
+  // Wenn wir jetzt schon deliverDream aufrufen, ist `state` noch `connecting`
+  // und jeder sendText/sendVoiceNote wirft `WhatsappNotConnectedError`. Wir
+  // warten bis zu 30 s auf den Handshake — danach ist der Sweep nur noch
+  // für die nächste Boot-Runde sinnvoll (Skipping = idle fail-fast).
+  try {
+    const { connect, getStatus } = await import('./whatsapp.js');
+    if (config.whatsapp?.enabled) {
+      await connect();
+      const deadline = Date.now() + 30_000;
+      while (Date.now() < deadline) {
+        const s = await getStatus();
+        if (s.state === 'connected' || s.state === 'disconnected') break;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+  } catch (e) {
+    console.warn('[delivery] WhatsApp-Connect vor Retry-Sweep fehlgeschlagen:', (e as Error).message);
+  }
+
   const maxAttempts = config.delivery.maxAttempts | 0;
   const retentionDays = config.delivery.retentionDays | 0;
   const sinceMs = Date.now() - Math.max(1, retentionDays) * 86_400_000;
