@@ -21,11 +21,13 @@ weiterverfolgt (keine Ketten).
 
 
 ## Energy-Drink
-Notiz: 32 mg Koffein pro 100 ml
+Notiz: 32mg/100ml Koffein
+
+## Energy
+Notiz: 32mg/100ml Koffein
 
 ## Extrakt
-NACH 2026-06-05 19:00 CEST: Notiz: Sinceritas 25/1 — 25 mg/ml THC, <1 mg/ml CBD.
-DAVOR: Notiz: Beacon Balanced Extrakt „Pink Kush", 10 mg/ml THC + 10 mg/ml CBD.
+Notiz: Sinceritas 100/1 — 100 mg/ml THC, <1 mg/ml CBD.
 
 ## CBD
 Notiz: 5 % CBD (Arbeitsrechnung ca. 50 mg/ml).

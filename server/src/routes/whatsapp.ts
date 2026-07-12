@@ -13,8 +13,9 @@ import { listDeliveryTargets, insertDeliveryTarget } from '../db.js';
 export const whatsappRouter = Router();
 
 // OPEN read (spiegelt GET /api/dreams/, das auch offen ist — privates Deployment).
-whatsappRouter.get('/status', (_req, res) => {
-  res.json({ ...whatsapp.getStatus(), adminEnabled: config.admin?.enabled ?? false });
+whatsappRouter.get('/status', async (_req, res) => {
+  const status = await whatsapp.getStatus();
+  res.json({ ...status, adminEnabled: config.admin?.enabled ?? false });
 });
 
 /** Pairing-QR als PNG-Base64 (admin). 404 wenn bereits verbunden oder Pairing aus. */

@@ -12,3 +12,6 @@ data2/
 # Capacitor / Android
 web/android/
 web/ios/
+
+data/
+data/DEFAULTS.md
