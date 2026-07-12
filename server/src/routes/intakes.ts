@@ -351,8 +351,19 @@ intakesRouter.post('/plan-batch', (req, res) => {
 
       const name = sub?.name ?? item.substance_name;
       const def = defaultsFor(name);
+      // Priorität: die im Plan für DIESEN Slot hinterlegte Dosis (z. B. die
+      // morgens/nachts-Dosis aus der Markdown-Planverlauf-Datei) > Substanz-
+      // Standarddosis > DEFAULTS.md > generische Plan-Stärke. Ohne den
+      // Slot-First würde der Markdown-Importer (der Dosen in morning/noon/
+      // evening/night, NICHT in strength schreibt) für betroffene Substanzen
+      // leere Einträge erzeugen.
+      const slotDose = normalizeAmount(item[slot]);
       const amount =
-        normalizeAmount(sub?.default_dose) || normalizeAmount(def.amount) || normalizeAmount(item.strength) || null;
+        slotDose
+        || normalizeAmount(sub?.default_dose)
+        || normalizeAmount(def.amount)
+        || normalizeAmount(item.strength)
+        || null;
       const notes = def.note || null;
 
       const info = insertIntake.run(sub?.id ?? null, name, takenAt, amount, notes, nowLocalISO(), `planbatch:${slot}`);
