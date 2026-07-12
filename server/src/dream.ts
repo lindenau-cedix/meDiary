@@ -54,6 +54,18 @@ async function main(): Promise<void> {
       console.log('────────────────────────────────────────────────────────');
       console.log(res.dream?.content ?? '');
       console.log('────────────────────────────────────────────────────────');
+      // Delivery anhängen (Text+Voice an alle aktiven Empfänger). Kein
+      // throw — wenn WhatsApp/ElevenLabs nicht konfiguriert sind, geben
+      // wir einen klaren Hinweis und beenden mit 0.
+      if (res.dream) {
+        try {
+          const { enqueueDelivery } = await import('./lib/dream_delivery.js');
+          const r = await enqueueDelivery(res.dream);
+          console.log(`[dream-cli] delivery: ${r.sent}/${r.attempted} sent, ${r.failed} failed`);
+        } catch (e) {
+          console.error('[dream-cli] delivery-enqueue failed:', (e as Error).message);
+        }
+      }
     } else if (res.status === 'skipped') {
       console.log(`[dream] ⏭  Traum für ${res.date} existiert bereits — übersprungen (--force zum Überschreiben).`);
     } else {

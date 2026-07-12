@@ -77,3 +77,39 @@ curl -sS -X POST "$MEDIARY_URL/api/intakes/text" \
   -H 'Content-Type: text/plain' \
   --data-binary $'08:30: Elvanse 30mg (nuechtern)\njetzt: Theanin'
 ```
+
+## WhatsApp & Delivery (`/api/whatsapp`, `/api/deliveries`)
+
+Dream delivery is a separate concern from dream generation. Generation runs in
+the scheduler at `DREAM_TIME`; delivery runs as a follow-up step that posts
+the formatted text + TTS voice note to WhatsApp. All state is tracked in
+`dream_deliveries` for the in-app log.
+
+### `GET /api/whatsapp/status`
+**Auth:** open read.
+**Returns:** `{ state, hasCreds, lastConnectedAt, lastQrAt, lastError, configured, adminEnabled, jid }` where `state ∈ {disconnected, connecting, qr, connected}`.
+
+### `GET /api/whatsapp/qr`
+**Auth:** CF-Access protected (admin).
+**Returns:** `{ qr: <base64 PNG> }` (the QR as base64, no data: prefix) when `state === 'qr'`. **404** otherwise.
+
+### `POST /api/whatsapp/reconnect`
+**Auth:** CF-Access protected (admin).
+**Returns:** `202 { ok: true }` — kicks off logout + creds wipe + reconnect. Use the admin UI's "Neu verbinden" button to see the fresh QR.
+
+### `POST /api/whatsapp/test`
+**Auth:** CF-Access protected (admin).
+**Returns:** `{ ok, recipient? }` on success, or `503 { error }` on failure. Sends a test text to the first enabled target.
+
+### `GET /api/whatsapp/targets` / `POST /api/whatsapp/targets`
+**Auth:** CF-Access protected (admin).
+**GET** → `{ targets: DeliveryTarget[] }`. **POST** body `{ phone, displayName? }` → `{ target }` (201). Phone must be 8–15 digits.
+
+### `GET /api/deliveries`
+**Auth:** open read.
+**Query:** `?dream_date=YYYY-MM-DD&limit=N` (limit 1–500, default 100).
+**Returns:** `{ deliveries: DreamDelivery[] }` where each has `{ id, dreamDate, channel, recipient, status, voiceStatus, attempts, error, sentAt, createdAt, updatedAt }`. `status ∈ {pending, sent, failed, abandoned}`. `voiceStatus ∈ {none, sent, failed}`.
+
+### `POST /api/dreams/:date/redeliver`
+**Auth:** CF-Access protected (admin).
+**Returns:** `{ date, attempted, sent, failed }`. Resets the matching `dream_deliveries` rows to `status='pending'`, increments attempts, and re-runs the delivery (text + voice). No body required.

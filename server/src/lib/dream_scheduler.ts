@@ -74,6 +74,16 @@ async function fireAndReschedule(hour: number, minute: number): Promise<void> {
     const res: GenerateDreamResult = await withDreamLock(() => generateDream());
     if (res.status === 'created') {
       console.log(`[dream] Traum für ${res.date} erzeugt (${res.attempts} Versuch(e)).`);
+      // Delivery-Pipeline anhängen — nie throw, damit `finally { schedule }`
+      // auch dann re-armt, wenn die WhatsApp-Schicht klemmt.
+      if (res.dream) {
+        try {
+          const { enqueueDelivery } = await import('./dream_delivery.js');
+          await enqueueDelivery(res.dream);
+        } catch (e) {
+          console.error('[dream] Delivery-Enqueue fehlgeschlagen:', (e as Error).message);
+        }
+      }
     } else if (res.status === 'skipped') {
       console.log(`[dream] Traum für ${res.date} existiert bereits — übersprungen.`);
     } else {
@@ -116,6 +126,16 @@ export function startDreamScheduler(): void {
   // zeitlich nachgetragene Tage nachholen — fire-and-forget, blockiert den Start
   // nicht. Idempotenz (PK auf date) + Empty-Skip schützen vor Doppel-/Leerläufen.
   if (config.dream.catchUpDays > 0) void runCatchUp();
+  // Boot-Retry-Sweep: failed-Deliveries, die noch Versuche übrig haben,
+  // erneut anstoßen — fängt Restarts nach einem kurzzeitigen WhatsApp-Hänger
+  // ab, ohne dass die UI einen Knopf drücken muss.
+  if (config.delivery?.enabled) {
+    void import('./dream_delivery.js')
+      .then((m) => m.retryFailedDeliveries())
+      .catch((e) => {
+        console.warn('[delivery] Boot-Retry-Sweep fehlgeschlagen:', (e as Error).message);
+      });
+  }
 }
 
 /** Holt fehlende Träume der jüngsten Tage nach (unter withDreamLock serialisiert). */
@@ -126,6 +146,24 @@ async function runCatchUp(): Promise<void> {
       console.log(`[dream] Catch-up: ${res.generated.length} Tag(e) nachgeholt (${res.generated.join(', ')}).`);
     }
     if (res.failed) console.warn(`[dream] Catch-up: ${res.failed} Tag(e) fehlgeschlagen.`);
+
+    // Catch-up-Days erneut zustellen — `catchUpDreams` liefert nur die
+    // tatsächlich neu erzeugten Traum-Datumsstrings. Für genau diese Tage
+    // enqueuen wir die Delivery (Text+Voice) sequentiell, damit eine
+    // schlechte Verbindung nicht zu einer Lawine paralleler Versuche führt.
+    if (res.generated.length && config.delivery?.enabled) {
+      try {
+        const { enqueueDelivery } = await import('./dream_delivery.js');
+        const { dreamFor } = await import('../db.js');
+        for (const day of res.generated) {
+          const dream = dreamFor(day);
+          if (!dream) continue;
+          await enqueueDelivery(dream);
+        }
+      } catch (e) {
+        console.error('[dream] Catch-up-Delivery fehlgeschlagen:', (e as Error).message);
+      }
+    }
   } catch (e) {
     if (e instanceof DreamBusyError) return; // läuft bereits (z. B. paralleler Trigger) — ok
     console.error(`[dream] Catch-up fehlgeschlagen: ${(e as Error).message}`);

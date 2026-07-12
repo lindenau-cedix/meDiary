@@ -16,6 +16,8 @@ import { habitRouter } from './routes/habit.js';
 import { dreamsRouter } from './routes/dreams.js';
 import { chatRouter } from './routes/chat.js';
 import { reportRouter } from './routes/report.js';
+import { whatsappRouter } from './routes/whatsapp.js';
+import { deliveriesRouter } from './routes/deliveries.js';
 import { startDreamScheduler } from './lib/dream_scheduler.js';
 
 // Sicherstellen, dass jede jemals eingetragene Substanz eine QuickPick-Kachel
@@ -46,6 +48,8 @@ app.use('/api/habit', habitRouter);
 app.use('/api/dreams', dreamsRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/report', reportRouter);
+app.use('/api/whatsapp', whatsappRouter);
+app.use('/api/deliveries', deliveriesRouter);
 
 // Optional: gebautes Frontend ausliefern (für Single-Deployment)
 if (config.webDist && fs.existsSync(config.webDist)) {
@@ -70,4 +74,14 @@ app.listen(config.port, () => {
   console.log(`[mediary] DEFAULTS: ${config.defaultsPath}`);
   // Nächtliches „Träumen" (no-op ohne MINIMAX_API_KEY oder wenn deaktiviert).
   startDreamScheduler();
+  // WhatsApp-Web-Connect (fire-and-forget; blockiert den Server-Start nicht).
+  // Lazy-Import, damit die Reihenfolge der Modul-Initialisierung sauber bleibt
+  // und ein laufender WhatsApp-Connect-Retry den HTTP-Listener nicht aufhält.
+  if (config.whatsapp?.enabled) {
+    void import('./lib/whatsapp.js')
+      .then((m) => m.connect())
+      .catch((e) => {
+        console.warn('[whatsapp] Initial-Connect fehlgeschlagen:', (e as Error).message);
+      });
+  }
 });

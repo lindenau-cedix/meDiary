@@ -31,12 +31,13 @@ FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates gosu tzdata \
+  && apt-get install -y --no-install-recommends ca-certificates ffmpeg gosu tzdata \
   && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production \
   PORT=4000 \
   DB_PATH=/data/mediary.db \
+  WHATSAPP_SESSION_PATH=/data/whatsapp-session \
   DEFAULTS_PATH=/data/DEFAULTS.md \
   DIARY_PATH=/data/diary.md \
   WEB_DIST=/app/web/dist \

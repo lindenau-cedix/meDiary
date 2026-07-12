@@ -3,6 +3,10 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { config } from './config.js';
 import { dateOf, nowLocalISO, toLocalISO } from './lib/time.js';
+
+// Re-export, damit andere Module (z. B. dream_delivery) ohne erneuten
+// Import aus time.js an `nowLocalISO` kommen.
+export { nowLocalISO };
 import { nameKey } from './lib/names.js';
 
 // Datenverzeichnis sicherstellen
@@ -135,6 +139,42 @@ CREATE TABLE IF NOT EXISTS daily_reports (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+-- WhatsApp-Delivery: konfigurierte Empfänger für die nächtliche Traum-Zustellung.
+-- Pro Zeile ein WhatsApp-Kontakt (phone im E.164-Format ohne "+" oder mit, wir
+-- normalisieren beim Insert auf Ziffern). 'enabled = 0' schaltet ohne DELETE
+-- ab (z. B. für pausierte Empfänger). 'display_name' ist rein informativ.
+CREATE TABLE IF NOT EXISTS delivery_targets (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  channel      TEXT NOT NULL DEFAULT 'whatsapp',
+  phone        TEXT NOT NULL,
+  display_name TEXT,
+  enabled      INTEGER NOT NULL DEFAULT 1,
+  created_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_delivery_targets_enabled ON delivery_targets(enabled);
+
+-- Pro (dream_date, target_id) genau eine Zustell-Zeile (uq_deliveries_dream_target).
+-- status-Lebenszyklus: 'pending' → 'sent' | 'failed'. voice_status läuft analog
+-- ('none' → 'sent' | 'failed'); text und voice werden getrackt, weil die
+-- ElevenLabs-Stimme ein optionaler, separat auswertbarer Schritt ist.
+CREATE TABLE IF NOT EXISTS dream_deliveries (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  dream_date   TEXT NOT NULL,
+  target_id    INTEGER,
+  channel      TEXT NOT NULL DEFAULT 'whatsapp',
+  recipient    TEXT NOT NULL,
+  status       TEXT NOT NULL DEFAULT 'pending',
+  voice_status TEXT NOT NULL DEFAULT 'none',
+  attempts     INTEGER NOT NULL DEFAULT 0,
+  error        TEXT,
+  sent_at      TEXT,
+  created_at   TEXT NOT NULL,
+  updated_at   TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_deliveries_dream ON dream_deliveries(dream_date);
+CREATE INDEX IF NOT EXISTS idx_deliveries_status ON dream_deliveries(status);
+CREATE UNIQUE INDEX IF NOT EXISTS uq_deliveries_dream_target ON dream_deliveries(dream_date, target_id);
 `);
 
 // Migration: Schemaumbenennung der Habit-Spalten von "PC-Nutzung" auf
@@ -270,6 +310,32 @@ export interface DailyReportRow {
   date: string;
   report: string;
   source: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Konfigurierter WhatsApp-Empfänger für die Traum-Zustellung. */
+export interface DeliveryTargetRow {
+  id: number;
+  channel: string;
+  phone: string;
+  display_name: string | null;
+  enabled: number;
+  created_at: string;
+}
+
+/** Eine Zustell-Zeile (Traum → WhatsApp-Empfänger). */
+export interface DreamDeliveryRow {
+  id: number;
+  dream_date: string;
+  target_id: number | null;
+  channel: string;
+  recipient: string;
+  status: string;
+  voice_status: string;
+  attempts: number;
+  error: string | null;
+  sent_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -627,4 +693,143 @@ export function markChangeSetUndone(id: number): void {
 
 export function markChangeSetDiscarded(id: number): void {
   db.prepare(`UPDATE chat_change_sets SET status = 'discarded' WHERE id = ? AND status = 'proposed'`).run(id);
+}
+
+// ---------- WhatsApp-Delivery: Empfänger & Zustell-Helfer ----------
+
+/** Aktive Empfänger (enabledOnly=true) oder alle (z. B. für die Admin-UI). */
+export function listDeliveryTargets(enabledOnly = true): DeliveryTargetRow[] {
+  const sql = enabledOnly
+    ? `SELECT * FROM delivery_targets WHERE enabled = 1 ORDER BY id ASC`
+    : `SELECT * FROM delivery_targets ORDER BY id ASC`;
+  return db.prepare(sql).all() as DeliveryTargetRow[];
+}
+
+/** Empfänger per ID (für retry-Sweep, der nur die target_id kennt). */
+export function getDeliveryTargetById(id: number): DeliveryTargetRow | null {
+  return (
+    (db.prepare(`SELECT * FROM delivery_targets WHERE id = ?`).get(id) as DeliveryTargetRow | undefined) ?? null
+  );
+}
+
+/** Empfänger per Phone (für Test-Endpunkt / Lookup). */
+export function getDeliveryTargetByPhone(phone: string): DeliveryTargetRow | null {
+  return (
+    (db.prepare(`SELECT * FROM delivery_targets WHERE phone = ?`).get(phone) as DeliveryTargetRow | undefined) ??
+    null
+  );
+}
+
+/** Neuen Empfänger anlegen (Admin-Route). Liefert die frisch eingefügte Zeile. */
+export function insertDeliveryTarget(
+  channel: string,
+  phone: string,
+  displayName: string | null,
+): DeliveryTargetRow {
+  const now = nowLocalISO();
+  const info = db
+    .prepare(
+      `INSERT INTO delivery_targets (channel, phone, display_name, enabled, created_at)
+       VALUES (?, ?, ?, 1, ?)`,
+    )
+    .run(channel, phone, displayName, now);
+  return getDeliveryTargetById(Number(info.lastInsertRowid))!;
+}
+
+/**
+ * Idempotente Zustell-Zeile: INSERT OR IGNORE, dann SELECT. Wenn schon eine
+ * Zeile für (dream_date, target_id) existiert, wird sie unverändert zurück-
+ * gegeben. So kollabieren parallele / wiederholte Triggers auf genau eine
+ * Historie-Zeile pro (Traum, Empfänger).
+ */
+export function insertOrGetDelivery(
+  dreamDate: string,
+  targetId: number,
+  recipient: string,
+): DreamDeliveryRow {
+  const now = nowLocalISO();
+  db.prepare(
+    `INSERT OR IGNORE INTO dream_deliveries
+       (dream_date, target_id, channel, recipient, status, voice_status, attempts, created_at, updated_at)
+     VALUES (?, ?, 'whatsapp', ?, 'pending', 'none', 0, ?, ?)`,
+  ).run(dreamDate, targetId, recipient, now, now);
+  const row = db
+    .prepare(`SELECT * FROM dream_deliveries WHERE dream_date = ? AND target_id = ?`)
+    .get(dreamDate, targetId) as DreamDeliveryRow | undefined;
+  if (!row) {
+    // Defensive — INSERT OR IGNORE + sofortiger SELECT sollte das nie liefern.
+    throw new Error(`insertOrGetDelivery: Zeile konnte nicht gelesen werden (${dreamDate}, ${targetId})`);
+  }
+  return row;
+}
+
+/**
+ * Felder einer bestehenden Zustell-Zeile aktualisieren (status, voice_status,
+ * attempts, error, sent_at). Bumped `updated_at` immer. Liefert die frische
+ * Zeile zurück.
+ */
+export function updateDeliveryResult(
+  id: number,
+  patch: {
+    status?: string;
+    voice_status?: string;
+    attempts?: number;
+    error?: string | null;
+    sent_at?: string | null;
+  },
+): DreamDeliveryRow {
+  const now = nowLocalISO();
+  db.prepare(
+    `UPDATE dream_deliveries
+        SET status = COALESCE(@status, status),
+            voice_status = COALESCE(@voice_status, voice_status),
+            attempts = COALESCE(@attempts, attempts),
+            error = @error,
+            sent_at = COALESCE(@sent_at, sent_at),
+            updated_at = @now
+      WHERE id = @id`,
+  ).run({
+    id,
+    status: patch.status ?? null,
+    voice_status: patch.voice_status ?? null,
+    attempts: patch.attempts ?? null,
+    error: patch.error === undefined ? null : patch.error,
+    sent_at: patch.sent_at ?? null,
+    now,
+  });
+  return (
+    (db.prepare(`SELECT * FROM dream_deliveries WHERE id = ?`).get(id) as DreamDeliveryRow | undefined) ?? null
+  ) as unknown as DreamDeliveryRow;
+}
+
+/** Zustellungen listen (neueste zuerst), optional nach Datum filtern. */
+export function listDeliveries(opts: { dreamDate?: string; limit?: number } = {}): DreamDeliveryRow[] {
+  const where: string[] = [];
+  const params: Record<string, unknown> = {};
+  if (opts.dreamDate) {
+    where.push(`dream_date = @dream_date`);
+    params.dream_date = opts.dreamDate.slice(0, 10);
+  }
+  let sql = `SELECT * FROM dream_deliveries ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC`;
+  const limit = opts.limit && opts.limit > 0 ? Math.floor(opts.limit) : 100;
+  sql += ` LIMIT ${limit}`;
+  return db.prepare(sql).all(params) as DreamDeliveryRow[];
+}
+
+/**
+ * Fehlgeschlagene Zustellungen, die noch einmal versucht werden dürfen:
+ * status='failed' UND attempts < maxAttempts UND created_at > sinceIso. Wird
+ * vom Boot-Retry-Sweep verwendet, um den Retry-Layer idempotent wieder
+ * anzustoßen, ohne dass jeder einzelne Klick in der Admin-UI das tun muss.
+ */
+export function failedDeliveriesToRetry(maxAttempts: number, sinceIso: string): DreamDeliveryRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM dream_deliveries
+        WHERE status = 'failed'
+          AND attempts < ?
+          AND created_at > ?
+        ORDER BY created_at ASC`,
+    )
+    .all(Math.max(0, Math.floor(maxAttempts)), sinceIso) as DreamDeliveryRow[];
 }

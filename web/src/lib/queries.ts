@@ -17,6 +17,10 @@ export const qk = {
   diaryNotes: (params?: object) => ['diary', 'notes', params ?? {}] as const,
   dreams: (params?: object) => ['dreams', params ?? {}] as const,
   dreamLatest: () => ['dreams', 'latest'] as const,
+  deliveries: (params?: { dreamDate?: string; limit?: number }) => ['deliveries', params ?? {}] as const,
+  whatsappStatus: () => ['whatsapp', 'status'] as const,
+  whatsappQr: () => ['whatsapp', 'qr'] as const,
+  whatsappTargets: () => ['whatsapp', 'targets'] as const,
 };
 
 // ---------- Substanzen ----------
@@ -197,8 +201,62 @@ export function useSaveDiary() {
 export function useDreams(params?: { from?: string; to?: string; limit?: number }) {
   return useQuery({ queryKey: qk.dreams(params), queryFn: () => api.dreams.list(params), staleTime: 30_000 });
 }
-export function useLatestDream() {
-  return useQuery({ queryKey: qk.dreamLatest(), queryFn: () => api.dreams.latest(), staleTime: 60_000 });
+
+// ---------- Traum-Zustellung (WhatsApp-Delivery-Log) ----------
+export function useDeliveries(params?: { dreamDate?: string; limit?: number }) {
+  return useQuery({
+    queryKey: qk.deliveries(params),
+    queryFn: () => api.deliveries.list(params),
+    staleTime: 15_000,
+  });
+}
+export function useWhatsappStatus() {
+  return useQuery({
+    queryKey: qk.whatsappStatus(),
+    queryFn: () => api.whatsapp.status(),
+    staleTime: 10_000,
+    refetchInterval: 15_000,
+  });
+}
+export function useWhatsappQr(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.whatsappQr(),
+    queryFn: () => api.whatsapp.qr(),
+    enabled,
+    refetchInterval: 5_000,
+  });
+}
+/**
+ * Liste der WhatsApp-Empfänger. Wird vom Panel nur abgefragt, wenn der
+ * Admin-Schalter aktiv ist — Nicht-Admins lösen damit nie eine
+ * CF-Access-401-Welle aus.
+ */
+export function useWhatsappTargets(enabled: boolean) {
+  return useQuery({
+    queryKey: qk.whatsappTargets(),
+    queryFn: () => api.whatsapp.targets.list(),
+    enabled,
+    staleTime: 30_000,
+  });
+}
+/** Neuen Empfänger anlegen; invalidiert die Liste nach Erfolg. */
+export function useAddWhatsappTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { phone: string; displayName?: string }) => api.whatsapp.targets.add(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.whatsappTargets() });
+    },
+  });
+}
+export function useRedeliverDream() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (date: string) => api.dreams.redeliver(date),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['deliveries'] });
+    },
+  });
 }
 
 // ---------- Daten-Konsole (Chat with your data) ----------

@@ -29,6 +29,7 @@ import { Button } from '../components/ui/Button';
 import { TextInput, TextArea } from '../components/ui/inputs';
 import { SectionLabel, Badge } from '../components/ui/feedback';
 import { SubstanceManager } from '../components/SubstanceManager';
+import { AdminWhatsappPanel } from '../components/AdminWhatsappPanel';
 import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
@@ -196,6 +197,12 @@ export function SettingsScreen() {
               </span>
             </button>
           </Card>
+        </section>
+
+        {/* WhatsApp (Admin) — gated; rendert nichts, wenn adminEnabled=false */}
+        <section>
+          <SectionLabel className="px-1 mb-2.5">WhatsApp</SectionLabel>
+          <AdminWhatsappPanel />
         </section>
 
         {/* Daten-Konsole */}

@@ -160,3 +160,49 @@ native `WidgetBridgePlugin`; `api.ts` ruft `setApiBase()` nach jedem
 
 Details, Datei-Liste, Endpoint-Wahl-Begründung:
 `web/android-native-src/README.md` und `docs/changelog.md`.
+
+## WhatsApp-Pairing & ElevenLabs-Voice
+
+### Voraussetzungen
+- **ffmpeg** muss im Server-Image verfügbar sein (im Dockerfile bereits als `apt`-Paket ergänzt).
+- Eine **eigene Telefonnummer** für den WhatsApp-Sender-Account. Empfehlung: dedizierte zweite SIM — Baileys ist inoffiziell, WhatsApp kann Nummern bei übermäßiger Nutzung sperren.
+- **ElevenLabs-API-Key** unter https://elevenlabs.io → Profile → API Key.
+
+### Env-Variablen setzen
+In `.env` (oder docker-compose `environment:`):
+```bash
+ELEVENLABS_API_KEY=sk_...
+ELEVENLABS_VOICE_ID=OO0WT3lY2gVNwzZMAjAI
+ELEVENLABS_MODEL=eleven_multilingual_v2
+WHATSAPP_DISABLED=false
+WHATSAPP_SESSION_PATH=/data/whatsapp-session  # in Docker, ./data/whatsapp-session lokal
+DREAM_DELIVERY_DISABLED=false
+ADMIN_UI_ENABLED=true   # nur in trusted Deployments!
+```
+
+### QR-Pairing (einmalig)
+1. Server starten: `docker compose up -d` (oder `npm run dev` lokal).
+2. Im Browser die App öffnen, in den **Einstellungen → WhatsApp** gehen (nur sichtbar mit `ADMIN_UI_ENABLED=true`).
+3. Auf **„QR anzeigen"** klicken — der QR erscheint, sobald der Server im Pairing-Modus ist.
+4. Auf dem Telefon: **WhatsApp → Einstellungen → Verknüpfte Geräte → Gerät hinzufügen**.
+5. QR innerhalb von **60 Sekunden** scannen — erneuert sich automatisch.
+6. Status wechselt auf **„Verbunden"**. Die `creds.json` liegt jetzt unter `WHATSAPP_SESSION_PATH/creds.json` und überlebt Container-Restarts.
+
+### Empfänger konfigurieren
+Mindestens ein Eintrag in `delivery_targets` muss existieren. Über die Admin-UI unter „Empfänger hinzufügen" oder per SQL:
+```bash
+docker compose exec mediary node -e "\
+  const db = require('better-sqlite3')('/data/mediary.db');\
+  db.prepare('INSERT INTO delivery_targets(channel, phone, display_name, enabled, created_at) VALUES(?,?,?,1,?)').run('whatsapp','4917012345678','Me', new Date().toISOString());"
+```
+
+### Manueller Dream-Trigger (Test)
+```bash
+docker compose exec mediary npm --prefix /app run dream -- --date=2026-07-12 --force
+```
+Erwartet: 30 s später kommen Textnachricht + Sprachnachricht auf WhatsApp an. Der Status in `dream_deliveries` ist `sent`/`sent`.
+
+### Failure-Recovery
+- Traum wurde generiert, aber WhatsApp war offline: Status `failed` in `dream_deliveries`. Nächster Server-Restart → Boot-Sweep versucht erneut (max 3×). Alternativ manuell: Admin-UI → „Erneut senden".
+- ffmpeg fehlt im Container: Status `sent` / `voice_status='failed'`. Im Dockerfile ergänzen, Image neu bauen.
+- Sprach-Synthese fehlt: Status `sent` / `voice_status='failed'`. ElevenLabs-Key prüfen.

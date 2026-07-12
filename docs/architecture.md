@@ -101,6 +101,51 @@
   Fallback-Pfad für ältere SQLite-Versionen (Tabelle neu anlegen +
   kopieren) liegt vor.
 
+## Traum-Delivery (WhatsApp + ElevenLabs)
+
+Sobald `generateDream()` einen Traum in der `dreams`-Tabelle gespeichert hat,
+übernimmt der **Delivery-Layer**:
+
+```
+04:20 cron → generateDream() → upsertDream() ─┐
+                                              ├─→ enqueueDelivery() → deliverDream() per (dream_date, target)
+                                              │     ├ whatsapp.sendText(jid, formatDreamForWhatsApp(content))
+                                              │     └ elevenlabs.synthesize(toSpeechText) → ffmpeg MP3→Opus → whatsapp.sendVoiceNote({ptt:true})
+                                              │
+                                              └─→ dream_deliveries: status='sent' | 'failed' | 'abandoned'
+```
+
+**Komponenten:**
+- `lib/whatsapp.ts` — Baileys-Singleton. Persistente Auth in
+  `WHATSAPP_SESSION_PATH`. Idempotenter `connect()`. `sendText` und
+  `sendVoiceNote` werfen `WhatsappNotConnectedError` wenn
+  `state !== 'connected'`.
+- `lib/elevenlabs.ts` — TTS-Client. Default-Modell `eleven_multilingual_v2`,
+  Default-Voice `OO0WT3lY2gVNwzZMAjAI`. `synthesize(text)` → MP3,
+  `mp3ToOpusOgg(mp3)` → Opus/OGG via ffmpeg.
+- `lib/dream_delivery.ts` — Orchestrator. `formatDreamForWhatsApp`
+  konvertiert das MiniMax-Markdown (headings → `*bold*`, fenced blocks
+  preserved, listen normalisiert, 4000-Char-Truncate). `toSpeechText` strippt
+  WhatsApp-Markdown und cappt bei `DREAM_VOICE_MAX_CHARS` (default 1500) für
+  Kostendisziplin.
+- `routes/whatsapp.ts` + `routes/deliveries.ts` — Admin- bzw. Read-API.
+
+**Failure-Semantik:** Text-Fehler → `status='failed'`, Voice wird gar nicht
+versucht. Text-OK + Voice-Fehler → `status='sent'`, `voice_status='failed'`,
+error-Text gespeichert. Nach `DREAM_DELIVERY_MAX_ATTEMPTS` (default 3)
+Fehlversuchen → `abandoned`. `retryFailedDeliveries()` läuft beim Server-Start
+und versucht alle `failed`-Zeilen der letzten `DREAM_DELIVERY_RETRY_DAYS`
+(default 7) erneut.
+
+**Idempotenz:** `INSERT OR IGNORE` auf
+`uq_deliveries_dream_target (dream_date, target_id)` verhindert Doppel-Rows.
+`insertOrGetDelivery` ist nebenläufigkeitssicher.
+
+**Entkopplung:** Traum-Generierung und WhatsApp-Zustellung sind vollständig
+getrennt. Ein WhatsApp-Outage um 04:20 kostet keinen Traum — `upsertDream` ist
+bereits committed, die Delivery wartet auf den nächsten Boot-Sweep oder
+manuellen Retry.
+
 ## DEFAULTS-Compliance — Checker & UI
 
 `GET /api/defaults/check` liefert:

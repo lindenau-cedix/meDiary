@@ -1,7 +1,6 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
 import { BottomNav } from './BottomNav';
-import { DreamStartupDialog } from './DreamStartupDialog';
 
 export function AppShell() {
   const { pathname } = useLocation();
@@ -23,8 +22,6 @@ export function AppShell() {
         </div>
       </main>
       <BottomNav />
-      {/* Startup-Dialog: zeigt einmal pro Session den jüngsten Traum. */}
-      <DreamStartupDialog />
     </div>
   );
 }

@@ -13,6 +13,7 @@ services:
       NODE_ENV: production
       PORT: 4000
       DB_PATH: /data/mediary.db
+      WHATSAPP_SESSION_PATH: /data/whatsapp-session
       DEFAULTS_PATH: /data/DEFAULTS.md
       DIARY_PATH: /data/diary.md
       WEB_DIST: /app/web/dist
@@ -21,6 +22,7 @@ services:
     ports:
       - "${HOST_PORT:-4000}:4000"
     volumes:
+      # ./data:/data persists the live SQLite DB AND the WhatsApp auth credentials (creds.json)
       - ./data:/data
     healthcheck:
       test:

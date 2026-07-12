@@ -7,6 +7,7 @@ import type {
   HabitRow,
   DreamRow,
   DailyReportRow,
+  DreamDeliveryRow,
 } from '../db.js';
 import { METRIC_KEYS } from './metrics.js';
 import { consumptionDay } from './time.js';
@@ -117,6 +118,22 @@ export function serializeReport(r: DailyReportRow) {
     date: r.date,
     report: r.report,
     source: r.source,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function serializeDelivery(r: DreamDeliveryRow) {
+  return {
+    id: r.id,
+    dreamDate: r.dream_date,
+    channel: r.channel,
+    recipient: r.recipient,
+    status: r.status,
+    voiceStatus: r.voice_status,
+    attempts: r.attempts,
+    error: r.error,
+    sentAt: r.sent_at,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

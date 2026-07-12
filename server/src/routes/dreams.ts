@@ -7,6 +7,7 @@ import { serializeDream } from '../lib/serialize.js';
 import { generateDream, dreamAvailable, dreamTargetDate } from '../lib/dreams.js';
 import { withDreamLock, DreamBusyError, dreamBusy } from '../lib/dream_scheduler.js';
 import { MinimaxNotConfiguredError } from '../lib/minimax.js';
+import { requireCloudflareAccess } from '../lib/cloudflare_access.js';
 
 export const dreamsRouter = Router();
 
@@ -142,4 +143,22 @@ dreamsRouter.delete('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
   if (!deleteDream(date)) return res.status(404).json({ error: 'Kein Traum für diesen Tag' });
   res.status(204).end();
+});
+
+/**
+ * Vorhandenen Traum erneut zustellen (admin). Body: `{}` (kein Body nötig).
+ * Idempotent: bereits `status='sent'`-Zeilen werden NICHT erneut gesendet
+ * (siehe `deliverDream` in `lib/dream_delivery.ts`).
+ */
+dreamsRouter.post('/:date/redeliver', requireCloudflareAccess, async (req, res) => {
+  const dream = dreamFor(req.params.date);
+  if (!dream) {
+    res.status(404).json({ error: 'dream nicht gefunden' });
+    return;
+  }
+  // Lazy-Import, damit der Modul-Init unabhängig von der Delivery-Pipeline
+  // bleibt (kein zirkulärer Load, kein WhatsApp-Side-Effect beim Import).
+  const { enqueueDelivery } = await import('../lib/dream_delivery.js');
+  const result = await enqueueDelivery(dream);
+  res.json({ ...result, date: dream.date });
 });

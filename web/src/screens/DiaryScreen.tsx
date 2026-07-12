@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { List, Moon, MoonStar, Sun, ChevronDown, Sparkles, Bot } from 'lucide-react';
+import { List, Moon, Sun, ChevronDown, Bot } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { EmptyState, LoadingScreen } from '../components/ui/feedback';
-import { DreamProse } from '../components/DreamProse';
-import { Starfield } from '../components/Starfield';
+import { SentDreamsLog } from '../components/SentDreamsLog';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
-import { formatDayLabel, formatFull, relativeDays } from '../lib/format';
-import { useDiaryNotes, useDreams, useMetrics } from '../lib/queries';
-import type { DiaryNoteDay, Dream } from '../lib/types';
+import { formatDayLabel } from '../lib/format';
+import { useDiaryNotes, useMetrics } from '../lib/queries';
+import type { DiaryNoteDay } from '../lib/types';
 
 type Mode = 'info' | 'traum';
 
@@ -44,7 +43,7 @@ export function DiaryScreen() {
         eyebrow={mode === 'traum' ? 'nächtliche Auswertung' : 'aus deinen Notizen'}
         action={<ModeToggle mode={mode} onChange={change} />}
       />
-      {mode === 'info' ? <ShortDiary /> : <DreamHistory />}
+      {mode === 'info' ? <ShortDiary /> : <SentDreamsLog />}
     </>
   );
 }
@@ -215,155 +214,6 @@ function DiaryReportBlock({ report }: { report: NonNullable<DiaryNoteDay['report
           <ChevronDown size={15} className={cx('transition-transform', expanded && 'rotate-180')} />
         </button>
       )}
-    </div>
-  );
-}
-
-// ───────────────────────── Traum: Historie der nächtlichen Auswertungen ─────────────────────────
-
-const monthFmt = new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' });
-function monthLabel(date: string): string {
-  return monthFmt.format(new Date(`${date}T12:00:00`));
-}
-
-function DreamHistory() {
-  const { data, isLoading } = useDreams();
-
-  if (isLoading) return <DreamSkeleton />;
-
-  const dreams = data?.dreams ?? [];
-  const available = data?.available ?? false;
-
-  if (dreams.length === 0) {
-    return (
-      <div className="space-y-4">
-        <DreamListHeader />
-        <EmptyState
-          icon={<MoonStar size={26} />}
-          iconClassName="dream-night text-[rgb(var(--periwinkle))] ring-1 ring-[rgb(var(--periwinkle))]/20"
-          title="Noch keine Träume"
-          description={
-            available
-              ? 'Die App träumt heute Nacht um 4:20 Uhr — dann erscheint hier die erste Auswertung deines Tages.'
-              : 'Sobald ein MINIMAX_API_KEY hinterlegt ist, erstellt die App jede Nacht um 4:20 Uhr eine Auswertung deines Tages.'
-          }
-        />
-      </div>
-    );
-  }
-
-  // Nach Monat gruppieren (neueste zuerst — dreams kommen bereits absteigend).
-  const groups: { month: string; items: Dream[] }[] = [];
-  for (const d of dreams) {
-    const m = monthLabel(d.date);
-    const last = groups[groups.length - 1];
-    if (last && last.month === m) last.items.push(d);
-    else groups.push({ month: m, items: [d] });
-  }
-
-  return (
-    <div className="space-y-6">
-      <DreamListHeader />
-      {groups.map((g) => (
-        <section key={g.month} className="space-y-3">
-          <h2 className="font-display text-lg text-ink/90 px-1 capitalize">{g.month}</h2>
-          <div className="space-y-3">
-            {g.items.map((d) => (
-              <DreamCard key={d.date} dream={d} />
-            ))}
-          </div>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-/** Listenkopf mit dezentem Nacht-Akzent (kleiner Halo + Sternchen). */
-function DreamListHeader() {
-  return (
-    <div className="relative overflow-hidden rounded-3xl dream-night dream-grain px-5 py-4 ring-1 ring-[rgb(var(--periwinkle))]/20">
-      <Starfield count={8} className="opacity-80" />
-      <div className="relative flex items-center gap-3">
-        <span className="grid place-items-center size-9 rounded-2xl bg-[rgb(var(--periwinkle))]/15 dream-accent">
-          <Moon size={18} />
-        </span>
-        <div className="min-w-0">
-          <p className="font-display text-[17px] dream-ink leading-tight">Träume</p>
-          <p className="text-[12px] dream-ink-soft leading-snug">
-            Jede Nacht eine ruhige Auswertung deines Tages — Muster, Trends, Punkte fürs Arztgespräch.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const COLLAPSE_AT = 680; // Zeichen — längere Träume werden eingeklappt
-
-function DreamCard({ dream }: { dream: Dream }) {
-  // `long` aus dem aktuellen Inhalt ableiten (nicht nur beim Mount), damit ein
-  // Refetch/Regenerieren, der die Länge über/unter COLLAPSE_AT schiebt, die
-  // Karte nicht in einem veralteten Zustand „klemmt" (geklappt ohne
-  // Weiterlesen-Button). `expanded` ist nur die explizite Nutzer-Aktion.
-  const long = dream.content.length > COLLAPSE_AT;
-  const [expanded, setExpanded] = useState(false);
-  const open = !long || expanded;
-
-  return (
-    <Card className="relative overflow-hidden p-0">
-      {/* zarte Indigo-Kante links als Nacht-Signatur */}
-      <span className="absolute inset-y-0 left-0 w-[3px] bg-[rgb(var(--periwinkle))]/45" aria-hidden />
-      <div className="p-4 pl-5">
-        <div className="flex items-baseline justify-between gap-3 mb-2.5">
-          <h3 className="font-display text-[18px] text-ink leading-tight">{formatFull(dream.date)}</h3>
-          <span className="text-[11px] text-ink-faint shrink-0">{relativeDays(dream.date)}</span>
-        </div>
-
-        <div className="relative">
-          <div
-            className={cx('relative', !open && 'max-h-[10.5rem] overflow-hidden')}
-            style={!open ? { maskImage: 'linear-gradient(to bottom, black 62%, transparent)', WebkitMaskImage: 'linear-gradient(to bottom, black 62%, transparent)' } : undefined}
-          >
-            <DreamProse content={dream.content} tone="surface" />
-          </div>
-        </div>
-
-        {long && (
-          <button
-            onClick={() => {
-              haptics.select();
-              setExpanded((o) => !o);
-            }}
-            className="press mt-3 inline-flex items-center gap-1 text-[13px] font-semibold text-primary"
-          >
-            {expanded ? 'Weniger' : 'Weiterlesen'}
-            <ChevronDown size={15} className={cx('transition-transform', expanded && 'rotate-180')} />
-          </button>
-        )}
-      </div>
-    </Card>
-  );
-}
-
-function DreamSkeleton() {
-  return (
-    <div className="space-y-6">
-      <DreamListHeader />
-      <div className="space-y-3">
-        {[0, 1, 2].map((i) => (
-          <Card key={i} className="p-4 pl-5">
-            <div className="h-5 w-40 rounded-full bg-surface2 mb-3 animate-pulse" />
-            <div className="space-y-2">
-              {[0, 1, 2].map((j) => (
-                <div key={j} className="h-3.5 rounded-full bg-surface2/70 animate-pulse" style={{ width: `${90 - j * 12}%` }} />
-              ))}
-            </div>
-          </Card>
-        ))}
-      </div>
-      <p className="flex items-center justify-center gap-2 text-xs text-ink-faint">
-        <Sparkles size={13} className="text-ink-faint" /> Träume werden geladen …
-      </p>
     </div>
   );
 }

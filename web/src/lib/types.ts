@@ -379,3 +379,61 @@ export interface ToolEvent {
   info?: string;
   summary?: string;
 }
+
+// ───────────────────────── Traum-Zustellung (WhatsApp-Delivery-Log) ─────────────────────────
+
+/** Zustellstatus eines Traums an den Empfänger (WhatsApp). */
+export type DeliveryStatus = 'pending' | 'sent' | 'failed' | 'abandoned';
+/** Status der optionalen Sprachnachricht (ElevenLabs → WhatsApp). */
+export type VoiceStatus = 'none' | 'sent' | 'failed';
+
+/** Ein Zustell-Datensatz: der Versuch, einen Traum eines Tages zuzustellen. */
+export interface DreamDelivery {
+  id: number;
+  dreamDate: string;
+  channel: string;
+  recipient: string;
+  status: DeliveryStatus;
+  voiceStatus: VoiceStatus;
+  attempts: number;
+  error: string | null;
+  sentAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DeliveriesResponse {
+  deliveries: DreamDelivery[];
+}
+
+// ───────────────────────── WhatsApp-Verbindung (Admin) ─────────────────────────
+
+export type WhatsappConnectionState = 'disconnected' | 'connecting' | 'qr' | 'connected';
+
+export interface WhatsappStatus {
+  state: WhatsappConnectionState;
+  hasCreds: boolean;
+  lastConnectedAt: string | null;
+  lastQrAt: string | null;
+  lastError: string | null;
+  configured: boolean;
+  adminEnabled: boolean;
+  jid: string | null;
+}
+
+export interface WhatsappQrResponse { qr: string; }   // base64 PNG, no data: prefix
+
+/**
+ * Konfigurierter WhatsApp-Empfänger (Spiegel der SQLite-Rohzeile aus
+ * `delivery_targets`). Wird vom Server unverändert (snake_case) zurückgegeben,
+ * weil der `/api/whatsapp/targets`-Endpunkt bewusst keinen Serializer
+ * vorschaltet — siehe `server/src/routes/whatsapp.ts`.
+ */
+export interface WhatsappTarget {
+  id: number;
+  channel: string;
+  phone: string;
+  display_name: string | null;
+  enabled: number;       // 0 oder 1 (SQLite-Boolean)
+  created_at: string;
+}

@@ -378,6 +378,78 @@ export const config = {
     systemPromptPath: findSystemPromptPath(),
   },
   /**
+   * ElevenLabs TTS für die Traum-Zustellung (Sprachnotiz per WhatsApp). Der
+   * API-Key wird ausschließlich serverseitig verwendet (NIE an den Client).
+   * Ohne Key liefert `GET /api/delivery/status` `elevenlabsAvailable:false`
+   * und die Voice-Pipeline antwortet 503. `voiceId` hat einen Default, damit
+   * die Funktion `elevenlabsAvailable()` ohne Key true/false sauber
+   * unterscheiden kann — der eigentliche Sendeversuch wirft dann
+   * `ElevenLabsNotConfiguredError`.
+   */
+  elevenlabs: {
+    apiKey: process.env.ELEVENLABS_API_KEY?.trim() || null,
+    voiceId: process.env.ELEVENLABS_VOICE_ID?.trim() || 'OO0WT3lY2gVNwzZMAjAI',
+    model: process.env.ELEVENLABS_MODEL?.trim() || 'eleven_multilingual_v2',
+    baseUrl: (process.env.ELEVENLABS_BASE_URL?.trim() || 'https://api.elevenlabs.io').replace(/\/$/, ''),
+    outputFormat: process.env.ELEVENLABS_OUTPUT_FORMAT?.trim() || 'mp3_22050_32',
+    timeoutMs: (() => {
+      const n = Number(process.env.ELEVENLABS_HTTP_TIMEOUT_MS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 60_000;
+    })(),
+  },
+  /**
+   * WhatsApp-Web-Verbindung (Baileys). `enabled` ist standardmäßig an und
+   * kann per `WHATSAPP_DISABLED=true` abgeschaltet werden (z. B. wenn der
+   * Server ohne WhatsApp-Setup laufen soll). `sessionPath` ist das
+   * Multi-File-Auth-Verzeichnis von Baileys — Default im Nutzer-Home,
+   * damit lokale Dev-Setups ohne `.env` funktionieren; das Docker-Image
+   * setzt `WHATSAPP_SESSION_PATH=/data/whatsapp-session`.
+   */
+  whatsapp: {
+    enabled: process.env.WHATSAPP_DISABLED !== 'true',
+    sessionPath: (() => {
+      if (process.env.WHATSAPP_SESSION_PATH) {
+        const raw = process.env.WHATSAPP_SESSION_PATH.trim();
+        return path.isAbsolute(raw) ? raw : resolveFromRoot(raw);
+      }
+      return path.join(DEFAULT_DATA_DIR, 'whatsapp-session');
+    })(),
+  },
+  /**
+   * Traum-Zustellung — globale Schalter + Limits. `enabled` ist standardmäßig
+   * an (DREAM_DELIVERY_DISABLED=true schaltet aus), `maxAttempts`/`retentionDays`
+   * regeln den Retry/Backoff-Layer, `ffmpegTimeoutMs` den Transcode-Step,
+   * `voiceMaxChars` kürzt den Traum-Text vor TTS, damit keine 5-Minuten-
+   * Voice-Note entsteht.
+   */
+  delivery: {
+    enabled: process.env.DREAM_DELIVERY_DISABLED !== 'true',
+    maxAttempts: (() => {
+      const n = Number(process.env.DREAM_DELIVERY_MAX_ATTEMPTS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 3;
+    })(),
+    retentionDays: (() => {
+      const n = Number(process.env.DREAM_DELIVERY_RETRY_DAYS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 7;
+    })(),
+    ffmpegTimeoutMs: (() => {
+      const n = Number(process.env.DREAM_VOICE_TIMEOUT_MS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 60_000;
+    })(),
+    voiceMaxChars: (() => {
+      const n = Number(process.env.DREAM_VOICE_MAX_CHARS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 1500;
+    })(),
+  },
+  /**
+   * Admin-UI-Schalter (WhatsApp-QR-Panel, Delivery-Status etc.). Default
+   * **aus** — nur mit `ADMIN_UI_ENABLED=true` exponiert die UI die
+   * entsprechenden Tabs/Endpoints. Verhindert versehentliches Pairing.
+   */
+  admin: {
+    enabled: process.env.ADMIN_UI_ENABLED === 'true',
+  },
+  /**
    * Cloudflare Access (Zero Trust) für geschützte Endpunkte (z. B.
    * POST /api/intakes/text). Ohne teamDomain+aud antworten geschützte
    * Endpunkte mit 503 (fail-closed); CF_ACCESS_DISABLED=true ist der

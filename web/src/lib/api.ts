@@ -24,6 +24,10 @@ import type {
   ChatStatus,
   ChangeSet,
   ChangeSetsResponse,
+  DeliveriesResponse,
+  WhatsappStatus,
+  WhatsappQrResponse,
+  WhatsappTarget,
 } from './types';
 import { mirrorApiBaseToWidgets } from './widgetBridge';
 
@@ -247,6 +251,45 @@ export const api = {
       request<DreamListResponse>(`/api/dreams${qs(params)}`),
     latest: () => request<DreamLatest>('/api/dreams/latest'),
     get: (date: string) => request<Dream & { exists: boolean }>(`/api/dreams/${date}`),
+    redeliver: (date: string) =>
+      request<{ date: string; attempted: number; sent: number; failed: number }>(
+        `/api/dreams/${date}/redeliver`,
+        { method: 'POST' },
+      ),
+  },
+
+  /**
+   * Zustell-Log der Träume (WhatsApp). Offen lesbar; zeigt pro Traum-Tag den
+   * Zustellversuch (Status, Sprachnachricht, Fehler, Zeitstempel).
+   */
+  deliveries: {
+    list: (params?: { dreamDate?: string; limit?: number }) => {
+      const q = params?.dreamDate ? `?dream_date=${encodeURIComponent(params.dreamDate)}` : '';
+      const l = params?.limit ? `${q ? '&' : '?'}limit=${params.limit}` : '';
+      return request<DeliveriesResponse>(`/api/deliveries${q}${l}`);
+    },
+  },
+
+  /**
+   * WhatsApp-Verbindung (Admin). `status()` ist offen lesbar (u. a. für das
+   * „Erneut senden"-Gate im Traum-Log); QR/Reconnect/Test/Targets sind
+   * Admin-Aktionen. Die Ziel-Tabellen-Antwort kommt als snake_case-Rohrow
+   * vom Server (kein Serializer vorgeschaltet), darum ist die Liste in
+   * `WhatsappTarget` ebenfalls snake_case.
+   */
+  whatsapp: {
+    status: () => request<WhatsappStatus>('/api/whatsapp/status'),
+    qr: () => request<WhatsappQrResponse>('/api/whatsapp/qr'),
+    reconnect: () => request<{ ok: boolean }>('/api/whatsapp/reconnect', { method: 'POST' }),
+    test: () => request<{ ok: boolean; recipient?: string }>('/api/whatsapp/test', { method: 'POST' }),
+    targets: {
+      list: () => request<{ targets: WhatsappTarget[] }>('/api/whatsapp/targets'),
+      add: (body: { phone: string; displayName?: string }) =>
+        request<{ target: WhatsappTarget }>('/api/whatsapp/targets', {
+          method: 'POST',
+          body: JSON.stringify(body),
+        }),
+    },
   },
 
   /**

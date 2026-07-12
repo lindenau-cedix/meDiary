@@ -6,112 +6,55 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # meDiary — Medikations-Tagebuch
 
-## Letzter Durchlauf (2026-07-09) — Issue #5 endgültig gefixt (self-healing prebuild)
+Ein sorgfältig gestaltetes **Medikations-Tagebuch**: HTTP-API + SQLite +
+React/Vite-Frontend (PC, iPad, Android-APK inkl. 1×1-Homescreen-Widget und
+WhatsApp-Auslieferung der nächtlichen Auswertung). Standard-Notizen aus
+`DEFAULTS.md` werden beim Eintragen automatisch übernommen. Nachtmedikation
+löst ein 11-Skalen-Tagesbild aus. Plan-Versionen mit Diff. Nächtliches
+„Träumen" wertet den Tag per **MiniMax M3** aus und liefert das Ergebnis
+als formatierte WhatsApp-Nachricht + native Sprachnachricht (ElevenLabs
+TTS, ffmpeg-Transcode zu Opus/OGG).
 
-**Aufgabe:** `mediary-web build` schlug **erneut** mit
-`Rollup failed to resolve import
-"@fontsource-variable/jetbrains-mono/wght.css"` aus `web/src/main.tsx`
-fehl (Vite 6.4.3, „Build failed in 432ms") — der **dritte** Lauf auf
-dasselbe Symptom. Die zwei vorherigen Blöcke haben die Ursache korrekt
-benannt (stale `node_modules`), aber **nur eine manuelle Handlung**
-(`npm install`) empfohlen, die die Build-Automation offensichtlich nie
-ausführt — deshalb kehrte der Fehler jedes Mal zurück.
-
-**Entscheidender Hinweis aus der Fehlermeldung:** `✓ 2 modules
-transformed`, **dann** scheitert jetbrains-mono. Die zwei älteren Fonts
-(fraunces/hanken-grotesk `^5.1.0`) lösen also sauber auf — **nur** das
-später hinzugefügte jetbrains-mono (`^5.2.8`) fehlt. Das ist der
-Fingerabdruck eines `node_modules`, das **vor** dem Hinzufügen von
-jetbrains-mono installiert und danach nie neu installiert wurde (Code
-gepullt, `npm install` vergessen). Es ist **nicht** das ganze
-`@fontsource-variable`-Verzeichnis (sonst würde schon fraunces failen).
-
-**Belegt (in dieser Sandbox):**
-- Code + Lockfile sind **korrekt**: frisches `npm ci` aus dem
-  committeten `web/package-lock.json` legt `jetbrains-mono/wght.css`
-  sauber ab; Build grün, identische Hashes. Der Docker-Pfad (`npm ci`)
-  ist ebenfalls fine.
-- `exports`-Feld von jetbrains-mono@5.2.8 hat `"./*.css"` → `./*.css`,
-  `wght.css` liegt im Paket-Root — Import-Pfad ist gültig. Der
-  Import in `main.tsx` ist **nicht** die Ursache und blieb unverändert.
-
-**Gemacht (der eigentliche Fix — self-healing statt manuellem Schritt):**
-- **`web/scripts/ensure-deps.mjs`** (neu): Guard, der `node_modules`
-  gegen `dependencies` + `devDependencies` aus `package.json` prüft
-  (existiert `node_modules/<name>/package.json`?). Fehlt etwas oder
-  fehlt `node_modules` ganz → automatisch `npm ci` (bzw. `npm install`
-  ohne Lockfile). Nur Node-Builtins, da `node_modules` unvollständig
-  sein kann.
-- **`web/package.json`**: `"prebuild": "node scripts/ensure-deps.mjs"`.
-  npm ruft `prebuild` automatisch **vor** jedem `build` auf — der Build
-  repariert sich jetzt selbst, statt zu scheitern und einen manuellen
-  `npm install` zu verlangen, den niemand ausführt.
-
-**Verifikation:**
-- `npm run build` mit vollständigen Deps: `prebuild` still (No-op),
-  `✓ built in 5.86s`, exit 0.
-- **Reproduktion + Heilung**: `rm -rf
-  node_modules/@fontsource-variable/jetbrains-mono` (exakt der
-  gemeldete Zustand) → `npm run build` erkennt
-  `missing: @fontsource-variable/jetbrains-mono`, fährt `npm ci`,
-  restauriert `wght.css`, `✓ built in 5.90s`, exit 0. **Vor** dem Fix
-  produzierte genau dieser Zustand die gemeldete Rollup-Fehlermeldung.
-- `npm run typecheck:all`: exit 0 (Server + Web).
-
-**Hinweis für die nächste KI-Instanz:** Falls Issue #5 doch nochmal
-auftaucht, ist die Automation vermutlich mit einem Bild-Snapshot
-unterwegs, das `prebuild` umgeht (z. B. Vite direkt statt via
-`npm run build`) — dann `ls node_modules/@fontsource-variable/`
-prüfen. Der `prebuild`-Guard deckt jeden Aufruf über `npm run build`
-sowie den Root-`npm run build` (delegiert an `web`) ab.
-
-## Vorheriger Durchlauf (2026-07-09) — Android-Home-Screen-Widget „meDiary-Sample"
-
-**Aufgabe:** „Add widgets to the android version, which are 1x1 Buttons
-for a Shortcut for adding a sample."
-
-**Gemacht:** Neues 1×1-Home-Screen-Widget „meDiary-Sample" in der
-Capacitor-APK. Pro Widget-Instanz eine Bindung (Substanz + Menge +
-Tageszeit-Slot), Tap → `POST /api/intakes` + Toast. Konfiguration
-über die Android-Standard-Widget-Config-Activity. Authentifizierung
-über den `CF_Authorization`-Cookie aus dem WebView-CookieManager;
-bei 401 öffnet das Widget die App. API-URL wird über das neue
-Capacitor-Plugin `WidgetBridgePlugin` aus dem WebView in
-`SharedPreferences` gespiegelt, damit das Widget die URL kennt,
-**bevor** der Nutzer die App öffnen musste.
-
-**Architektur-Entscheidung:** `POST /api/intakes` (single, offen, kein
-CF-Access-Auth) statt `POST /api/intakes/text` (CF-Access-required).
-Pro Widget genau eine Substanz — Text-Parser-Overhead unnötig, und im
-LAN-Deployment mit `CF_ACCESS_DISABLED=true` direkt erreichbar.
-`Mit:`-Begleitsubstanzen und DEFAULTS-Standarddosis greifen serverseitig
-genauso wie beim in-app `submitInstant`-Button.
-
-**Wo der Code liegt:** Da `web/android/` per `.gitignore` ausgeschlossen
-ist (Capacitor regeneriert das Verzeichnis), liegen die nativen Quellen
-in **`web/android-native-src/`** und werden vom mitgelieferten
-`install.sh` (idempotent) nach `npx cap add android` in den
-Capacitor-Scaffold gemergt. **Erst `cap add android` laufen lassen,
-dann `./android-native-src/install.sh`** — sonst zeigt das Merge-Skript
-einen klaren Fehler.
-
-**Verifikation:** Statische Prüfung — alle `R.*`-Referenzen in den
-fünf Kotlin-Klassen haben passende XML-Definitionen, die
-`AndroidManifest.xml`-Einträge sind im Skript-Output korrekt,
-`install.sh` hat gültige Bash-Syntax, alle XML-Dateien parsen sauber.
-**`gradlew assembleDebug` konnte in dieser Sandbox nicht laufen** (kein
-JDK/Android-SDK), das ist im README der Komponente dokumentiert.
-
-## TL;DR für eilige KI-Instanzen
-
-```bash
-npm run install:all          # Deps (einmalig)
-npm run dev                  # API :4000 + Web :5173
-npm run typecheck:all        # Server- + Web-TS-Check (exit 0 = sauber)
-docker compose up -d --build # Produktionscontainer bauen + starten
+```
+meDiary/
+├── server/                  → HTTP-API (Express + TS + better-sqlite3, ESM)
+│   ├── src/routes/          → 12 Router (intakes, plan, dreams, chat, report, …)
+│   ├── src/lib/             → 20 Module (dreams, anthropic, minimax, elevenlabs,
+│   │                          whatsapp, dream_delivery, diary, chat_agent, …)
+│   ├── src/index.ts         → Express-Mounts + Scheduler-Start + WhatsApp-Boot
+│   ├── src/db.ts            → idempotente Schema-Migration (alle Tabellen)
+│   ├── src/dream.ts         → CLI: `npm --prefix server run dream`
+│   ├── src/seed.ts          → CLI: `npm --prefix server run seed`
+│   └── src/import.ts        → CLI: `npm --prefix server run import`
+├── web/                     → Frontend (React 18 + Vite 6 + Tailwind 3, Capacitor-fähig)
+│   ├── src/screens/         → 7 Screens (QuickEntry, History, Plan, Diary, Trends, Console, Settings)
+│   ├── src/components/      → inkl. SentDreamsLog, SentDreamDrawer, AdminWhatsappPanel
+│   ├── src/lib/             → api.ts (Fetch-Wrapper), queries.ts (react-query Hooks), types.ts
+│   ├── android-native-src/  → Native Android-Widget-Quellen (NICHT in git getrackt;
+│   │                          web/android/ ist via .gitignore ausgeschlossen und
+│   │                          wird bei `cap add android` lokal generiert)
+│   └── scripts/             → ensure-deps.mjs (prebuild-Guard), patch-capacitor-cli.mjs
+├── import/                  → Datenquellen für den Importer (Markdown + entries.jsonl)
+├── DEFAULTS.md              → Standard-Notizen/Mengen pro Substanz (live editierbar)
+├── SAMPLES.md               → Zeilen-Format für den Freitext-Import (POST /api/intakes/text)
+├── docs/                    → Themen-Doku (development, architecture, api, deployment,
+│                              pitfalls, roadmap, changelog)
+├── system_prompt.md         → System-Prompt für nächtliches Träumen (read-only)
+├── README.md                → Funktionsumfang, Schnellstart, API-Übersicht
+└── AGENTS.md                (du bist hier — CLAUDE.md ist ein Symlink)
 ```
 
-**Wichtigste Stolperfallen:**
+## TL;DR
+
+```bash
+npm run install:all          # Deps (einmalig, installiert server + web)
+npm run dev                  # API :4000 + Web :5173 (concurrently)
+npm run typecheck:all        # Server- + Web-TS-Check (exit 0 = sauber)
+npm run build                # web/dist + server/dist (für Produktion)
+docker compose up -d --build # Produktionscontainer bauen + starten (inkl. ffmpeg)
+```
+
+**Stolperfallen, die du beim ersten Edit brechen kannst (lies `docs/pitfalls.md` für die volle Liste):**
 - **Niemals `./data/` für Tests** — das ist das Docker-Volume mit der Live-DB.
   Smoke-Tests immer mit `DB_PATH=/tmp/mediary-test/…` gegen `/tmp` fahren.
 - **`nameKey()` statt SQLite `lower()`** — `lower('Ö')` ist ASCII-only und bleibt `Ö`.
@@ -119,54 +62,26 @@ docker compose up -d --build # Produktionscontainer bauen + starten
 - **Tagesbericht-Default = `dreamTargetDate(now)`** — `POST /api/report/new` ohne
   Body-`date` schreibt auf den Konsum-Vortag (genau der Tag, über den 42 min
   später geträumt wird). Der 03:30-Berlin-Cron muss also nichts mitsenden.
+- **Traum-Generierung ≠ Traum-UI-Update** — WhatsApp ist die Lese-Fläche,
+  der Traum-Subtab in der Web-App ist nur ein Sent-Log. Traum-Generierung
+  kann laufen, während WhatsApp offline ist — Delivery wird beim nächsten
+  Boot automatisch nachgeholt.
 - **`web/android/` ist gitignored** — Capacitor-Scaffold wird lokal generiert
   und ist nicht im Repo. Native Quellen für das Widget liegen in
   `web/android-native-src/`.
 
----
-
-Schnell-Einstieg für eine andere KI (Claude Code, Hermes o. ä.), die dieses
-Projekt nahtlos weiterbearbeitet.
-
-## Was ist meDiary?
-
-Ein sorgfältig gestaltetes **Medikations-Tagebuch**: HTTP-API + SQLite +
-React/Vite-Frontend (PC, iPad, Android-APK inkl. 1×1-Homescreen-Widget).
-Standard-Notizen aus `DEFAULTS.md` werden beim Eintragen automatisch
-übernommen. Nachtmedikation löst ein 11-Skalen-Tagesbild aus.
-Plan-Versionen mit Diff. Nächtliches „Träumen" wertet den Tag per
-**MiniMax M3** aus und kennt neben den 1–10-Skalen + Notizen auch den
-**Tagesbericht des Hermes-Agents** (`POST /api/report/new`, eingeliefert
-vom 03:30-Berlin-Cron), der im Tagebuch-Info-Subtab und in der
-Traum-Auswertung erscheint.
-
-```
-meDiary/
-├── server/                  → HTTP-API (Express + TypeScript + better-sqlite3)
-│   └── src/routes/          → endpoints: intakes, plan, dreams, chat, report, …
-├── web/                     → Frontend (React + Vite + Tailwind, Capacitor-fähig)
-│   ├── src/screens/         → 7 Screens (QuickEntry, History, Plan, Diary, Trends, Console, Settings)
-│   └── android-native-src/  → Native Android-Widget-Quellen (NICHT in git getrackt;
-│                              web/android/ ist via .gitignore ausgeschlossen und
-│                              wird bei `cap add android` lokal generiert)
-├── import/                  → Datenquellen für den Importer (Markdown + entries.jsonl)
-├── DEFAULTS.md              → Standard-Notizen/Mengen pro Substanz (live editierbar)
-├── SAMPLES.md               → Zeilen-Format für den Freitext-Import (POST /api/intakes/text)
-├── docs/                    → Detaillierte Doku (development, architecture, api, deployment, pitfalls, changelog)
-├── README.md
-└── AGENTS.md                (du bist hier — CLAUDE.md ist ein Symlink auf diese Datei)
-```
-
 ## Tech-Stack
 
-- **Server:** Node 18+, TypeScript (ESM), Express, better-sqlite3, zod.
-  Dev: `tsx watch`, Build: `tsc → dist/`.
+- **Server:** Node 18+, TypeScript (ESM, `"type":"module"`), Express, better-sqlite3, zod.
+  Dev: `tsx watch`, Build: `tsc → dist/`. Externe KI-Clients: `@whiskeysockets/baileys`
+  (WhatsApp, QR-Pairing), `pino`, `qrcode`, `@hapi/boom`. ElevenLabs + ffmpeg nur
+  via Shell (`child_process.spawn`).
 - **Web:** React 18, Vite 6, Tailwind 3, framer-motion, lucide-react,
-  @tanstack/react-query, react-router-dom. Build: `vite build → web/dist`.
-- **APK:** Capacitor 6 (`@capacitor/core` + `android`) plus natives
-  1×1-Home-Screen-Widget (Kotlin/OkHttp, Quellen in
-  `web/android-native-src/`, gemergt nach `web/android/app/src/main/`
-  durch `install.sh`).
+  @tanstack/react-query, react-router-dom. Build: `tsc --noEmit && vite build → web/dist`.
+  Prebuild-Hook `web/scripts/ensure-deps.mjs` repariert stale `node_modules` selbst.
+- **APK:** Capacitor 6 (`@capacitor/core` + `android`) plus natives 1×1-Home-Screen-Widget
+  (Kotlin/OkHttp, Quellen in `web/android-native-src/`, gemergt nach
+  `web/android/app/src/main/` durch `install.sh`).
 - **DB:** SQLite, Schema wird idempotent in `server/src/db.ts` angelegt
   (inkl. `source_event_id` für Import-Idempotenz).
 - **Tests:** **kein Test-Runner** — Verifikation läuft über
@@ -185,8 +100,9 @@ Smoke-Tests gegen eine **Wegwerf-DB unter `/tmp`** (NIE `./data` — das ist die
 | Nur API / nur Web | `npm run dev:server` · `npm run dev:web` |
 | TS-Check (Server + Web) | `npm run typecheck:all` |
 | Build (Web → `web/dist`, dann Server → `server/dist`) | `npm run build` |
-| Produktion (Docker) | `docker compose up -d --build` |
+| Produktion (Docker, inkl. ffmpeg + WhatsApp-Session-Persistenz) | `docker compose up -d --build` |
 | Seed / Import (tsx-Skripte) | `npm --prefix server run seed` · `… run import` |
+| Traum für ein bestimmtes Datum / sofort / erzwungen | `npm --prefix server run dream -- [-- --date=YYYY-MM-DD] [--force]` |
 | Einzelnes Skript/Modul fahren | `cd server && DB_PATH=/tmp/x/db CF_ACCESS_DISABLED=true npx tsx src/<file>.ts` |
 | Android-Plattform anlegen | `cd web && npm install && npx cap add android` |
 | Native Widget-Quellen mergen | `cd web && ./android-native-src/install.sh` (nach `cap add android`) |
@@ -245,13 +161,38 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
   (Konsum-Vortag) — passt zum 04:20-Traum, 03:30-Cron muss nichts mitsenden.
   Ein vorhandener Bericht zählt für `hasContent` (kein Traum-Skip mehr nur
   wegen leerer Medikations-Sektion). Tabelle: `daily_reports` (PK `date`).
-- **Drei KI-Integrationen, drei Wire-Formate** (alle Keys ausschließlich serverseitig):
-  KI-Tagebuch = Anthropic-Messages (`lib/anthropic.ts`), nächtliches „Träumen" =
-  OpenAI-Chat-Completions (`lib/minimax.ts`), Daten-Konsole = Anthropic-Messages mit
-  Tool-Loop + SSE (`lib/chat_agent.ts`). Alle laufen wahlweise gegen MiniMax.
-- **Auth = Cloudflare Access** (`lib/cloudflare_access.ts`, fail-closed), bewusst NUR
-  auf mutierenden Endpunkten (`POST /api/intakes/text`, `/api/chat/*`-Writes); der Rest
-  der API ist offen (privates Deployment). `CF_ACCESS_DISABLED=true` = Local-Bypass.
+- **Nächtliches „Träumen" → WhatsApp + ElevenLabs.** Der 04:20-Scheduler
+  ruft `generateDream()` (unverändert, MiniMax M3), und nach erfolgreichem
+  `upsertDream()` enqueued der Traum eine Delivery:
+  `formatDreamForWhatsApp` (Markdown→WA-Subset, 4000-Char-Truncate) →
+  `whatsapp.sendText()` + `elevenlabs.synthesize()` (MP3) →
+  `ffmpeg MP3→Opus/OGG` → `whatsapp.sendVoiceNote({ptt:true})`. Text und
+  Voice werden unabhängig getrackt (Tabellen `delivery_targets` +
+  `dream_deliveries`, `uq_deliveries_dream_target (dream_date, target_id)`).
+  Bei WhatsApp-Outage um 04:20 geht kein Traum verloren — `upsertDream`
+  ist bereits committed, `retryFailedDeliveries()` versucht es beim
+  nächsten Server-Start bis zu `DREAM_DELIVERY_MAX_ATTEMPTS=3` mal,
+  danach `abandoned`. In-App ist nur ein **Sent-Log**
+  (`SentDreamsLog` + `SentDreamDrawer`); der `DreamStartupDialog` ist
+  gelöscht — WhatsApp IST die Lese-Fläche. Admin-Pairing + Testnachricht
+  läuft über `AdminWhatsappPanel` (gated auf `ADMIN_UI_ENABLED=true`,
+  QR-Polling alle 5s, 60s-Scan-Fenster). Baileys ist inoffiziell →
+  dedizierte zweite SIM empfohlen.
+- **Vier KI-Integrationen, jeweils eigener Wire-Format-Stil** (alle Keys
+  ausschließlich serverseitig): KI-Tagebuch = Anthropic-Messages
+  (`lib/anthropic.ts`), nächtliches „Träumen" = OpenAI-Chat-Completions
+  (`lib/minimax.ts`), Daten-Konsole = Anthropic-Messages mit Tool-Loop
+  + SSE (`lib/chat_agent.ts`), WhatsApp-Voice = ElevenLabs
+  `text-to-speech` + ffmpeg. Alle drei LLM-Provider laufen wahlweise
+  gegen MiniMax.
+- **Auth = Cloudflare Access** (`lib/cloudflare_access.ts`, fail-closed),
+  bewusst NUR auf mutierenden Endpunkten (`POST /api/intakes/text`,
+  `/api/chat/*`-Writes, `/api/whatsapp/{qr,reconnect,test,targets}`,
+  `/api/dreams/:date/redeliver`); der Rest der API ist offen (privates
+  Deployment). `CF_ACCESS_DISABLED=true` = Local-Bypass. Separater
+  Token-Schutz für `POST /api/dreams/generate` (`X-Dream-Token`,
+  `DREAM_TRIGGER_TOKEN`) — hinter einem Reverse-Proxy zählt
+  „localhost" **nicht** als Auth.
 - **Android-Homescreen-Widget** (`web/android-native-src/`, gemergt nach
   `web/android/app/src/main/` durch `install.sh`) — 1×1-Kachel, Tap
   feuert `ACTION_SEND_SAMPLE`-Broadcast → `SampleSendReceiver` →
@@ -266,76 +207,32 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
 - **Datenfluss Web:** `lib/api.ts` (typisierte Fetch-Wrapper) → `lib/queries.ts`
   (react-query Hooks + Query-Keys) → Screens. Server: `routes/*` →
   `lib/serialize.ts` (snake_case-Row → camelCase-DTO); Schema idempotent in `db.ts`.
+  `web/src/lib/widgetBridge.ts` + der Patch in `api.ts` spiegeln die
+  API-URL ins Native-Backend (WidgetBridgePlugin) bei jedem
+  `getApiBase()`/`setApiBase()`.
 
-## Letzte Session-Änderungen
+## Wo finde ich was?
 
-- **Android-Home-Screen-Widget „meDiary-Sample" (1×1) (2026-07-09):**
-  1×1-Widget, Tap schickt `POST /api/intakes` und blendet Toast ein.
-  Konfiguration über Android-Standard-Widget-Config-Activity (Spinner
-  + Menge + Tageszeit). `web/android-native-src/` enthält die fünf
-  Kotlin-Klassen + Bridge-Plugin + XML-Ressourcen; `install.sh` mergt
-  sie nach `cap add android` idempotent in den Capacitor-Scaffold.
-  Authentifizierung: `CF_Authorization`-Cookie aus dem WebView
-  (`CookieManager`) wird weitergereicht; bei 401 öffnet das Widget die
-  App. API-URL-Spiegelung: `web/src/lib/widgetBridge.ts` + Patch in
-  `web/src/lib/api.ts` rufen das native `WidgetBridgePlugin.setApiBase()`
-  nach jedem `getApiBase()`/`setApiBase()` auf. **Endpoint-Wahl:**
-  `POST /api/intakes` (offen, kein CF-Access) — pro Widget genau eine
-  Substanz, kein Bedarf für `/text`-Multiline-Parser. **Bekannte
-  Limitationen** (v1): Single-Substance, App muss für Erst-URL einmal
-  offen gewesen sein, kein Preview des letzten Eintrags, kein
-  Undo vom Tap. Vollständige Datei-Liste + Diffs in
-  `docs/changelog.md` und `docs/deployment.md`.
-- **Tagesbericht des Hermes-Agents → Traum-Kontext + Info-Subtab (2026-07-04):**
-  Neuer Endpoint `POST /api/report/new` (Body `{ date?, report, source? }`,
-  idempotenter Upsert pro Konsum-Tag, Default-`date` = `dreamTargetDate(now)`).
-  Tabelle `daily_reports` (PK `date`). `gatherDreamContext` (`lib/dreams.ts`)
-  zieht den Tagesbericht des Ziel-Tags **und** die jüngsten 7 Berichte als
-  eigene Sektionen in den Traum-Prompt — das nächtliche „Träumen" kennt jetzt
-  auch, was der Hermes-Agent am Tag gemacht hat (Coding, Cron, Deploys,
-  Fehler). `hasContent` berücksichtigt einen vorhandenen Bericht, damit der
-  Traum-Skip nicht mehr rein auf Grund leerer Medikations-Sektionen greift.
-  Im **Tagebuch-Info-Subtab** (`web/src/screens/DiaryScreen.tsx`) erscheint
-  der Bericht als eigene Sektion „Hermes-Agent" (Lucide-Icon `Bot`, mit
-  optionaler Quellenangabe); lange Berichte klappen hinter
-  „Weiterlesen" zusammen (> 600 Zeichen, gleiche Schwelle wie Traum-Karten).
-  Tage mit NUR einem Bericht zählen als „noteworthy" und erscheinen auch
-  ohne Einnahmen / Tagesbild / Wachzeit. `buildDayPrompt` (`lib/diary.ts`)
-  reicht den Bericht zusätzlich an die KI-Tagebuch-Generierung weiter.
-  Dateien: `server/src/routes/report.ts`, `server/src/db.ts`,
-  `server/src/lib/dreams.ts`, `server/src/lib/diary.ts`,
-  `server/src/lib/serialize.ts`, `server/src/index.ts`,
-  `server/src/routes/diary.ts`, `web/src/lib/types.ts`,
-  `web/src/screens/DiaryScreen.tsx`, `docs/api.md`, `docs/architecture.md`,
-  `docs/changelog.md`. Cron-Beispiel für den 03:30-Berlin-Trigger:
-  ```bash
-  curl -fsS -X POST "${MEDIARY_URL}/api/report/new" \
-    -H 'Content-Type: application/json' \
-    -d "{\"report\":\"$(cat /var/log/hermes/daily-report.md)\",\"source\":\"hermes-cron-0330\"}"
-  ```
-- **Daten-Konsole „Chat with your data" (2026-06-18):** Neuer Tab `/konsole` für
-  natürlichsprachige Massen-Korrekturen. Lesen läuft read-only (separate
-  `{readonly:true}`-SQLite-Verbindung, nur `SELECT`/`WITH`); Schreiben NUR über
-  typisierte, zod-validierte Change-Sets, die in der UI mit before→after-Vorschau
-  bestätigt werden — transaktional + Undo (Vorzustands-Snapshot), Audit-Log in
-  `chat_change_sets`. Modell = **MiniMax M3** über den **Anthropic-kompatiblen**
-  Endpunkt (`CHAT_BASE_URL/v1/messages`, Tool-Loop, `thinking`-Blöcke bewahrt,
-  SSE). Schlüssel serverseitig (Default `MINIMAX_API_KEY`, `CHAT_API_KEY` Vorrang).
-  Mutierende Endpunkte CF-Access-geschützt + rate-limitiert. Dateien:
-  `server/src/lib/chat_tools.ts` (Sicherheitsschicht), `…/chat_agent.ts`
-  (Agent-Loop), `routes/chat.ts`, `web/src/screens/ConsoleScreen.tsx` +
-  `web/src/components/console/*`. Details: [docs/changelog.md](docs/changelog.md),
-  [docs/api.md](docs/api.md).
-- **npm-Audit bereinigt (2026-06-17):**
-  - `server/package-lock.json`: transitive `tsx → esbuild`-Version von
-    `0.28.0` auf `0.28.1` aktualisiert.
-  - `web/package.json` + `web/package-lock.json`: npm-`overrides` für
-    `tar@7.5.16` ergänzt, damit die `@capacitor/cli@6.2.1`-Schwachstellen
-    ohne Capacitor-Major-Upgrade behoben sind.
-- **Verifiziert:** `npm audit` in `server/` und `web/`, `npm run typecheck:all`,
-  `npm run build` und `npm run install:all` laufen sauber mit `0 vulnerabilities`.
-- **Hinweis:** Die verbleibenden npm-`allow-scripts`-Warnungen betreffen
-  Install-Skripte (`better-sqlite3`, `esbuild`) und sind keine Audit-Befunde.
+- **Neues Endpunkt-Pattern ansehen:** `server/src/routes/dreams.ts`
+  (Traum-Routen inkl. Auth-Guards) oder `server/src/routes/whatsapp.ts`
+  (Admin vs. open, CF-Access-`requireCloudflareAccess`).
+- **Neues externes-API-Modul anlegen:** `server/src/lib/whatsapp.ts` oder
+  `server/src/lib/elevenlabs.ts` als Template — beide spiegeln den Stil
+  aus `minimax.ts` (typed errors, `available()`-Guard, AbortController
+  + Timeout, IIFE-Numeric-Parser im `config.ts`-Block).
+- **Neue DB-Tabelle:** Idempotente `CREATE TABLE IF NOT EXISTS` + Indizes
+  in `server/src/db.ts` (siehe `delivery_targets`/`dream_deliveries`),
+  TS-Interface daneben, Helper am Ende (idempotent via
+  `INSERT OR IGNORE`).
+- **Neues Frontend-Pattern:** `SentDreamsLog.tsx` +
+  `SentDreamDrawer.tsx` (Status-Pills, framer-motion-Drawer, lucide-Icons,
+  Tailwind-Klassen der Nacht-Palette), `AdminWhatsappPanel.tsx`
+  (QR-Polling via `refetchInterval`, Mutation-Hooks, `useToast`).
+- **Schlüssel-Properties der Nacht-Palette / Typografie:** siehe
+  `docs/architecture.md` und die Tailwind-Config in `web/`.
+  Display-Serife = Fraunces, UI = Hanken Grotesk, Mono = JetBrains
+  Mono (alle drei lokal über `@fontsource-variable/*` gebündelt —
+  das Web funktioniert offline in der APK).
 
 ## Detail-Dokumentation
 
@@ -346,14 +243,16 @@ File lesen, statt alles auf einmal in den Kontext zu laden:
   Verifikations-Rezepte (Smoke-Tests gegen `/tmp`, einzelne Endpunkte prüfen).
 - **[docs/architecture.md](docs/architecture.md)** — Architektur-Punkte
   (Tagesgrenze 03:30, DEFAULTS live, `Mit:`-Begleitsubstanzen, Plan-Versionierung
-  mit `effective_from`, Habit/Wachzeit, nächtliches „Träumen"), DEFAULTS-Compliance,
-  DB-Schema, Frontend-Struktur.
+  mit `effective_from`, Habit/Wachzeit, nächtliches „Träumen" + WhatsApp-Delivery),
+  DEFAULTS-Compliance, DB-Schema, Frontend-Struktur.
 - **[docs/api.md](docs/api.md)** — API-Referenz (alle Endpunkte inkl.
-  `/api/intakes/text` und `/api/dreams`).
-- **[docs/deployment.md](docs/deployment.md)** — Docker-Compose-Deployment, Env-Variablen,
-  iPad/Capacitor-APK, **Android-Widget-Installationsprozedur**.
+  `/api/intakes/text`, `/api/dreams`, `/api/whatsapp/*`, `/api/deliveries`,
+  `/api/report/*`).
+- **[docs/deployment.md](docs/deployment.md)** — Docker-Compose-Deployment,
+  Env-Variablen, iPad/Capacitor-APK, Android-Widget-Installationsprozedur,
+  **WhatsApp-Pairing + ElevenLabs-Setup**.
 - **[docs/pitfalls.md](docs/pitfalls.md)** — Bekannte Stolperfallen.
   **Vor Änderungen lesen.**
 - **[docs/roadmap.md](docs/roadmap.md)** — Offene Punkte / Next Steps.
-- **[docs/changelog.md](docs/changelog.md)** — „Letzte Änderungen": chronologische
-  Detailhistorie aller Sessions (nachschlagen, was wann & warum geändert wurde).
+- **[docs/changelog.md](docs/changelog.md)** — Chronologische Detailhistorie
+  aller Sessions (nachschlagen, was wann & warum geändert wurde).

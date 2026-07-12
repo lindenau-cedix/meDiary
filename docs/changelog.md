@@ -4,6 +4,53 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-07-12 — WhatsApp-Delivery + ElevenLabs-Voice**:
+  - **Was:** Der nächtliche „Traum" wurde bisher in der App als Popup + Traum-Tab
+    angezeigt. Lese-Fläche war die Web-UI.
+  - **Jetzt:** Jeder generierte Traum wird **per WhatsApp** zugestellt — als
+    formatierte Textnachricht (WhatsApp-Markdown) UND als native
+    **Sprachnachricht** (Opus/OGG, im WhatsApp-Voice-Note-Player). WhatsApp ist
+    jetzt die primäre Lese-Fläche; die App zeigt nur noch ein
+    „Gesendete Träume"-Log mit Status (sent / failed / abandoned / pending).
+  - **Architektur:**
+    - **Server:** `server/src/lib/whatsapp.ts` (Baileys-Singleton, QR-Pairing,
+      persistente Auth in `WHATSAPP_SESSION_PATH`), `server/src/lib/elevenlabs.ts`
+      (TTS-Client, ElevenLabs `eleven_multilingual_v2`), `server/src/lib/ffmpeg.ts`
+      (MP3 → Opus/OGG Transcoder), `server/src/lib/dream_delivery.ts`
+      (Orchestrator + Markdown→WhatsApp-Formatter), `server/src/routes/whatsapp.ts`
+      + `server/src/routes/deliveries.ts` (Admin-API), neue Tabellen
+      `delivery_targets` + `dream_deliveries`.
+    - **Pipeline:** `04:20 cron → generateDream() → upsertDream() →
+      enqueueDelivery() → formatDreamForWhatsApp() → whatsapp.sendText() +
+      ElevenLabs.synthesize() → ffmpeg MP3→Opus → whatsapp.sendVoiceNote({ptt:true})
+      → dream_deliveries.status='sent'`.
+    - **Web:** `web/src/components/SentDreamsLog.tsx` (ersetzt `DreamHistory`
+      im Tagebuch-Tab), `web/src/components/SentDreamDrawer.tsx`
+      (Slide-in mit „Erneut senden"),
+      `web/src/components/AdminWhatsappPanel.tsx` (QR-Pairing, Testnachricht,
+      Empfänger-Verwaltung — sichtbar nur wenn `ADMIN_UI_ENABLED=true`). Der
+      `DreamStartupDialog` ist gelöscht.
+    - **Failure-Isolation:** Text und Sprachnachricht werden unabhängig getrackt.
+      Wenn die Sprach-Synthese fehlt, gilt die Nachricht trotzdem als zugestellt
+      (UI zeigt „Sprachnachricht fehlgeschlagen"). Wenn die Text-Zustellung
+      fehlt, geht der Traum nicht verloren — er ist bereits in der `dreams`-
+      Tabelle gespeichert, und `retryFailedDeliveries()` (Boot-Sweep) versucht es
+      bis zu 3× erneut. Nach 3 Fehlversuchen: `abandoned`.
+  - **Neue Env-Variablen:** `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` (Default
+    `OO0WT3lY2gVNwzZMAjAI`), `ELEVENLABS_MODEL`, `ELEVENLABS_BASE_URL`,
+    `ELEVENLABS_OUTPUT_FORMAT`, `ELEVENLABS_HTTP_TIMEOUT_MS`, `WHATSAPP_DISABLED`,
+    `WHATSAPP_SESSION_PATH` (Docker: `/data/whatsapp-session`),
+    `DREAM_DELIVERY_DISABLED`, `DREAM_DELIVERY_MAX_ATTEMPTS`,
+    `DREAM_DELIVERY_RETRY_DAYS`, `DREAM_VOICE_TIMEOUT_MS`, `DREAM_VOICE_MAX_CHARS`,
+    `ADMIN_UI_ENABLED`.
+  - **Neue Abhängigkeiten (server):** `@whiskeysockets/baileys@^7.0.0-rc.13`,
+    `pino@^9.5.0`, `qrcode@^1.5.4`, `@hapi/boom@^10.0.1`. Docker: `ffmpeg` zum
+    Runtime-Image hinzugefügt.
+  - **ToS-Warnung:** Baileys ist inoffiziell. WhatsApp kann die Nummer sperren.
+    Für Produktion eine dedizierte zweite SIM empfohlen.
+  - **Dateien (komplett):** Siehe git diff. Alle Tests grün:
+    `npm run typecheck:all` exit 0.
+
 - **2026-07-09 — Android-Home-Screen-Widget „meDiary-Sample" (1×1)**:
   - **Feature:** 1×1-Widget, das per Tap eine vorkonfigurierte Einnahme
     an `POST /api/intakes` schickt und einen Toast einblendet
