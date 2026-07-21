@@ -24,6 +24,7 @@
 | `GET` | `/api/assessments?from=&to=` | Tagesbilder (Trends) |
 | `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
 | `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
+| `PUT` | `/api/defaults/sections` | Strukturierte Sections schreiben (siehe unten) — **CF-Access** |
 | `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht |
 | `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Liste der Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild + Wachzeit-Habit + **Hermes-Agent-Tagesbericht**). Tage zählen als „noteworthy", sobald EINE dieser Quellen vorliegt — auch ein reiner Agent-Bericht ohne Medikations-Daten erscheint. |
 | `GET` | `/api/diary` | Zustand des KI-Voll-Tagebuchs (`raw`, `entries[]`, `generatedDays`/`pendingDays`, `available`) |
@@ -49,6 +50,66 @@
 | `POST` | `/api/chat/change-sets/:id/apply` | Change-Set anwenden (transaktional + Undo-Snapshot); 409 wenn nicht `proposed`. **CF-Access** |
 | `POST` | `/api/chat/change-sets/:id/undo` | Jüngstes angewandtes Change-Set rückgängig machen; 409 sonst. **CF-Access** |
 | `POST` | `/api/chat/change-sets/:id/discard` | Vorgeschlagenes Change-Set verwerfen; 409 wenn nicht `proposed`. **CF-Access** |
+
+### `PUT /api/defaults/sections`
+
+Strukturierte DEFAULTS.md-Mutation. Der Web-Editor (`/standardnotizen`)
+schickt pro Substanz einen Eintrag; der Server validiert (Doppelnamen
+case-insensitive via `nameKey`, keine Selbst-Referenz als Begleitstoff,
+Längen-Caps), serialisiert zurück in Markdown und schreibt atomar. Der
+Dokumenttitel (`# DEFAULTS.md`) und alles vor der ersten `## …`-Section
+bleibt erhalten; Zeilen unter einer Section, die nicht als `Menge:`/
+`Notiz:`/`Mit:` interpretierbar sind (z.B. `NACH 2026-08-01 12:00 CEST: …`
+oder `DAVOR: …`), werden als `preLines` / `postLines` der jeweiligen
+Section verlustfrei übernommen.
+
+**Auth:** Cloudflare Access, fail-closed (siehe Env-Tabelle).
+`CF_ACCESS_DISABLED=true` ist der Dev-Bypass; lokal reicht das für Smoke-
+Tests vollkommen.
+
+**Request** (`PUT /api/defaults/sections`):
+
+```json
+{
+  "sections": [
+    {
+      "name": "Modafinil",
+      "amount": "100 mg",
+      "note": "morgens",
+      "companions": [],
+      "preLines": [],
+      "postLines": []
+    },
+    {
+      "name": "L-Theanin",
+      "amount": "400 mg",
+      "note": null,
+      "companions": [
+        { "name": "Lemon Balm", "amount": "100 mg", "note": null }
+      ],
+      "preLines": [],
+      "postLines": []
+    }
+  ]
+}
+```
+
+- `amount` / `note` / `companion.amount` / `companion.note`: `string | null`, ≤ 80 bzw. 1000 Zeichen.
+- `preLines` / `postLines`: `string[]` — Zeilen, die das Frontend nicht
+  strukturiert pflegen will (z.B. `NACH …`-Vorbehalte). Werden 1:1 mit
+  einer Leerzeile Abstand davor wieder in den Markdown-Text eingefügt.
+- Leere Sections (alles `null`/`[]`) werden stillschweigend weggelassen.
+
+**Response (200):** dieselbe Form wie `GET /api/defaults` —
+`{ defaults, raw }` (frisch geparst + Rohtext nach dem Schreiben).
+
+**Errors:**
+
+| Status | Bedeutung |
+|---|---|
+| 400 | Doppelname (case-insensitive), Begleitstoff = Sektion selbst, Name leer / zu lang, `Menge`/`Notiz` zu lang, Zod-Validation fehlgeschlagen |
+| 401/403 | Cloudflare Access nicht erfüllt (fail-closed) |
+| 503 | Server ohne `DEFAULTS_PATH` konfiguriert oder Datei nicht beschreibbar |
 
 `POST /api/intakes` liefert `{ intake, nightMed, assessmentDate, assessmentExists, createdSubstance, companions }` — `createdSubstance: true` heißt, der Name war neu und wurde als QuickPick angelegt; `companions` (`{ intake, createdSubstance }[]`) sind die automatisch miterfassten Begleit-Einnahmen aus `Mit:`-Defaults (leer, wenn keine).
 

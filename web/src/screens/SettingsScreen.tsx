@@ -1,5 +1,5 @@
 import { useRef, useState, type ChangeEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   Sun,
@@ -26,7 +26,7 @@ import {
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
-import { TextInput, TextArea } from '../components/ui/inputs';
+import { TextInput } from '../components/ui/inputs';
 import { SectionLabel, Badge } from '../components/ui/feedback';
 import { SubstanceManager } from '../components/SubstanceManager';
 import { AdminWhatsappPanel } from '../components/AdminWhatsappPanel';
@@ -35,7 +35,7 @@ import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { getApiBase, setApiBase, api } from '../lib/api';
-import { useDefaults, useSaveDefaults, useCompliance, useImportIntakes } from '../lib/queries';
+import { useCompliance, useImportIntakes } from '../lib/queries';
 
 const THEME_OPTIONS: { value: ThemePref; label: string; Icon: typeof Sun }[] = [
   { value: 'system', label: 'System', Icon: Monitor },
@@ -47,6 +47,7 @@ export function SettingsScreen() {
   const { pref, setPref } = useTheme();
   const toast = useToast();
   const qc = useQueryClient();
+  const navigate = useNavigate();
 
   const [serverUrl, setServerUrl] = useState(getApiBase());
   const [testing, setTesting] = useState<'idle' | 'ok' | 'fail' | 'loading'>('idle');
@@ -54,12 +55,8 @@ export function SettingsScreen() {
   const [exportingIntakes, setExportingIntakes] = useState(false);
   const intakeImportRef = useRef<HTMLInputElement>(null);
 
-  const { data: defaults } = useDefaults();
-  const saveDefaults = useSaveDefaults();
   const importIntakes = useImportIntakes();
   const { data: compliance, isFetching: complianceLoading, refetch: refetchCompliance } = useCompliance();
-  const [defaultsText, setDefaultsText] = useState<string | null>(null);
-  const defaultsValue = defaultsText ?? defaults?.raw ?? '';
 
   const saveServer = async () => {
     setApiBase(serverUrl.trim());
@@ -75,13 +72,6 @@ export function SettingsScreen() {
       haptics.warning();
       toast.show({ tone: 'warning', message: 'Keine Verbindung', detail: 'Adresse erreichbar?' });
     }
-  };
-
-  const onSaveDefaults = async () => {
-    await saveDefaults.mutateAsync(defaultsValue);
-    setDefaultsText(null);
-    haptics.success();
-    toast.show({ message: 'Standard-Notizen gespeichert' });
   };
 
   const exportIntakes = async () => {
@@ -129,25 +119,11 @@ export function SettingsScreen() {
     }
   };
 
-  /**
-   * Fügt einen neuen DEFAULTS-Abschnitt für eine Substanz ein, die bisher
-   * keinen Eintrag hatte. Schnell-Pflege, damit der Compliance-Bericht
-   * nicht ständig rot leuchtet.
-   */
-  const addMissingDefault = (name: string) => {
-    const heading = `## ${name}`;
-    const block = `\n${heading}\nNotiz: \n`;
-    // Wenn am Ende kein Newline steht, einen setzen.
-    const base = defaultsValue.endsWith('\n') || defaultsValue === '' ? defaultsValue : `${defaultsValue}\n`;
-    const next = `${base}${block}`;
-    setDefaultsText(next);
+  /** Leitet auf den neuen Editor weiter und legt den Substanznamen als
+   *  "Anlegen"-Chip im strukturierten Editor ab. */
+  const goAddMissing = (name: string) => {
     haptics.light();
-    // Scrollt den Editor ins Sichtfeld, damit der User direkt weiter pflegen kann.
-    requestAnimationFrame(() => {
-      const el = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Standard-Notizen (Markdown)"], textarea[placeholder*="## Substanzname"]');
-      el?.focus();
-      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    });
+    navigate(`/standardnotizen?prefill=${encodeURIComponent(name)}`);
   };
 
   const missing = compliance?.missing ?? [];
@@ -372,7 +348,7 @@ export function SettingsScreen() {
                             size="sm"
                             variant="soft"
                             icon={<Plus size={14} />}
-                            onClick={() => addMissingDefault(m.name)}
+                            onClick={() => goAddMissing(m.name)}
                           >
                             Eintrag
                           </Button>
@@ -391,35 +367,22 @@ export function SettingsScreen() {
         {/* DEFAULTS.md */}
         <section>
           <SectionLabel className="px-1 mb-2.5">Standard-Notizen (DEFAULTS.md)</SectionLabel>
-          <Card className="p-4 space-y-3">
-            <div className="flex items-center gap-2.5 text-ink-muted">
-              <FileText size={18} />
-              <p className="text-sm">Wird automatisch als Notiz übernommen</p>
-            </div>
-            <TextArea
-              value={defaultsValue}
-              onChange={(e) => setDefaultsText(e.target.value)}
-              rows={9}
-              spellCheck={false}
-              className="font-mono text-[13px] leading-relaxed"
-              placeholder={'## Substanzname\nMenge: 0,4–0,5 g\nNotiz: Hinweistext …\nMit: Begleitsubstanz | Menge | Notiz'}
-            />
-            <p className="text-xs text-ink-faint leading-relaxed">
-              Pro Substanz eine Überschrift <code className="text-ink-muted">## Substanzname</code>, darunter optional{' '}
-              <code className="text-ink-muted">Menge:</code>, <code className="text-ink-muted">Notiz:</code> und{' '}
-              <code className="text-ink-muted">Mit:</code>. Menge/Notiz werden beim Eintragen übernommen, wenn sie nicht
-              selbst angegeben wurden. <code className="text-ink-muted">Mit: Name | Menge | Notiz</code> trägt die genannte
-              Begleitsubstanz automatisch als eigene Einnahme mit ein (Menge/Notiz optional — sonst gelten deren eigene
-              Standards). Wird bei jedem Eintrag frisch gelesen.
-            </p>
-            <Button
-              icon={<Check size={18} />}
-              onClick={onSaveDefaults}
-              loading={saveDefaults.isPending}
-              disabled={defaultsText === null}
+          <Card className="overflow-hidden">
+            <Link
+              to="/standardnotizen"
+              className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-surface2"
             >
-              Speichern
-            </Button>
+              <span className="grid size-9 place-items-center rounded-xl bg-surface2 text-primary">
+                <FileText size={18} />
+              </span>
+              <span className="flex-1">
+                <span className="block font-medium text-ink">Standard-Notizen bearbeiten</span>
+                <span className="block text-xs text-ink-muted">
+                  Pro Substanz ein Formular (Menge, Notiz, Begleitstoffe) — oder direkt im Markdown
+                </span>
+              </span>
+              <ChevronRight size={18} className="text-ink-faint" />
+            </Link>
           </Card>
         </section>
 

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type IntakeInput, type SubstanceInput } from './api';
-import type { Plan, PlanItem, PlanSlot, IntakeBatchEntryInput } from './types';
+import type { Plan, PlanItem, PlanSlot, IntakeBatchEntryInput, DefaultsSection } from './types';
 
 export const qk = {
   substances: (archived = false) => ['substances', archived] as const,
@@ -160,6 +160,17 @@ export function useSaveDefaults() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (content: string) => api.defaults.save(content),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.defaults() });
+      qc.invalidateQueries({ queryKey: qk.compliance() });
+    },
+  });
+}
+/** Strukturierte Sections speichern (PUT /api/defaults/sections). */
+export function useSaveDefaultsSections() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (sections: DefaultsSection[]) => api.defaults.saveSections(sections),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qk.defaults() });
       qc.invalidateQueries({ queryKey: qk.compliance() });

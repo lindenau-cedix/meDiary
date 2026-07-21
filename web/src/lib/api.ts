@@ -8,6 +8,8 @@ import type {
   Assessment,
   Metric,
   DefaultsPayload,
+  DefaultsSectionsPayload,
+  DefaultsSection,
   ComplianceReport,
   IntakeImportResult,
   PlanSlot,
@@ -228,6 +230,11 @@ export const api = {
     get: () => request<DefaultsPayload>('/api/defaults'),
     save: (content: string) =>
       request<DefaultsPayload>('/api/defaults', { method: 'PUT', body: JSON.stringify({ content }) }),
+    saveSections: (sections: DefaultsSection[]) =>
+      request<DefaultsPayload>('/api/defaults/sections', {
+        method: 'PUT',
+        body: JSON.stringify({ sections } satisfies DefaultsSectionsPayload),
+      }),
     check: () => request<ComplianceReport>('/api/defaults/check'),
   },
 

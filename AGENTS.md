@@ -27,9 +27,13 @@ meDiary/
 │   ├── src/seed.ts          → CLI: `npm --prefix server run seed`
 │   └── src/import.ts        → CLI: `npm --prefix server run import`
 ├── web/                     → Frontend (React 18 + Vite 6 + Tailwind 3, Capacitor-fähig)
-│   ├── src/screens/         → 7 Screens (QuickEntry, History, Plan, Diary, Trends, Console, Settings)
-│   ├── src/components/      → inkl. SentDreamsLog, SentDreamDrawer, AdminWhatsappPanel
-│   ├── src/lib/             → api.ts (Fetch-Wrapper), queries.ts (react-query Hooks), types.ts
+│   ├── src/screens/         → 8 Screens (QuickEntry, History, Plan, Diary, Trends, Console,
+│   │                          Settings, **DefaultsEditor** = `/standardnotizen`)
+│   ├── src/components/      → inkl. SentDreamsLog, SentDreamDrawer, AdminWhatsappPanel,
+│   │                          **DefaultsEditor/{StructuredView, SubstanceSection,
+│   │                          CompanionRow, ErweitertView, AddSubstanceSheet, SaveBar}**
+│   ├── src/lib/             → api.ts (Fetch-Wrapper), queries.ts (react-query Hooks), types.ts,
+│   │                          **names.ts** (Client-Spiegel des Server-`nameKey()`)
 │   ├── android-native-src/  → Native Android-Widget-Quellen (NICHT in git getrackt;
 │   │                          web/android/ ist via .gitignore ausgeschlossen und
 │   │                          wird bei `cap add android` lokal generiert)
@@ -59,6 +63,8 @@ docker compose up -d --build # Produktionscontainer bauen + starten (inkl. ffmpe
   Smoke-Tests immer mit `DB_PATH=/tmp/mediary-test/…` gegen `/tmp` fahren.
 - **`nameKey()` statt SQLite `lower()`** — `lower('Ö')` ist ASCII-only und bleibt `Ö`.
   Umlaut-Matching nur über JS `nameKey()` (`toLocaleLowerCase('de')`).
+  Server: `server/src/lib/names.ts`; Client-Spiegel: `web/src/lib/names.ts`
+  (z.B. für Compliance-Badges im DEFAULTS-Editor und React-State-Vergleiche).
 - **Tagesbericht-Default = `dreamTargetDate(now)`** — `POST /api/report/new` ohne
   Body-`date` schreibt auf den Konsum-Vortag (genau der Tag, über den 42 min
   später geträumt wird). Der 03:30-Berlin-Cron muss also nichts mitsenden.
@@ -188,11 +194,23 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
 - **Auth = Cloudflare Access** (`lib/cloudflare_access.ts`, fail-closed),
   bewusst NUR auf mutierenden Endpunkten (`POST /api/intakes/text`,
   `/api/chat/*`-Writes, `/api/whatsapp/{qr,reconnect,test,targets}`,
-  `/api/dreams/:date/redeliver`); der Rest der API ist offen (privates
-  Deployment). `CF_ACCESS_DISABLED=true` = Local-Bypass. Separater
-  Token-Schutz für `POST /api/dreams/generate` (`X-Dream-Token`,
+  `/api/dreams/:date/redeliver`, **`PUT /api/defaults/sections`**);
+  der Rest der API ist offen (privates Deployment). `CF_ACCESS_DISABLED=true` = Local-Bypass.
+  Separater Token-Schutz für `POST /api/dreams/generate` (`X-Dream-Token`,
   `DREAM_TRIGGER_TOKEN`) — hinter einem Reverse-Proxy zählt
   „localhost" **nicht** als Auth.
+- **Server ist der einzige Serializer von DEFAULTS.md.** Zwei Schreibpfade,
+  ein Wahrheits-Eigentümer: der strukturierte Editor unter
+  `/standardnotizen` ruft `PUT /api/defaults/sections` (zod-validiert, Server
+  serialisiert aus dem JSON zurück in Markdown); der alte `PUT /api/defaults`
+  (roher Text) bleibt offen als Power-User-Fallback — **niemals beide
+  Pfade lokal parallel pflegen**, sonst gibt es Round-Trip-Drift. Beim
+  Edit werden Preamble (Dokumenttitel + Intro) und nicht-strukturierte Zeilen
+  (z.B. `NACH 2026-08-01 12:00 CEST: …` oder `DAVOR: …`) als
+  `preLines`/`postLines` 1:1 verlustfrei übernommen — siehe
+  `parseSections()` + `buildMarkdownFromParsed()` in
+  `server/src/lib/defaults.ts`. Client-Mirror nur für Read-only-Parsing:
+  `web/src/components/DefaultsEditor/state.ts`.
 - **Android-Homescreen-Widget** (`web/android-native-src/`, gemergt nach
   `web/android/app/src/main/` durch `install.sh`) — 1×1-Kachel, Tap
   feuert `ACTION_SEND_SAMPLE`-Broadcast → `SampleSendReceiver` →
@@ -228,6 +246,17 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
   `SentDreamDrawer.tsx` (Status-Pills, framer-motion-Drawer, lucide-Icons,
   Tailwind-Klassen der Nacht-Palette), `AdminWhatsappPanel.tsx`
   (QR-Polling via `refetchInterval`, Mutation-Hooks, `useToast`).
+- **Strukturierter Editor ansehen:** `web/src/components/DefaultsEditor/`
+  (`index.tsx` = Tab-Switcher + Draft-State, `StructuredView.tsx` =
+  Section-Liste + Compliance-Badges, `SubstanceSection.tsx` = eine
+  Substanz-Karte mit Menge/Notiz/Mit:/`preLines`/`postLines`-Disclosure,
+  `CompanionRow.tsx` = autocomplete auf `useSubstances()`-Liste,
+  `AddSubstanceSheet.tsx` = neues `Sheet` für QuickPick-Anlage,
+  `ErweitertView.tsx` = Raw-TextArea als Power-User-Escape-Hatch,
+  `SaveBar.tsx` = sticky Footer mit Dirty-Tracking,
+  `state.ts` = Client-Read-only-Parser `sectionsFromRaw()` +
+  `sectionsEqual()` für die „Speichern"-Enable-Logik).
+  Pattern-Referenz für jede zukünftige **Section-basierte Editor-Funktion**.
 - **Schlüssel-Properties der Nacht-Palette / Typografie:** siehe
   `docs/architecture.md` und die Tailwind-Config in `web/`.
   Display-Serife = Fraunces, UI = Hanken Grotesk, Mono = JetBrains

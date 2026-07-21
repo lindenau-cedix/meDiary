@@ -11,6 +11,7 @@ import { DiaryScreen } from './screens/DiaryScreen';
 import { PlanScreen } from './screens/PlanScreen';
 import { TrendsScreen } from './screens/TrendsScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
+import { DefaultsEditorScreen } from './screens/DefaultsEditorScreen';
 import { ConsoleScreen } from './screens/ConsoleScreen';
 
 const queryClient = new QueryClient({
@@ -43,6 +44,7 @@ export function App() {
                 <Route path="werte" element={<TrendsScreen />} />
                 <Route path="konsole" element={<ConsoleScreen />} />
                 <Route path="einstellungen" element={<SettingsScreen />} />
+                <Route path="standardnotizen" element={<DefaultsEditorScreen />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Route>
             </Routes>

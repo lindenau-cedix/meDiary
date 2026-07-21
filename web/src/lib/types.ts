@@ -195,6 +195,32 @@ export interface ComplianceReport {
   missing: SubstanceCompliance[];
 }
 
+// ---------- Strukturierte DEFAULTS-Sections (PUT /api/defaults/sections) ----------
+
+/** Wire-Shape eines Begleitstoffs in einer Section. */
+export interface DefaultsSectionCompanion {
+  name: string;
+  amount: string | null;
+  note: string | null;
+}
+
+/** Wire-Shape einer Substanz-Section.
+ *  `preLines` / `postLines` tragen nicht-strukturierte Zeilen (z.B. `NACH
+ *  2026-08-01 12:00 CEST: …` Kommentarblöcke) verlustfrei durch. */
+export interface DefaultsSection {
+  name: string;
+  amount: string | null;
+  note: string | null;
+  companions: DefaultsSectionCompanion[];
+  preLines: string[];
+  postLines: string[];
+}
+
+/** Payload für `PUT /api/defaults/sections`. */
+export interface DefaultsSectionsPayload {
+  sections: DefaultsSection[];
+}
+
 // ───────────────────────── Tagebuch ─────────────────────────
 
 /** Eine Notiz-tragende Einnahme in der Kurzversion des Tagebuchs. */

@@ -4,6 +4,48 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-07-21 — Strukturierter DEFAULTS.md-Editor**:
+  - **Was:** Die einzige Bearbeitungsfläche für `DEFAULTS.md` war bisher
+    ein roher `<TextArea>` in `SettingsScreen` — fehleranfällig für jeden,
+    der nicht regelmäßig mit der Markdown-Struktur arbeitet.
+  - **Jetzt:** Eigener Bildschirm `/standardnotizen` mit zwei Tabs:
+    *Strukturiert* (pro Substanz ein Formular für `Menge`, `Notiz`,
+    `Mit:`-Begleitstoffe + `[NACH/DAVOR …]`-Vorbehalte, die als
+    `preLines`/`postLines` verlustfrei mitgeschleift werden) und *Erweitert
+    (Markdown)* (der bisherige Rohtext-Editor als Power-User-Escape-Hatch).
+    `SettingsScreen` behält die Compliance-Karte mit dem neuen „Eintrag"-
+    Button — dieser navigiert jetzt direkt zur neuen Sektion mit
+    vorausgewähltem Substanznamen.
+  - **Backend:** Neuer Endpunkt `PUT /api/defaults/sections`
+    (zod-validiert, **Cloudflare Access**, fail-closed). Eingabe:
+    `{ sections: [{ name, amount?, note?, companions: [{name, amount?, note?}], preLines: string[], postLines: string[] }] }`.
+    Server ist der einzige Serializer — verhindert Drift zwischen zwei
+    Schreibpfaden. Existierender raw-`PUT /api/defaults` bleibt als
+    Power-User-Fallback offen.
+  - **Validierung:** Doppelte Namen (case-insensitive via `nameKey()`),
+    fehlende/leere Namen, zu lange Felder (`Menge` ≤ 80, `Notiz` ≤ 1000
+    Zeichen), Selbst-Referenz als Begleitstoff → 400.
+  - **Round-Trip:** `parseSections()` / `buildMarkdownFromParsed()`
+    erhalten Preamble (Titel + Erklärung) und nicht-strukturierte Zeilen
+    (`NACH …:`-Vorbehalte) verlustfrei. Smoke-Tests gegen `/tmp` zeigen:
+    Komplettes Erstellen + Edit + Speichern, parallel laufende
+    `POST /api/intakes` greifen die neuen Defaults sofort ab
+    (Datei-read-frisch, kein Cache).
+  - **Dateien:**
+    - Server: `server/src/lib/defaults.ts` (`parseSections`,
+      `buildMarkdownFromParsed`, `validateSections`), neue
+      `SectionInput`/`ParsedSections`-Typen,
+      `server/src/routes/defaults.ts` (`PUT /sections`).
+    - Web: `web/src/components/DefaultsEditor/{index, StructuredView,
+      SubstanceSection, CompanionRow, ErweitertView, AddSubstanceSheet,
+      SaveBar, state}.tsx`,
+      `web/src/screens/DefaultsEditorScreen.tsx`, Routen-Eintrag
+      `/standardnotizen` in `web/src/App.tsx`,
+      `web/src/lib/names.ts` (Client-Spiegel von `nameKey()`),
+      `api.defaults.saveSections` + `useSaveDefaultsSections`.
+  - **Kein neuer npm-Dependency.** Reine React/JS-Lösung, spiegelt den
+    dependency-armen Stil der App (`CLAUDE.md`).
+
 - **2026-07-12 — WhatsApp-Delivery + ElevenLabs-Voice**:
   - **Was:** Der nächtliche „Traum" wurde bisher in der App als Popup + Traum-Tab
     angezeigt. Lese-Fläche war die Web-UI.
