@@ -14,6 +14,15 @@
 - **DEFAULTS.md wird live eingelesen** — keine Notwendigkeit, den Server
   nach einer Änderung neu zu starten, aber auch keine Reload-Logik im
   Client nötig (Server liest pro Anfrage frisch).
+- **Standard-Menge lebt NUR in DEFAULTS.md, nicht in der DB.** Das
+  `defaultDose`-Feld der Substanz-UIs schreibt über `upsertSectionAmount()`
+  nach `DEFAULTS.md`; `substances.default_dose` ist entmachtet (bleibt nur
+  fürs Undo-Snapshot-Restore im Schema, wird nie als Autorität gelesen).
+  Neue Auflösungskette überall: `explizit > DEFAULTS.md`. Wer eine Dosis
+  vorbelegen will, MUSS also einen `Menge:`-Eintrag in `DEFAULTS.md` haben —
+  ein Wert in der DB-Spalte wird ignoriert. Beim ersten Serverstart nach
+  diesem Umbau überführt `migrateDefaultDosesToDefaultsFile()` alte
+  DB-Werte einmalig in die Datei (bestehende `Menge:` gewinnt).
 - **`Mit:`-Begleitsubstanzen gelten für `POST /api/intakes` UND
   `POST /api/intakes/text`** — Importer, XLSX-Replace und PATCH legen bewusst
   keine Begleit-Einnahmen an (Historie bleibt Historie); `plan-batch` ebenso

@@ -142,7 +142,13 @@ Querschnitt-Invarianten, die mehrere Dateien betreffen (Detail-Doku in `docs/`):
   `toLocaleLowerCase('de')`); SQLite `lower()` ist ASCII-only und falsch — gilt für
   Matching, Dedup und `Mit:`-Auflösung.
 - **DEFAULTS.md wird pro Schreibvorgang frisch von Platte gelesen.** Auflösung von
-  Menge/Notiz überall gleich: expliziter Wert > Substanz-Standarddosis > DEFAULTS.
+  Menge/Notiz überall gleich: expliziter Wert > DEFAULTS.md.
+  **DEFAULTS.md ist die einzige Quelle für Standard-Mengen** — die DB-Spalte
+  `substances.default_dose` ist entmachtet (bleibt nur fürs Undo-Snapshot-Restore
+  im Schema, wird nie als Autorität gelesen/geschrieben). Beide Substanz-UIs
+  schreiben ihre „Standarddosis" über `upsertSectionAmount()` verlustfrei nach
+  `DEFAULTS.md` (Notiz/`Mit:`/Kommentare bleiben unangetastet); `serializeSubstance`
+  liest `defaultDose` via `defaultAmountFor(name)` aus der Datei zurück.
   `Mit:`-Begleitsubstanzen werden als eigene Einnahmen miterfasst (eine Ebene tief) —
   bei `POST /api/intakes` und `/text`, NICHT bei Import/XLSX/PATCH/`plan-batch`.
 - **Der Plan ist über `effective_from` versioniert** (nicht `created_at`): „welcher

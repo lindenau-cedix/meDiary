@@ -14,8 +14,8 @@
 - **Begleitsubstanzen (`Mit:`)**: `POST /api/intakes` erfasst für jede
   `Mit:`-Zeile der eingetragenen Substanz automatisch eine zweite Einnahme —
   gleicher Zeitpunkt, in einer Transaktion mit dem Haupteintrag. Menge/Notiz
-  aus der `Mit:`-Zeile haben Vorrang, sonst Standarddosis bzw. eigener
-  DEFAULTS-Eintrag der Begleitsubstanz. Nur eine Ebene tief (`Mit:` der
+  aus der `Mit:`-Zeile haben Vorrang, sonst der eigene DEFAULTS-Eintrag der
+  Begleitsubstanz (DEFAULTS.md ist die einzige Quelle für Standard-Mengen). Nur eine Ebene tief (`Mit:` der
   Begleitsubstanz wird nicht verfolgt, Selbstbezug übersprungen),
   Autovivifikation wie beim Haupteintrag, `source_event_id =
   companion:<haupt-id>`. Ist die Begleitsubstanz Nachtmedikation, wird das
@@ -178,7 +178,7 @@ Frontend-UI:
 
 | Tabelle | Zweck |
 |---|---|
-| `substances` | antippbare Liste (Farbe, Standarddosis, `is_night_med`, Reihenfolge via `sort_order`, Soft-Archive via `archived_at`) |
+| `substances` | antippbare Liste (Farbe, `is_night_med`, Reihenfolge via `sort_order`, Soft-Archive via `archived_at`). **Standard-Menge NICHT hier** — die lebt in `DEFAULTS.md` (Spalte `default_dose` ist entmachtet, nur fürs Undo-Snapshot-Restore im Schema) |
 | `intakes` | Einnahmen (Zeitpunkt, Substanz-Snapshot mit `substance_id` + `substance_name`, Menge, Notizen) |
 | `plan_versions` | Plan-Snapshots (`created_at` = erfasst, `effective_from` = gültig ab) |
 | `plan_items` | Plan-Zeilen (Morgens/Mittags/Abends/Nachts) je Version |

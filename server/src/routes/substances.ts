@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { db, type SubstanceRow } from '../db.js';
 import { nowLocalISO } from '../lib/time.js';
 import { serializeSubstance } from '../lib/serialize.js';
+import { upsertSectionAmount, clearSectionAmount } from '../lib/defaults.js';
+import { nameKey } from '../lib/names.js';
 
 export const substancesRouter = Router();
 
@@ -50,13 +52,17 @@ substancesRouter.post('/', (req, res) => {
     )
     .run(
       d.name,
-      normalizeAmount(d.defaultDose) ?? null,
+      // Standarddosis lebt in DEFAULTS.md (Single Source of Truth) — die
+      // DB-Spalte bleibt leer und wird nicht mehr als Autorität gelesen.
+      null,
       d.unit ?? null,
       d.color ?? null,
       d.isNightMed ? 1 : 0,
       d.sortOrder ?? maxOrder + 1,
       nowLocalISO(),
     );
+  // Menge nach DEFAULTS.md schreiben (verlustfrei: Notiz/Mit: bleiben erhalten).
+  if (d.defaultDose !== undefined) upsertSectionAmount(d.name, normalizeAmount(d.defaultDose));
   const row = db.prepare(`SELECT * FROM substances WHERE id = ?`).get(info.lastInsertRowid) as SubstanceRow;
   res.status(201).json(serializeSubstance(row));
 });
@@ -73,7 +79,6 @@ substancesRouter.patch('/:id', (req, res) => {
   db.prepare(
     `UPDATE substances SET
        name = COALESCE(@name, name),
-       default_dose = COALESCE(@defaultDose, default_dose),
        unit = COALESCE(@unit, unit),
        color = COALESCE(@color, color),
        is_night_med = COALESCE(@isNightMed, is_night_med),
@@ -83,7 +88,6 @@ substancesRouter.patch('/:id', (req, res) => {
   ).run({
     id,
     name: d.name ?? null,
-    defaultDose: d.defaultDose !== undefined ? normalizeAmount(d.defaultDose) ?? null : undefined,
     unit: d.unit ?? null,
     color: d.color ?? null,
     isNightMed: d.isNightMed === undefined ? null : d.isNightMed ? 1 : 0,
@@ -95,6 +99,17 @@ substancesRouter.patch('/:id', (req, res) => {
           ? (existing.archived_at ?? nowLocalISO())
           : null,
   });
+
+  // Standarddosis nach DEFAULTS.md (Single Source of Truth). Bei gleichzeitiger
+  // Umbenennung die Menge unter dem alten Namen entfernen, damit keine
+  // verwaiste Sektion zurückbleibt. (Ein vollständiges Umbenennen der
+  // Notiz/Mit:-Sektion bleibt Sache des DEFAULTS-Editors — hier geht es nur
+  // um die Menge.)
+  const newName = d.name?.trim() || existing.name;
+  if (d.defaultDose !== undefined) {
+    if (nameKey(newName) !== nameKey(existing.name)) clearSectionAmount(existing.name);
+    upsertSectionAmount(newName, normalizeAmount(d.defaultDose));
+  }
   const row = db.prepare(`SELECT * FROM substances WHERE id = ?`).get(id) as SubstanceRow;
   res.json(serializeSubstance(row));
 });

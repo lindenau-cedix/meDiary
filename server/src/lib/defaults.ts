@@ -459,6 +459,105 @@ export function validateSections(sections: SectionInput[]): { ok: true } | { ok:
   return { ok: true };
 }
 
+// ---------- Standarddosis-Upsert (Single Source of Truth) ----------
+// DEFAULTS.md ist die alleinige Quelle für Standard-Mengen. Die frühere
+// DB-Spalte `substances.default_dose` wird nicht mehr als Autorität gelesen
+// oder geschrieben (sie bleibt nur fürs Snapshot-Restore im Schema). Beide
+// Substanz-UIs (SubstanceManager, AddSubstanceSheet) schreiben ihre
+// „Standarddosis" über `upsertSectionAmount()` verlustfrei in die Datei.
+
+/**
+ * Setzt (oder entfernt) die `Menge:` einer Substanz-Sektion in DEFAULTS.md,
+ * ohne Notiz / `Mit:` / Kommentar-Zeilen anzutasten. Match case-insensitive
+ * über `nameKey`. Existiert die Sektion noch nicht und `amount` ist gesetzt,
+ * wird eine neue `## Name` + `Menge:`-Sektion angehängt. `amount = null`
+ * löscht die Menge (leere Sektion wird vom Serializer verworfen).
+ *
+ * Idempotent: gleicher Aufruf schreibt denselben Markdown-Text.
+ */
+export function upsertSectionAmount(name: string, amount: string | null): void {
+  const normalized = normalizeAmount(amount);
+  const parsed = parseSections(readDefaultsRaw());
+  const key = nameKey(name);
+  const idx = parsed.sections.findIndex((s) => nameKey(s.name) === key);
+
+  if (idx >= 0) {
+    parsed.sections[idx] = { ...parsed.sections[idx], amount: normalized };
+  } else if (normalized) {
+    // Neue Sektion nur anlegen, wenn es tatsächlich eine Menge zu speichern gibt.
+    parsed.sections.push({
+      name: name.trim(),
+      amount: normalized,
+      note: null,
+      companions: [],
+      preLines: [],
+      postLines: [],
+    });
+  } else {
+    return; // nichts zu tun: keine Sektion, keine Menge
+  }
+
+  writeDefaultsRaw(buildMarkdownFromParsed(parsed));
+}
+
+/**
+ * Entfernt die `Menge:` einer Substanz-Sektion (z. B. bei Umbenennung, damit
+ * unter dem alten Namen keine verwaiste Menge zurückbleibt). Notiz/`Mit:`
+ * bleiben erhalten; enthält die Sektion danach nichts mehr, verwirft sie der
+ * Serializer.
+ */
+export function clearSectionAmount(name: string): void {
+  upsertSectionAmount(name, null);
+}
+
+/**
+ * Einmalige Migration: übernimmt bestehende DB-`default_dose`-Werte nach
+ * DEFAULTS.md, sofern die Sektion dort noch KEINE `Menge:` hat (DEFAULTS.md
+ * gewinnt bei Konflikt). Danach wird die DB-Spalte auf NULL gesetzt, damit
+ * es keine konkurrierende Quelle mehr gibt. Idempotent: nach erstem Lauf
+ * gibt es keine Substanz mit gesetztem `default_dose` mehr.
+ *
+ * Läuft beim Serverstart (siehe index.ts). Alle Änderungen in einer
+ * Transaktion + einem einzigen DEFAULTS.md-Schreibvorgang.
+ */
+export function migrateDefaultDosesToDefaultsFile(): { migrated: number; cleared: number } {
+  const rows = db
+    .prepare(`SELECT id, name, default_dose FROM substances WHERE default_dose IS NOT NULL AND TRIM(default_dose) <> ''`)
+    .all() as { id: number; name: string; default_dose: string }[];
+  if (rows.length === 0) return { migrated: 0, cleared: 0 };
+
+  const parsed = parseSections(readDefaultsRaw());
+  let migrated = 0;
+
+  for (const r of rows) {
+    const key = nameKey(r.name);
+    const idx = parsed.sections.findIndex((s) => nameKey(s.name) === key);
+    if (idx >= 0) {
+      // Sektion existiert: nur befüllen, wenn dort noch keine Menge steht.
+      if (!parsed.sections[idx].amount) {
+        parsed.sections[idx] = { ...parsed.sections[idx], amount: normalizeAmount(r.default_dose) };
+        migrated++;
+      }
+    } else {
+      parsed.sections.push({
+        name: r.name.trim(),
+        amount: normalizeAmount(r.default_dose),
+        note: null,
+        companions: [],
+        preLines: [],
+        postLines: [],
+      });
+      migrated++;
+    }
+  }
+
+  if (migrated > 0) writeDefaultsRaw(buildMarkdownFromParsed(parsed));
+
+  // DB-Spalte in jedem Fall leeren — sie ist keine Autorität mehr.
+  const info = db.prepare(`UPDATE substances SET default_dose = NULL WHERE default_dose IS NOT NULL`).run();
+  return { migrated, cleared: info.changes };
+}
+
 // ---------- Compliance-Check ----------
 // "Compliant" = jede Substanz, die in DB oder Einnahmen vorkommt, hat einen
 // passenden Eintrag in DEFAULTS.md (case-insensitive Name-Match). Stoffe

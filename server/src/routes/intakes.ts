@@ -46,7 +46,7 @@ function previewCompanions(
     const compSub = subs.find((s) => nameKey(s.name) === key);
     const compDef = defaultsFor(comp.name);
     const amount =
-      normalizeAmount(comp.amount) || normalizeAmount(compSub?.default_dose) || normalizeAmount(compDef.amount) || null;
+      normalizeAmount(comp.amount) || normalizeAmount(compDef.amount) || null;
     const note = comp.note || compDef.note || null;
     out.push({ substanceName: compSub?.name ?? comp.name, amount, note, takenAt });
   }
@@ -87,7 +87,6 @@ function insertCompanions(mainSubstanceName: string, mainId: number, takenAt: st
     const compDef = defaultsFor(compSub.name);
     const compAmount =
       normalizeAmount(comp.amount) ||
-      normalizeAmount(compSub.default_dose) ||
       normalizeAmount(compDef.amount) ||
       null;
     const compNotes = comp.note || compDef.note || null;
@@ -234,9 +233,9 @@ intakesRouter.post('/', (req, res) => {
   const takenAt = d.takenAt ? normalizeDateTime(d.takenAt) : nowLocalISO();
 
   // DEFAULTS.md wird bei jedem Schreibvorgang frisch gelesen (Notiz + Menge).
-  // Vorrang: explizite Angabe > Substanz-Standarddosis > DEFAULTS.md.
+  // Vorrang: explizite Angabe > DEFAULTS.md (Single Source of Truth).
   const def = defaultsFor(substanceName);
-  const amount = normalizeAmount(d.amount) || substance?.default_dose || def.amount || null;
+  const amount = normalizeAmount(d.amount) || def.amount || null;
   const notes = d.notes?.trim() || def.note || null;
 
   const insertIntake = db.prepare(
@@ -352,15 +351,14 @@ intakesRouter.post('/plan-batch', (req, res) => {
       const name = sub?.name ?? item.substance_name;
       const def = defaultsFor(name);
       // Priorität: die im Plan für DIESEN Slot hinterlegte Dosis (z. B. die
-      // morgens/nachts-Dosis aus der Markdown-Planverlauf-Datei) > Substanz-
-      // Standarddosis > DEFAULTS.md > generische Plan-Stärke. Ohne den
+      // morgens/nachts-Dosis aus der Markdown-Planverlauf-Datei) >
+      // DEFAULTS.md > generische Plan-Stärke. Ohne den
       // Slot-First würde der Markdown-Importer (der Dosen in morning/noon/
       // evening/night, NICHT in strength schreibt) für betroffene Substanzen
       // leere Einträge erzeugen.
       const slotDose = normalizeAmount(item[slot]);
       const amount =
         slotDose
-        || normalizeAmount(sub?.default_dose)
         || normalizeAmount(def.amount)
         || normalizeAmount(item.strength)
         || null;
@@ -465,7 +463,7 @@ intakesRouter.post('/batch', (req, res) => {
     }
     const substanceName = substance?.name ?? e.substanceName!;
     const def = defaultsFor(substanceName);
-    const amount = normalizeAmount(e.amount) || substance?.default_dose || def.amount || null;
+    const amount = normalizeAmount(e.amount) || def.amount || null;
     const notes = e.notes?.trim() || def.note || null;
     resolved.push({ substance, substanceName, amount, notes, createdSubstance });
   }
@@ -617,7 +615,7 @@ intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
       const sub = findOrCreateSubstance(entry.substanceName);
       const def = defaultsFor(sub.name);
       const amount =
-        normalizeAmount(entry.amount) || normalizeAmount(sub.default_dose) || normalizeAmount(def.amount) || null;
+        normalizeAmount(entry.amount) || normalizeAmount(def.amount) || null;
       const notes = entry.note || def.note || null;
       const info = insertIntake.run(sub.id, sub.name, entry.takenAt, amount, notes, nowLocalISO(), batchId);
       const mainId = Number(info.lastInsertRowid);
@@ -637,7 +635,6 @@ intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
           const compDef = defaultsFor(compSub.name);
           const compAmount =
             normalizeAmount(comp.amount) ||
-            normalizeAmount(compSub.default_dose) ||
             normalizeAmount(compDef.amount) ||
             null;
           const compNotes = comp.note || compDef.note || null;

@@ -4,6 +4,42 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-07-21 — Standarddosis: Single Source of Truth in DEFAULTS.md**:
+  - **Problem:** Die „Standarddosis" einer Substanz gab es doppelt — in der
+    DB-Spalte `substances.default_dose` (befüllt vom Substanz-Formular) UND
+    als `Menge:` in `DEFAULTS.md`. Beim Anlegen einer Substanz landete die
+    Dosis nur in der DB, nie in `DEFAULTS.md`. Sie funktionierte trotzdem
+    (Auflösungskette `explizit > default_dose > DEFAULTS`), aber die Datei
+    war nicht mehr die Wahrheit, und der Compliance-Check meldete solche
+    Substanzen fälschlich als „missing".
+  - **Jetzt:** `DEFAULTS.md` ist die **einzige** Quelle für Standard-Mengen.
+    - `POST/PATCH /api/substances` schreibt `defaultDose` über den neuen
+      Helper `upsertSectionAmount()` verlustfrei als `Menge:` nach
+      `DEFAULTS.md` (Notiz/`Mit:`/`preLines`/`postLines` bleiben unangetastet);
+      die DB-Spalte wird mit `NULL` befüllt. Bei Umbenennung entfernt
+      `clearSectionAmount()` die Menge unter dem alten Namen.
+    - `serializeSubstance` liest `defaultDose` via `defaultAmountFor(name)`
+      aus der Datei — dadurch bleiben beide Substanz-UIs (`SubstanceManager`,
+      `AddSubstanceSheet`) und QuickEntry funktional unverändert.
+    - Alle Auflösungsketten in `routes/intakes.ts` (POST `/`, `/text`,
+      `/batch`, `plan-batch` + deren `Mit:`-Companions) sind auf
+      `explizit > DEFAULTS.md` reduziert; die `chat_tools`-Fallbacks für
+      `backfill_intakes` lesen jetzt `defaultAmountFor()`.
+    - **Boot-Migration** `migrateDefaultDosesToDefaultsFile()` (in `index.ts`,
+      neben dem Substanz-Backfill): überführt bestehende `default_dose`-Werte
+      nach `DEFAULTS.md` (bestehende `Menge:` gewinnt bei Konflikt) und leert
+      die Spalte. Idempotent — zweiter Start tut nichts.
+  - **DB-Spalte:** `substances.default_dose` bleibt im Schema (kein
+    destruktives `DROP`), wird aber nie mehr als Autorität gelesen/geschrieben
+    — nur der Undo-Snapshot-Restore in `chat_tools` fasst sie noch an.
+  - **Dateien:** `lib/defaults.ts` (Helper + Migration), `lib/serialize.ts`,
+    `routes/substances.ts`, `routes/intakes.ts`, `lib/chat_tools.ts`,
+    `index.ts`. Kein Frontend-Umbau nötig.
+  - **Verifiziert:** `typecheck:all` sauber; Smoke-Tests gegen `/tmp`
+    (Anlegen + PATCH → `DEFAULTS.md` mit erhaltener Notiz/`Mit:`, DB-Spalte
+    NULL; Migration inkl. Konflikt-Vorrang + Idempotenz; Einnahme ohne Menge
+    zieht Dosis korrekt aus `DEFAULTS.md`).
+
 - **2026-07-21 — Strukturierter DEFAULTS.md-Editor**:
   - **Was:** Die einzige Bearbeitungsfläche für `DEFAULTS.md` war bisher
     ein roher `<TextArea>` in `SettingsScreen` — fehleranfällig für jeden,

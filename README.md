@@ -199,7 +199,7 @@ Die Datei liegt im **Projekt-Wurzelverzeichnis** (`DEFAULTS.md`) und ist auch in
 `Mit: <Name> | <Menge> | <Notiz>` (alias `Zusammen mit:`) erfasst beim Eintragen
 der Substanz **automatisch eine zweite Einnahme** für die genannte
 Begleitsubstanz — gleicher Zeitpunkt, Menge/Notiz optional (ohne Angabe gelten
-die Defaults der Begleitsubstanz: Standarddosis bzw. eigener DEFAULTS-Eintrag).
+die Defaults der Begleitsubstanz: eigener DEFAULTS-Eintrag).
 Mehrere `Mit:`-Zeilen sind möglich. `Mit:`-Angaben der Begleitsubstanz werden
 **nicht weiterverfolgt** (eine Ebene, keine Zyklen); Selbstbezüge werden
 übersprungen. Die Begleitsubstanz wird bei Bedarf als QuickPick angelegt, ihr
@@ -403,7 +403,7 @@ Capacitor-Konfiguration (`cleartext`) bereits erlaubt.
 
 ## Datenmodell (SQLite)
 
-- `substances` — antippbare Liste (Farbe, Standarddosis, `is_night_med`)
+- `substances` — antippbare Liste (Farbe, `is_night_med`; Standard-Menge liegt in `DEFAULTS.md`, nicht in der DB)
 - `intakes` — Einnahmen (Zeitpunkt, Substanz-Snapshot, Menge, Notizen)
 - `plan_versions` / `plan_items` — versionierter Plan (Morgens/Mittags/Abends/Nachts)
 - `daily_assessments` — Tagesbild je Datum (11 Skalen als JSON)

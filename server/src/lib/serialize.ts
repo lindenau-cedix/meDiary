@@ -11,12 +11,16 @@ import type {
 } from '../db.js';
 import { METRIC_KEYS } from './metrics.js';
 import { consumptionDay } from './time.js';
+import { defaultAmountFor } from './defaults.js';
 
 export function serializeSubstance(r: SubstanceRow) {
   return {
     id: r.id,
     name: r.name,
-    defaultDose: r.default_dose,
+    // Single Source of Truth = DEFAULTS.md. Die DB-Spalte `default_dose` wird
+    // nicht mehr als Autorität gelesen (nur noch fürs Snapshot-Restore im
+    // Schema gehalten); die Standarddosis kommt aus der Markdown-Datei.
+    defaultDose: defaultAmountFor(r.name),
     unit: r.unit,
     color: r.color,
     isNightMed: !!r.is_night_med,

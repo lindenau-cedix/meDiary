@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { db, type IntakeRow, type SubstanceRow } from '../db.js';
 import { nameKey } from './names.js';
 import { findOrCreateSubstance } from './substances.js';
+import { defaultAmountFor } from './defaults.js';
 import { nowLocalISO, normalizeDateTime, toLocalISO } from './time.js';
 
 /**
@@ -472,7 +473,7 @@ export function previewOperations(operations: ChangeOperation[]): ChangeSetPrevi
             op: 'create',
             label: `${sub?.name ?? op.substanceName} · ${d} ${time}`,
             before: null,
-            after: { substance: sub?.name ?? op.substanceName, takenAt, amount: op.amount ?? sub?.default_dose ?? null, notes: op.notes ?? null },
+            after: { substance: sub?.name ?? op.substanceName, takenAt, amount: op.amount ?? (sub ? defaultAmountFor(sub.name) : null) ?? null, notes: op.notes ?? null },
             changedKeys: ['substance', 'takenAt'],
           });
         }
@@ -696,7 +697,7 @@ export const applyOperations = db.transaction((operations: ChangeOperation[]): A
             sub.id,
             sub.name,
             `${d}T${time}:00`,
-            op.amount !== undefined ? op.amount : sub.default_dose,
+            op.amount !== undefined ? op.amount : defaultAmountFor(sub.name),
             op.notes ?? null,
             nowLocalISO(),
           );

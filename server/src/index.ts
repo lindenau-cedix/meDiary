@@ -5,6 +5,7 @@ import cors from 'cors';
 import { config } from './config.js';
 import './db.js'; // initialisiert Schema beim Import
 import { backfillSubstancesFromIntakes } from './lib/substances.js';
+import { migrateDefaultDosesToDefaultsFile } from './lib/defaults.js';
 import { substancesRouter } from './routes/substances.js';
 import { intakesRouter } from './routes/intakes.js';
 import { planRouter } from './routes/plan.js';
@@ -29,6 +30,18 @@ try {
   }
 } catch (e) {
   console.warn('[mediary] Substanz-Backfill fehlgeschlagen:', e);
+}
+
+// Einmalige Migration: bestehende DB-`default_dose`-Werte nach DEFAULTS.md
+// überführen (Single Source of Truth) und die DB-Spalte leeren. Idempotent —
+// nach dem ersten erfolgreichen Lauf ist nichts mehr zu tun.
+try {
+  const { migrated, cleared } = migrateDefaultDosesToDefaultsFile();
+  if (migrated || cleared) {
+    console.log(`[mediary] Standarddosis-Migration: ${migrated} nach DEFAULTS.md übernommen, ${cleared} DB-Spalten geleert.`);
+  }
+} catch (e) {
+  console.warn('[mediary] Standarddosis-Migration fehlgeschlagen:', e);
 }
 
 const app = express();
