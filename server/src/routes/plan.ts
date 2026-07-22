@@ -7,10 +7,11 @@ import {
   createPlanVersion,
   upcomingPlanVersions,
   type PlanVersionRow,
+  type PlanItemRow,
   type NewPlanItem,
 } from '../db.js';
 import { dateOf, toLocalISO } from '../lib/time.js';
-import { serializePlanVersion, type SerializedPlanItem } from '../lib/serialize.js';
+import { serializePlanVersion, serializePlanItem, type SerializedPlanItem } from '../lib/serialize.js';
 
 export const planRouter = Router();
 
@@ -43,8 +44,14 @@ planRouter.get('/', (_req, res) => {
   res.json({ ...planPayloadAt(null), upcoming });
 });
 
-/** Liste aller Versionen (Verlauf, nach Wirkungsdatum). */
-planRouter.get('/versions', (_req, res) => {
+/**
+ * Liste aller Versionen (Verlauf, nach Wirkungsdatum). Mit `?withItems=1`
+ * werden je Version zusätzlich die Plan-Items geliefert — der Verlauf nutzt das,
+ * um jede Einnahme gegen die zu ihrem Zeitpunkt WIRKSAME Version zu messen
+ * (nicht gegen den heute gültigen Plan).
+ */
+planRouter.get('/versions', (req, res) => {
+  const withItems = req.query.withItems === '1' || req.query.withItems === 'true';
   const versions = db
     .prepare(`SELECT * FROM plan_versions ORDER BY effective_from DESC, id DESC`)
     .all() as PlanVersionRow[];
@@ -55,6 +62,20 @@ planRouter.get('/versions', (_req, res) => {
   const countMap = new Map(counts.map((r) => [r.v, r.c]));
   const now = toLocalISO(new Date());
   const activeId = planVersionAt(null)?.id ?? null;
+
+  // Items nur bei Bedarf laden — ein einziger Query, gruppiert nach Version.
+  const itemsByVersion = new Map<number, SerializedPlanItem[]>();
+  if (withItems) {
+    const allItems = db
+      .prepare(`SELECT * FROM plan_items ORDER BY version_id, sort_order, id`)
+      .all() as PlanItemRow[];
+    for (const it of allItems) {
+      const arr = itemsByVersion.get(it.version_id) ?? [];
+      arr.push(serializePlanItem(it));
+      itemsByVersion.set(it.version_id, arr);
+    }
+  }
+
   res.json(
     versions.map((v) => ({
       versionId: v.id,
@@ -65,6 +86,7 @@ planRouter.get('/versions', (_req, res) => {
       itemCount: countMap.get(v.id) ?? 0,
       active: v.id === activeId,
       upcoming: v.effective_from > now,
+      ...(withItems ? { items: itemsByVersion.get(v.id) ?? [] } : {}),
     })),
   );
 });

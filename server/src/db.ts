@@ -8,6 +8,7 @@ import { dateOf, nowLocalISO, toLocalISO } from './lib/time.js';
 // Import aus time.js an `nowLocalISO` kommen.
 export { nowLocalISO };
 import { nameKey } from './lib/names.js';
+import { doseKey } from './lib/doses.js';
 
 // Datenverzeichnis sicherstellen
 fs.mkdirSync(path.dirname(config.dbPath), { recursive: true });
@@ -524,13 +525,27 @@ export function nightMedicationsFromPlan(day: string): string[] {
 }
 
 /**
- * Prüft, ob ALLE今夜-Medis des am gegebenen Tag wirksamen Plans
- * heute bereits eingenommen wurden. Gibt den Tagesbild-Konsumtag zurück,
- * wenn ja, sonst null.
+ * Prüft, ob ALLE Nacht-Medis des am gegebenen Tag wirksamen Plans an diesem
+ * Konsumtag bereits eingenommen wurden — UND zwar in der im Plan hinterlegten
+ * Dosis. Gibt den Tagesbild-Konsumtag zurück, wenn ja, sonst null.
+ *
+ * Eine Nacht-Med gilt als erfasst, wenn eine Einnahme sie über den Namen
+ * (nameKey-normalisiert) ODER die im Plan hinterlegte substance_id trifft UND
+ * ihre Menge einer der Plan-Dosen entspricht (Nacht-Slot bzw. generische
+ * `strength`, über doseKey normalisiert). Gibt der Plan für die Med keine
+ * konkrete Dosis vor (nur „✓"/leer), genügt der Substanz-Match.
+ *
+ * Zwei bewusste Schärfungen ggü. „irgendeine Nachtmed genügt":
+ *   1. NICHT zähl-basiert (`taken.length >= planned.length`) — zwei Einnahmen
+ *      DERSELBEN Nacht-Med dürfen keine noch fehlende zweite Med vortäuschen.
+ *   2. Dosis-scharf — eine Nacht-Med in falscher Dosis zählt nicht als
+ *      „eingenommen"; das Tagesbild bleibt aus, bis die Plan-Dosis erfasst ist.
  */
 export function allNightMedsTaken(day: string): string | null {
-  const planned = nightMedicationsFromPlan(day);
-  if (planned.length === 0) return null;
+  const version = planVersionAt(day);
+  if (!version) return null;
+  const nightItems = planItemsFor(version.id).filter((it) => it.night != null);
+  if (nightItems.length === 0) return null;
 
   // Einnahmen an diesem Konsumtag (mit Tagesgrenzen-Berücksichtigung):
   // zum Konsumtag `day` zählen alle Einnahmen im Wand­uhr-Bereich
@@ -545,31 +560,34 @@ export function allNightMedsTaken(day: string): string | null {
   const end = `${nextStr}T03:29:59`;
   const taken = db
     .prepare(
-      `SELECT substance_id, substance_name FROM intakes
+      `SELECT substance_id, substance_name, amount FROM intakes
        WHERE taken_at >= ? AND taken_at <= ?`,
     )
-    .all(start, end) as { substance_id: number | null; substance_name: string }[];
+    .all(start, end) as { substance_id: number | null; substance_name: string; amount: string | null }[];
 
-  // Substanz-IDs mit今夜-Med-Flag für今天的 Plan (normalisierte Namen)
-  const plannedLower = new Set(planned.map((n) => nameKey(n)));
+  const everyTaken = nightItems.every((item) => {
+    const key = nameKey(item.substance_name);
+    // Einnahmen, die genau diese Nacht-Med treffen (Name ODER Plan-substance_id).
+    const matches = taken.filter(
+      (r) =>
+        nameKey(r.substance_name) === key ||
+        (item.substance_id != null && r.substance_id === item.substance_id),
+    );
+    if (matches.length === 0) return false;
 
-  // Eine Einnahme gilt als今夜-Med, wenn:
-  //   - substance_id auf eine Substanz mit is_night_med=1 zeigt, ODER
-  //   - substance_name nach nameKey-Normalisierung in plannedLower liegt
-  const nightMedIds = new Set<number>();
-  for (const item of planned) {
-    const row = db
-      .prepare(`SELECT id FROM substances WHERE name = ?`)
-      .get(item) as { id: number } | undefined;
-    if (row) nightMedIds.add(row.id);
-  }
-
-  const takenNightMeds = taken.filter((r) => {
-    if (r.substance_id != null && nightMedIds.has(r.substance_id)) return true;
-    return plannedLower.has(nameKey(r.substance_name));
+    // Zulässige Plan-Dosen dieser Nacht-Med: der Nacht-Slot (echte Dosis beim
+    // Markdown-Import) plus die generische `strength` (Seed-/Formular-Format,
+    // in dem der Slot nur die Anzahl trägt). „✓"/leer = keine konkrete Vorgabe.
+    const doses = new Set<string>();
+    for (const raw of [item.night, item.strength]) {
+      const d = doseKey(raw);
+      if (d && d !== '✓') doses.add(d);
+    }
+    if (doses.size === 0) return true; // Plan gibt keine Dosis vor → Name genügt
+    return matches.some((r) => doses.has(doseKey(r.amount)));
   });
 
-  return takenNightMeds.length >= planned.length ? day : null;
+  return everyTaken ? day : null;
 }
 
 export interface NewPlanItem {

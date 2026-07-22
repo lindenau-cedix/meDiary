@@ -4,6 +4,50 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-07-22 — „planmäßig" jetzt dosis-scharf (Verlauf + Tagesbild-Trigger)**:
+  - **Problem 1 (Verlauf):** Der „Plan"-Badge (History + QuickEntry „Heute
+    erfasst") erschien, sobald die **Substanz** im Plan stand — unabhängig von
+    der Dosis. Eine Abweichung (z. B. 300 mg statt 150 mg) war nicht erkennbar.
+  - **Problem 2 (Tagesbild):** Das 11-Skalen-Assessment wurde ausgelöst, sobald
+    `takenNightMeds.length >= planned.length` — ein **Zähl-Check**, den zwei
+    Einnahmen DERSELBEN Nacht-Med austricksen konnten, obwohl eine andere
+    Nacht-Med noch fehlte.
+  - **Jetzt:**
+    - **Dosis-Match:** Neuer, vergleichs-toleranter `doseKey()` (Umlaute,
+      Whitespace, Einheiten-Abstand, Komma/Punkt, `–—−`-Striche, `%`) — als
+      Server-Spiegel `server/src/lib/doses.ts` ↔ `web/src/lib/plan.ts`
+      (analog zum `nameKey()`-Mirror). `planDoseIndex()` sammelt je Substanz
+      die zulässigen Dosen (Slots + `strength`); `isPlanIntake(intake, index)`
+      verlangt Substanz **und** Dosis. Fehlt eine konkrete Plan-Dosis
+      (nur „✓"), genügt der Substanz-Match; reine Stückzahlen aus den Slots
+      (Formular-Modell, `plan-batch` protokolliert sie als `amount`) zählen
+      bewusst weiter als planmäßige Menge.
+    - **Zeitpunktgenau:** Der Verlauf misst jede Einnahme gegen die zu ihrem
+      `takenAt` **wirksame** Plan-Version (nicht den heutigen Plan) — sonst
+      verlöre eine damals korrekte Einnahme nach einer Dosisänderung den Badge.
+      Dafür liefert `GET /api/plan/versions?withItems=1` alle Versionen inkl.
+      Items; `usePlanVersionsWithItems()` + Auflösung `effective_from ≤ takenAt`
+      (mirror von `planVersionAt`, Tiebreak `id DESC`).
+    - **Nacht-Med-Vollständigkeit dosis-scharf:** `allNightMedsTaken()` prüft
+      jetzt, ob **jede einzelne** geplante Nacht-Med genommen wurde UND ihre
+      Menge der Plan-Dosis (Nacht-Slot bzw. `strength`) entspricht. Kein
+      Zähl-Check mehr, keine Duplikat-Vortäuschung; falsche Dosis ⇒ Tagesbild
+      bleibt aus, bis die Plan-Dosis erfasst ist.
+  - **Dateien:** `server/src/db.ts` (`allNightMedsTaken`), neu
+    `server/src/lib/doses.ts`, `server/src/routes/plan.ts` (`?withItems=1`),
+    `web/src/lib/plan.ts`, `web/src/lib/{api,queries,types}.ts`,
+    `web/src/screens/{HistoryScreen,QuickEntryScreen}.tsx`.
+  - **Bewusst offen gelassen:** Die Traum-Kontext-Sektion „Außerplanmäßiger
+    Konsum" (`lib/dreams.ts`) klassifiziert weiter nur namensbasiert — eine
+    Dosis-Abweichung ist keine „außerplanmäßige" Substanz und bräuchte eine
+    eigene Kategorie im Prompt.
+  - **Verifiziert:** `typecheck:all` sauber; Smoke-Tests gegen `/tmp`
+    (Nacht-Med-Vollständigkeit: Duplikat ohne 2. Med → kein Trigger, falsche
+    Dosis → kein Trigger, Anzahl-Slot „1" & Groß/klein → Trigger; Dosis-Match:
+    exakt/ohne-Space/Case/Range → Badge, Abweichung/`null` → keiner;
+    zeitpunktgenaue Auflösung: alte 100-mg-Einnahme behält Badge trotz
+    heutigem 150-mg-Plan; `?withItems=1`-Endpoint liefert Items).
+
 - **2026-07-21 — Standarddosis: Single Source of Truth in DEFAULTS.md**:
   - **Problem:** Die „Standarddosis" einer Substanz gab es doppelt — in der
     DB-Spalte `substances.default_dose` (befüllt vom Substanz-Formular) UND

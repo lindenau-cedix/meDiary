@@ -11,16 +11,41 @@ import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { formatTime, formatDayLabel, dateNDaysAgo } from '../lib/format';
-import { useIntakes, useSubstances, useIntakeMutations, usePlan } from '../lib/queries';
-import { isPlanIntake, planSubstanceKeys } from '../lib/plan';
+import { useIntakes, useSubstances, useIntakeMutations, usePlanVersionsWithItems } from '../lib/queries';
+import { isPlanIntake, planDoseIndex, type PlanDoseEntry } from '../lib/plan';
 import type { Intake, Substance } from '../lib/types';
 import { History as HistoryIcon } from 'lucide-react';
+
+/** Stabiler Leer-Index für Einnahmen, für die keine Plan-Version wirksam war. */
+const EMPTY_INDEX: Map<string, PlanDoseEntry> = new Map();
 
 export function HistoryScreen() {
   const { data: substances = [] } = useSubstances(true);
   const { data: intakes = [], isLoading } = useIntakes({ from: dateNDaysAgo(120), limit: 1000 });
-  const { data: plan } = usePlan();
-  const planKeys = useMemo(() => planSubstanceKeys(plan), [plan]);
+  const { data: planVersions = [] } = usePlanVersionsWithItems();
+  // „planmäßig" wird zeitpunktgenau bewertet: jede Einnahme gegen die zu ihrem
+  // `takenAt` WIRKSAME Plan-Version (nicht gegen den heute gültigen Plan) —
+  // sonst verlöre eine damals korrekte Einnahme nach einer Dosisänderung den
+  // Badge. Ein Dosis-Index je Version, plus die Versionen nach Wirkungsdatum
+  // (mirror von planVersionAt: effective_from DESC, id DESC).
+  const indexByVersion = useMemo(() => {
+    const m = new Map<number, Map<string, PlanDoseEntry>>();
+    for (const v of planVersions) m.set(v.versionId, planDoseIndex({ items: v.items }));
+    return m;
+  }, [planVersions]);
+  const versionsByRecency = useMemo(
+    () =>
+      [...planVersions]
+        .filter((v) => !!v.effectiveFrom)
+        .sort((a, b) =>
+          a.effectiveFrom < b.effectiveFrom ? 1 : a.effectiveFrom > b.effectiveFrom ? -1 : b.versionId - a.versionId,
+        ),
+    [planVersions],
+  );
+  const indexForIntake = (it: Intake): Map<string, PlanDoseEntry> => {
+    const v = versionsByRecency.find((ver) => ver.effectiveFrom <= it.takenAt);
+    return (v && indexByVersion.get(v.versionId)) ?? EMPTY_INDEX;
+  };
   const [filter, setFilter] = useState<number | null>(null);
   const [editing, setEditing] = useState<Intake | null>(null);
 
@@ -80,7 +105,7 @@ export function HistoryScreen() {
               </div>
               <Card className="divide-y divide-hairline overflow-hidden">
                 {items.map((it) => {
-                  const inPlan = isPlanIntake(it.substanceName, planKeys);
+                  const inPlan = isPlanIntake(it, indexForIntake(it));
                   return (
                     <button
                       key={it.id}
@@ -104,7 +129,7 @@ export function HistoryScreen() {
                           <span className="truncate">{it.substanceName}</span>
                           {inPlan && (
                             <span
-                              title="Teil des aktuellen Medikationsplans"
+                              title="Substanz und Dosis stimmen mit dem aktuellen Medikationsplan überein"
                               className="shrink-0 rounded-full bg-primary/15 text-primary text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5"
                             >
                               Plan

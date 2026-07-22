@@ -210,7 +210,8 @@ export const api = {
   plan: {
     current: () => request<Plan>('/api/plan'),
     at: (params: { date?: string; days?: number }) => request<Plan>(`/api/plan/at${qs(params)}`),
-    versions: () => request<PlanVersionSummary[]>('/api/plan/versions'),
+    versions: (opts?: { withItems?: boolean }) =>
+      request<PlanVersionSummary[]>(`/api/plan/versions${opts?.withItems ? '?withItems=1' : ''}`),
     version: (id: number) => request<Plan>(`/api/plan/version/${id}`),
     diff: (params: { days?: number; fromDate?: string; toDate?: string }) =>
       request<PlanDiff>(`/api/plan/diff${qs(params)}`),

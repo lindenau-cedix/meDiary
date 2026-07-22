@@ -16,7 +16,7 @@ import { haptics } from '../lib/haptics';
 import { greeting, nowLocalInput, consumptionToday, consumptionTodayOffset, formatFull, formatTime } from '../lib/format';
 import { useSubstances, useIntakes, useIntakeMutations, useSubstanceMutations, useDefaults, useCompliance, usePlan } from '../lib/queries';
 import { ApiError } from '../lib/api';
-import { isPlanIntake, planSubstanceKeys, nameKey } from '../lib/plan';
+import { isPlanIntake, planDoseIndex, nameKey } from '../lib/plan';
 import type { Substance, PlanSlot, SubstanceDefault, IntakeBatchEntryInput } from '../lib/types';
 
 export function QuickEntryScreen() {
@@ -43,7 +43,7 @@ export function QuickEntryScreen() {
   // pro Tag sicher ab.
   const recentIntakesRaw = useIntakes({ limit: 1500 });
   const { data: plan } = usePlan();
-  const planKeys = useMemo(() => planSubstanceKeys(plan), [plan]);
+  const planIndex = useMemo(() => planDoseIndex(plan), [plan]);
   const { create, remove, batch, planBatch } = useIntakeMutations();
 
   // Sammel-Einträge "Morgendmedis"/"Nachtmedis": tragen mit einem Tipp alle
@@ -513,7 +513,7 @@ export function QuickEntryScreen() {
               sub={s}
               selected={selectedIds.includes(s.id)}
               missingDefault={missingDefaults.has(s.name.toLowerCase())}
-              inPlan={planKeys.has(nameKey(s.name))}
+              inPlan={planIndex.has(nameKey(s.name))}
               frequency={frequencyById.get(s.id) ?? 0}
               sortMode={sortKey === 'frequency'}
               onSelect={() => toggleSelect(s.id)}
@@ -556,7 +556,7 @@ export function QuickEntryScreen() {
           </div>
           <Card className="divide-y divide-hairline overflow-hidden">
             {todayIntakes.slice(0, 6).map((it) => {
-              const inPlan = isPlanIntake(it.substanceName, planKeys);
+              const inPlan = isPlanIntake(it, planIndex);
               return (
                 <div
                   key={it.id}
@@ -579,7 +579,7 @@ export function QuickEntryScreen() {
                   <span className="flex-1 min-w-0 text-sm text-ink truncate">{it.substanceName}</span>
                   {inPlan && (
                     <span
-                      title="Teil des aktuellen Medikationsplans"
+                      title="Substanz und Dosis stimmen mit dem aktuellen Medikationsplan überein"
                       className="shrink-0 rounded-full bg-primary/15 text-primary text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5"
                     >
                       Plan

@@ -129,6 +129,10 @@ export interface PlanVersionSummary {
   itemCount: number;
   active: boolean;
   upcoming: boolean;
+  /** Nur bei GET /api/plan/versions?withItems=1 — die Items dieser Version.
+   *  Der Verlauf misst damit jede Einnahme gegen die zu ihrem Zeitpunkt
+   *  wirksame Plan-Version. */
+  items?: PlanItem[];
 }
 
 export interface PlanDiff {

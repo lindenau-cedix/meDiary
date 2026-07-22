@@ -7,6 +7,7 @@ export const qk = {
   intakes: (params?: object) => ['intakes', params ?? {}] as const,
   plan: () => ['plan'] as const,
   planVersions: () => ['plan', 'versions'] as const,
+  planVersionsWithItems: () => ['plan', 'versions', 'withItems'] as const,
   planDiff: (params: object) => ['plan', 'diff', params] as const,
   assessments: (from?: string, to?: string) => ['assessments', from, to] as const,
   assessment: (date: string) => ['assessment', date] as const,
@@ -120,6 +121,14 @@ export function usePlan() {
 }
 export function usePlanVersions() {
   return useQuery({ queryKey: qk.planVersions(), queryFn: () => api.plan.versions() });
+}
+/** Alle Plan-Versionen inklusive Items — für die zeitpunktgenaue „planmäßig"-
+ *  Bewertung im Verlauf (jede Einnahme gegen die damals wirksame Version). */
+export function usePlanVersionsWithItems() {
+  return useQuery({
+    queryKey: qk.planVersionsWithItems(),
+    queryFn: () => api.plan.versions({ withItems: true }),
+  });
 }
 export function usePlanDiff(params: { days?: number; fromDate?: string; toDate?: string }, enabled = true) {
   return useQuery({ queryKey: qk.planDiff(params), queryFn: () => api.plan.diff(params), enabled });
