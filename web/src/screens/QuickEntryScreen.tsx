@@ -19,6 +19,9 @@ import { ApiError } from '../lib/api';
 import { isPlanIntake, planDoseIndex, nameKey } from '../lib/plan';
 import type { Substance, PlanSlot, SubstanceDefault, IntakeBatchEntryInput } from '../lib/types';
 
+// localStorage-Schlüssel für die zuletzt gewählte Kachel-Sortierung im Heute-Tab.
+const SORT_KEY_STORAGE = 'mediary.heute.sortKey';
+
 export function QuickEntryScreen() {
   const toast = useToast();
   const { data: substances = [], error } = useSubstances();
@@ -78,7 +81,24 @@ export function QuickEntryScreen() {
   // Häufigkeit der letzten ~90 Tage kommt.
   type SortKey = 'manual' | 'frequency';
   const { reorder } = useSubstanceMutations();
-  const [sortKey, setSortKey] = useState<SortKey>('manual');
+  // Die gewählte Sortierung (Custom/„Manuell" vs. „Häufigkeit") wird pro Gerät
+  // in localStorage gemerkt, damit sie einen Reload / App-Neustart überlebt —
+  // gleiches Muster wie Theme (`mediary.theme`) und API-Base.
+  const [sortKey, setSortKeyState] = useState<SortKey>(
+    () =>
+      (typeof localStorage !== 'undefined' &&
+      localStorage.getItem(SORT_KEY_STORAGE) === 'frequency'
+        ? 'frequency'
+        : 'manual'),
+  );
+  const setSortKey = (key: SortKey) => {
+    try {
+      if (typeof localStorage !== 'undefined') localStorage.setItem(SORT_KEY_STORAGE, key);
+    } catch {
+      /* localStorage kann in restriktiven WebViews fehlen — Auswahl bleibt dann nur für die Sitzung */
+    }
+    setSortKeyState(key);
+  };
   const [sortMode, setSortMode] = useState(false);
   const [ordered, setOrdered] = useState<Substance[]>([]);
   const saveTimer = useRef<number | null>(null);
