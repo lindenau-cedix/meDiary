@@ -354,7 +354,7 @@ export function StatistikScreen() {
               <p className="text-[13px] text-ink-faint">Lädt …</p>
             ) : !ingredients.available ? (
               <p className="text-[13px] text-ink-muted leading-snug">
-                KI-Analyse ist nicht konfiguriert (<span className="tabular">ANTHROPIC_API_KEY</span> fehlt). Ohne
+                KI-Analyse ist nicht konfiguriert (<span className="tabular">MINIMAX_API_KEY</span> fehlt). Ohne
                 Schlüssel können keine Wirkstoff-Profile geschätzt werden.
               </p>
             ) : (

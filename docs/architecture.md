@@ -19,9 +19,12 @@
   Hochrechnung auf die protokollierte Menge (`scaleServings`/`applyProfile`/
   `compoundReports` in `analytics.ts`) ist reine Client-Mathematik — das LLM schätzt
   NUR die Gehalte, es summiert nicht. Analyse-Trigger `POST /api/ingredients/analyze`
-  ist CF-Access-geschützt und nutzt denselben Anthropic-/MiniMax-Client
-  (`generateText`, `config.anthropic`) wie das KI-Tagebuch (kein separater Key). Nicht
-  auflösbare Mengen werden als „unquantifiziert" ausgewiesen, nicht geraten.
+  ist CF-Access-geschützt und läuft **standardmäßig über das MiniMax-Abo**
+  (`config.ingredients` = `INGREDIENTS_API_KEY` > `CHAT_API_KEY` > `MINIMAX_API_KEY`,
+  Anthropic-kompatibler MiniMax-Endpunkt, `MiniMax-M3`) — kein separater Anthropic-Key.
+  Technisch derselbe `generateText`-Client wie das KI-Tagebuch, nur mit eigener
+  `client`-Config (`generateText({ …, client: config.ingredients })`). Nicht auflösbare
+  Mengen werden als „unquantifiziert" ausgewiesen, nicht geraten.
 - **DEFAULTS.md wird bei JEDEM Schreibvorgang frisch gelesen** (kein Cache).
   Parser: `server/src/lib/defaults.ts → parse()`. Unterstützt `Menge:`/
   `Dosis:`, `Notiz:`/`Hinweis:` und `Mit:`/`Zusammen mit:` (Begleitsubstanz,

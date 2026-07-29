@@ -19,10 +19,13 @@
     Beispielen sammeln, Prompt mit kanonischen Wirkstoff-Schlüsseln + Few-Shot,
     zod-validiertes JSON-Parsing tolerant ggü. Codefences/Prosa, Chunking à 25);
     `routes/ingredients.ts`: `GET /api/ingredients` (offen: Profile + fehlende/veraltete),
-    `POST /api/ingredients/analyze` (Cloudflare Access + `anthropicAvailable`-503 +
-    In-Process-Busy-Lock; `scope` missing|all). Reuse `generateText` — dieselbe
-    Anthropic-/MiniMax-kompatible Integration wie das KI-Tagebuch (`config.anthropic`),
-    also **kein neuer API-Key**.
+    `POST /api/ingredients/analyze` (Cloudflare Access + 503-Guard + In-Process-Busy-Lock;
+    `scope` missing|all). **Läuft standardmäßig über das MiniMax-Abo** (`config.ingredients`:
+    `INGREDIENTS_API_KEY` > `CHAT_API_KEY` > `MINIMAX_API_KEY`; Anthropic-kompatibler
+    MiniMax-Endpunkt `…/anthropic`, Modell `MiniMax-M3`) — wie die Daten-Konsole, also
+    **kein Anthropic-Key nötig**. Dafür nimmt `generateText` (lib/anthropic.ts) jetzt einen
+    optionalen `client`-Param (`AnthropicClientConfig`), Default weiterhin `config.anthropic`
+    (KI-Tagebuch unverändert).
   - **Client:** `analytics.ts` → `scaleServings` (Einheiten-Umrechnung mg↔g, ml↔l,
     Portions-`milliliters`/`grams`, zählbare Einheit → Anzahl Portionen), `applyProfile`,
     `compoundReports` (Tages-Serie + Quellen-Aufschlüsselung + „unquantifiziert"-Zähler),

@@ -44,7 +44,7 @@
 | `GET` | `/api/report/:date` | Einzelner Tagesbericht (immer 200, `exists:false` wenn leer) |
 | `DELETE` | `/api/report/:date` | Tagesbericht löschen (204 / 404) |
 | `GET` | `/api/ingredients` | Statistik „Wirkstoff-Bilanz": gecachte KI-Wirkstoff-Profile pro Substanz. `{ available, model, profiles: {[nameKey]: { name, profile, model, updatedAt, stale }}, missing[], stale[], total }`. Offen lesbar. |
-| `POST` | `/api/ingredients/analyze` | Substanzen via KI analysieren + cachen (`{ scope?: 'missing'\|'all' }`); liefert `{ analyzed, skipped, total, errors[], state }`. **CF-Access**, 503 ohne `ANTHROPIC_API_KEY`, 409 wenn bereits ein Lauf aktiv (Busy-Lock). Reuse des KI-Tagebuch-Clients (`config.anthropic`). |
+| `POST` | `/api/ingredients/analyze` | Substanzen via KI analysieren + cachen (`{ scope?: 'missing'\|'all' }`); liefert `{ analyzed, skipped, total, errors[], state }`. **CF-Access**, 409 wenn bereits ein Lauf aktiv (Busy-Lock). Läuft standardmäßig über das **MiniMax-Abo** (`config.ingredients`: `INGREDIENTS_API_KEY` > `CHAT_API_KEY` > `MINIMAX_API_KEY`, Modell `MiniMax-M3`); 503 wenn keiner davon gesetzt ist. |
 | `GET` | `/api/chat/status` | Daten-Konsole: `{ available, model }` (`available:false` ohne Key) |
 | `GET` | `/api/chat/change-sets?limit=` | Change-Set-Audit-Log (neueste zuerst); `{ changeSets[], latestAppliedId, available }` |
 | `GET` | `/api/chat/change-sets/:id` | Einzelnes Change-Set (`{ changeSet, latestAppliedId }`, 404) |

@@ -9,7 +9,7 @@ import {
 } from '../db.js';
 import { nameKey } from './names.js';
 import { defaultsFor } from './defaults.js';
-import { generateText, anthropicAvailable, anthropicModel } from './anthropic.js';
+import { generateText } from './anthropic.js';
 import { config } from '../config.js';
 
 /**
@@ -315,10 +315,10 @@ export function parseProfiles(text: string, expected: Map<string, string>): Pars
 // ───────────────────────── Analyse-Lauf ─────────────────────────
 
 export function ingredientsAvailable(): boolean {
-  return anthropicAvailable();
+  return !!config.ingredients.apiKey;
 }
 export function ingredientsModel(): string {
-  return anthropicModel();
+  return config.ingredients.model;
 }
 
 const CHUNK_SIZE = 25;
@@ -337,7 +337,7 @@ export interface AnalyzeResult {
  * groß wird; ein fehlgeschlagener Chunk stoppt die übrigen nicht.
  */
 export async function analyzeSubstances(opts: { scope?: 'missing' | 'all' } = {}): Promise<AnalyzeResult> {
-  if (!anthropicAvailable()) throw new Error('ANTHROPIC_API_KEY ist nicht konfiguriert.');
+  if (!config.ingredients.apiKey) throw new Error('Kein KI-Schlüssel konfiguriert (MINIMAX_API_KEY).');
   const scope = opts.scope ?? 'missing';
   const inputs = gatherSubstanceInputs();
 
@@ -345,7 +345,7 @@ export async function analyzeSubstances(opts: { scope?: 'missing' | 'all' } = {}
   const errors: { names: string[]; error: string }[] = [];
   let analyzed = 0;
 
-  const model = anthropicModel();
+  const model = config.ingredients.model;
   for (let i = 0; i < todo.length; i += CHUNK_SIZE) {
     const chunk = todo.slice(i, i + CHUNK_SIZE);
     const expected = new Map(chunk.map((s) => [s.key, s.name]));
@@ -353,7 +353,8 @@ export async function analyzeSubstances(opts: { scope?: 'missing' | 'all' } = {}
       const text = await generateText({
         system: SYSTEM_PROMPT,
         prompt: buildUserPrompt(chunk),
-        maxTokens: config.anthropic.maxTokens,
+        maxTokens: config.ingredients.maxTokens,
+        client: config.ingredients,
       });
       const parsed = parseProfiles(text, expected);
       const hashByKey = new Map(chunk.map((s) => [s.key, inputHash(s)]));
@@ -445,8 +446,8 @@ export function ingredientsState(): IngredientsState {
   }
 
   return {
-    available: anthropicAvailable(),
-    model: anthropicModel(),
+    available: !!config.ingredients.apiKey,
+    model: config.ingredients.model,
     profiles,
     missing,
     stale,

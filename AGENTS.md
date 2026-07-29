@@ -30,8 +30,11 @@ protokollierte Menge macht deterministisch der Client**.
 - **Server:** Tabelle `substance_profiles` (Cache, `input_hash` → Stale-Erkennung),
   `lib/ingredients.ts` (Eingabe sammeln, Prompt, zod-Parse, Chunking à 25),
   `routes/ingredients.ts` (`GET /api/ingredients` offen; `POST /api/ingredients/analyze`
-  CF-Access + `anthropicAvailable`-503 + Busy-Lock). Reuse `generateText` (dieselbe
-  Anthropic-/MiniMax-Integration wie das KI-Tagebuch, `config.anthropic`).
+  CF-Access + 503-Guard + Busy-Lock). Reuse `generateText` (jetzt via optionalen
+  `client`-Param mehrfach nutzbar); **läuft standardmäßig über das MiniMax-Abo**
+  (`config.ingredients`: `INGREDIENTS_API_KEY` > `CHAT_API_KEY` > `MINIMAX_API_KEY`,
+  Anthropic-kompatibler MiniMax-Endpunkt, Modell `MiniMax-M3`) — wie die Daten-Konsole,
+  also **kein Anthropic-Key nötig**.
 - **Client:** `analytics.ts` (`scaleServings`/`applyProfile`/`compoundReports` +
   Einheiten-Umrechnung mg↔g, ml↔l, Portions-`milliliters`/`grams`, count→Portionen;
   `equivalentFor` „≈ N Tassen Kaffee") · Modul mit KI-Analyse-Button, Wirkstoff-Chips,

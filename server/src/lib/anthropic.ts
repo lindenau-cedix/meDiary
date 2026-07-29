@@ -49,10 +49,26 @@ interface AnthropicResponse {
   stop_details?: { category?: string | null; explanation?: string } | null;
 }
 
+/**
+ * Minimal-Konfiguration eines Anthropic-(kompatiblen) Messages-Clients. Damit
+ * `generateText` nicht an `config.anthropic` gebunden ist, sondern auch mit
+ * `config.chat`/`config.ingredients` (MiniMax über den Anthropic-kompatiblen
+ * Endpunkt, `x-api-key`) laufen kann — identisches Wire-Format.
+ */
+export interface AnthropicClientConfig {
+  apiKey: string | null;
+  model: string;
+  baseUrl: string;
+  maxTokens: number;
+  thinking: { type: string; budget_tokens?: number } | null;
+}
+
 interface GenerateOptions {
   system: string;
   prompt: string;
   maxTokens?: number;
+  /** Client-Konfiguration (Default `config.anthropic` = KI-Tagebuch). */
+  client?: AnthropicClientConfig;
 }
 
 /**
@@ -60,22 +76,22 @@ interface GenerateOptions {
  * Text-Block zurück. Wirft bei fehlendem Key, HTTP-Fehler, Refusal oder leerer
  * Antwort (die Aufrufer behandeln das pro Tag).
  */
-export async function generateText({ system, prompt, maxTokens }: GenerateOptions): Promise<string> {
-  const key = config.anthropic.apiKey;
+export async function generateText({ system, prompt, maxTokens, client = config.anthropic }: GenerateOptions): Promise<string> {
+  const key = client.apiKey;
   if (!key) throw new AnthropicNotConfiguredError();
 
   const body: Record<string, unknown> = {
-    model: config.anthropic.model,
-    max_tokens: maxTokens ?? config.anthropic.maxTokens,
+    model: client.model,
+    max_tokens: maxTokens ?? client.maxTokens,
     system,
     messages: [{ role: 'user', content: prompt }],
   };
-  // Adaptives Denken (oder per DIARY_THINKING konfiguriert); weggelassen, wenn null.
-  if (config.anthropic.thinking) body.thinking = config.anthropic.thinking;
+  // Adaptives Denken (oder per *_THINKING konfiguriert); weggelassen, wenn null.
+  if (client.thinking) body.thinking = client.thinking;
 
   let res: Response;
   try {
-    res = await fetch(`${config.anthropic.baseUrl}/v1/messages`, {
+    res = await fetch(`${client.baseUrl}/v1/messages`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',

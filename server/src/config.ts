@@ -330,6 +330,43 @@ export const config = {
       return Number.isFinite(n) && n > 0 ? Math.floor(n) : 100;
     })(),
   },
+  /**
+   * KI-Wirkstoff-Analyse für die Statistik „Wirkstoff-Bilanz" (Gesamt-Koffein &
+   * Co. über alle Quellen). Nutzt — wie die Daten-Konsole — standardmäßig das
+   * **MiniMax-Abo** über den Anthropic-kompatiblen Endpunkt (`x-api-key`,
+   * `POST {baseUrl}/v1/messages`); dasselbe Wire-Format wie das KI-Tagebuch,
+   * daher genügt `generateText`. Der Schlüssel wird ausschließlich serverseitig
+   * verwendet. Reihenfolge (erster gesetzte gewinnt): INGREDIENTS_API_KEY >
+   * CHAT_API_KEY > MINIMAX_API_KEY — d. h. mit dem vorhandenen MiniMax-Key läuft
+   * die Analyse OHNE Zusatzkonfiguration. Ohne Key liefert `GET /api/ingredients`
+   * `available:false` und `POST /api/ingredients/analyze` 503.
+   */
+  ingredients: {
+    apiKey:
+      process.env.INGREDIENTS_API_KEY?.trim() ||
+      process.env.CHAT_API_KEY?.trim() ||
+      process.env.MINIMAX_API_KEY?.trim() ||
+      null,
+    /** Modell-ID (INGREDIENTS_MODEL > CHAT_MODEL > MiniMax-M3 — wie die Daten-Konsole). */
+    model: process.env.INGREDIENTS_MODEL?.trim() || process.env.CHAT_MODEL?.trim() || 'MiniMax-M3',
+    /** Anthropic-kompatible Basis-URL (INGREDIENTS_BASE_URL > CHAT_BASE_URL > MiniMax); Client hängt `/v1/messages` an. */
+    baseUrl: (
+      process.env.INGREDIENTS_BASE_URL?.trim() ||
+      process.env.CHAT_BASE_URL?.trim() ||
+      'https://api.minimax.io/anthropic'
+    ).replace(/\/$/, ''),
+    /**
+     * Max. Output-Tokens je Chunk (INGREDIENTS_MAX_TOKENS, Default 24000). Groß-
+     * zügig, weil M3 ein Reasoning-Modell ist und sein Denken in dieses Budget
+     * fällt — zu knapp würde das JSON abschneiden.
+     */
+    maxTokens: (() => {
+      const n = Number(process.env.INGREDIENTS_MAX_TOKENS);
+      return Number.isFinite(n) && n > 0 ? Math.floor(n) : 24000;
+    })(),
+    /** `thinking`-Parameter (INGREDIENTS_THINKING > CHAT_THINKING > `{ type:'adaptive' }`). */
+    thinking: parseThinking(process.env.INGREDIENTS_THINKING ?? process.env.CHAT_THINKING),
+  },
   /** Nächtliches „Träumen" — Scheduler & manueller Trigger. */
   dream: {
     /** Uhrzeit "HH:MM" (lokale Wand­uhr = Europe/Berlin). Default 04:20. */

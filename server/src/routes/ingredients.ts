@@ -34,7 +34,7 @@ ingredientsRouter.post('/analyze', requireCloudflareAccess, async (req, res) => 
   if (!ingredientsAvailable()) {
     return res.status(503).json({
       error:
-        'KI-Wirkstoff-Analyse ist nicht konfiguriert. Setze ANTHROPIC_API_KEY (und optional DIARY_MODEL) in der .env.',
+        'KI-Wirkstoff-Analyse ist nicht konfiguriert. Setze MINIMAX_API_KEY (nutzt das MiniMax-Abo wie die Daten-Konsole) — oder INGREDIENTS_API_KEY/INGREDIENTS_MODEL für eine eigene Konfiguration.',
     });
   }
   const parsed = analyzeSchema.safeParse(req.body ?? {});
