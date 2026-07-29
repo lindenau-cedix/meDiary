@@ -10,6 +10,7 @@ import { HistoryScreen } from './screens/HistoryScreen';
 import { DiaryScreen } from './screens/DiaryScreen';
 import { PlanScreen } from './screens/PlanScreen';
 import { TrendsScreen } from './screens/TrendsScreen';
+import { StatistikScreen } from './screens/StatistikScreen';
 import { SettingsScreen } from './screens/SettingsScreen';
 import { DefaultsEditorScreen } from './screens/DefaultsEditorScreen';
 import { ConsoleScreen } from './screens/ConsoleScreen';
@@ -42,6 +43,7 @@ export function App() {
                 <Route path="tagebuch" element={<DiaryScreen />} />
                 <Route path="plan" element={<PlanScreen />} />
                 <Route path="werte" element={<TrendsScreen />} />
+                <Route path="statistik" element={<StatistikScreen />} />
                 <Route path="konsole" element={<ConsoleScreen />} />
                 <Route path="einstellungen" element={<SettingsScreen />} />
                 <Route path="standardnotizen" element={<DefaultsEditorScreen />} />

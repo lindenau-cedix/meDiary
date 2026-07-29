@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Pill, History, BookOpen, ClipboardList, LineChart } from 'lucide-react';
+import { Pill, History, BookOpen, ClipboardList, LineChart, BarChart3 } from 'lucide-react';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 
@@ -10,6 +10,7 @@ const tabs = [
   { to: '/tagebuch', label: 'Träume', Icon: BookOpen },
   { to: '/plan', label: 'Plan', Icon: ClipboardList },
   { to: '/werte', label: 'Werte', Icon: LineChart },
+  { to: '/statistik', label: 'Statistik', Icon: BarChart3 },
 ];
 
 export function BottomNav() {

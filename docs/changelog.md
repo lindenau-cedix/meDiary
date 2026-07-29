@@ -4,6 +4,38 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-07-29 — Neuer „Statistik"-Bereich (grafische Konsum-Auswertung)**:
+  - **Warum:** Einnahmen & Tagesbilder waren bisher nur als Listen sichtbar
+    (Verlauf, Werte). Es fehlte eine grafische Auswertung, die Muster auf einen
+    Blick zeigt („wann wurde wie viel von was konsumiert", Tageszeit-Rhythmus,
+    Plan-Treue, Zusammenhang mit dem Wohlbefinden).
+  - **Neu:** 6. Bottom-Nav-Tab **`/statistik`** (Icon `BarChart3`). Diagramme
+    dependency-frei als Inline-SVG (wie `TrendChart`) — **keine Charting-Library**,
+    offline-APK-tauglich, warme Nacht-Palette. Alles clientseitig aus vorhandenen
+    Endpunkten aggregiert — **kein neuer Server-/DB-Code**.
+  - **Dateien:** `web/src/lib/analytics.ts` (reine Aggregations-/Mathematik-Schicht:
+    `parseAmount` für Freitext-Mengen inkl. Bereichen/Komma/Plural, Ranglisten,
+    Tages-Dosis-Serien mit Dosis-/Count-Fallback, Tageszeit-Verteilung, Pearson-
+    Korrelation); `web/src/components/charts/` (VBars, HBars, Punchcard,
+    DaypartChart, DualAxis + Barrel); `web/src/screens/StatistikScreen.tsx`.
+    Geändert: `App.tsx` (Route), `BottomNav.tsx` (Tab).
+  - **7 Module:** KPI-Band · **Konsum-Kalender** (Punchcard Substanz×Tag, Deckkraft =
+    Einnahmen/Tag relativ zur eigenen Spitze, Tap-Detail) · **Menge über Zeit**
+    (pro Substanz in *deren* Einheit — Freitext-Mengen werden **nie über Substanzen
+    hinweg summiert**; Count-Fallback bei nicht durchgängig parsebaren Mengen) ·
+    **Top-Substanzen** (horizontale Rangbalken) · **Tageszeit-Muster**
+    (Morgens/Mittags/Abends/Nachts + 24-Stunden-Histogramm) · **Plan-Treue über Zeit**
+    (Anteil planmäßiger Einnahmen je Tag; reuse `isPlanIntake` + zeitpunktgenaue
+    Version-Recency-Indexierung aus `HistoryScreen`) · **Substanz × Wohlbefinden**
+    (Tages-Dosis vs. 11-Skalen-Dimension, Doppelachsen-Overlay + Pearson `r` mit
+    Klartext-Einordnung und explizitem Hinweis **„Korrelation ≠ Kausalität"**).
+  - **Lesbarkeit by design:** Substanzfarbe als durchgängige Identität, direkte
+    Beschriftung statt Achsen-Wüste, nach Relevanz sortiert (lange Listen einklappbar),
+    responsive `viewBox` (passt in die `max-w-app`-Spalte, kein Zoomen), 7/30/90/180-T-
+    Umschalter (wie „Werte").
+  - **Verifikation:** `typecheck:all` + `web build` grün; 39/39 Analytics-Smoke-
+    Assertions (parseAmount, Ranking, Dosis-/Count-Serie, Tageszeit, Pearson, Punchcard).
+
 - **2026-07-22 — „planmäßig" jetzt dosis-scharf (Verlauf + Tagesbild-Trigger)**:
   - **Problem 1 (Verlauf):** Der „Plan"-Badge (History + QuickEntry „Heute
     erfasst") erschien, sobald die **Substanz** im Plan stand — unabhängig von

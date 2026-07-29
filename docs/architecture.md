@@ -4,6 +4,14 @@
 
 ## Wichtige Architektur-Punkte
 
+- **Statistik-Auswertung ist rein clientseitig & mengen-vorsichtig.** Der
+  `StatistikScreen` aggregiert Einnahmen/Tagesbilder/Plan über
+  `web/src/lib/analytics.ts` (kein Server-Endpunkt). Freitext-Mengen (`amount`:
+  „150 mg", „1 Tablette", `null`) werden über `parseAmount()` in Zahl+Einheit
+  zerlegt und **niemals über Substanzen hinweg summiert** — jede Dosis-Summe
+  gilt pro Substanz und pro dominanter Einheit; Substanzen ohne durchgängig
+  parsebare Menge fallen auf Count (Einnahmen/Tag) zurück. Wer hier neue Charts
+  ergänzt, muss diese Invariante wahren (sonst entstehen sinnlose mg+Stück-Summen).
 - **DEFAULTS.md wird bei JEDEM Schreibvorgang frisch gelesen** (kein Cache).
   Parser: `server/src/lib/defaults.ts → parse()`. Unterstützt `Menge:`/
   `Dosis:`, `Notiz:`/`Hinweis:` und `Mit:`/`Zusammen mit:` (Begleitsubstanz,
@@ -202,11 +210,16 @@ web/src/
 │   ├── DiaryScreen.tsx         # Tagebuch: Kurz (Notiz-Liste) / Voll (KI-generiert)
 │   ├── PlanScreen.tsx          # Medikationsplan + Verlauf + Diff
 │   ├── TrendsScreen.tsx        # 11 Skalen-Trends (SVG)
+│   ├── StatistikScreen.tsx     # Grafische Konsum-Auswertung (7 Module, Inline-SVG)
 │   └── SettingsScreen.tsx      # Theme, Substanzen, Server, DEFAULTS.md, Compliance
 ├── components/                 # UI-Bausteine (Sheet, Card, Button, Toaster, …)
+│   └── charts/                 # Dependency-freie SVG-Primitives (VBars, HBars,
+│                               #   Punchcard, DaypartChart, DualAxis) für Statistik
 ├── lib/
 │   ├── api.ts                  # fetch-Wrapper + ApiError
 │   ├── queries.ts              # react-query-Hooks
+│   ├── analytics.ts            # Statistik-Aggregatoren (parseAmount, ranking,
+│   │                           #   dailyDoseSeries, daypart, pearson) — pure, testbar
 │   ├── types.ts                # API-Typen
 │   ├── time.ts                 # DAY_BOUNDARY, consumptionDay, consumptionToday, parseLocal, nowLocalInput
 │   ├── format.ts               # re-exportiert time-Helfer, greeting, formatTime, formatDayLabel, …

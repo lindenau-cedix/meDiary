@@ -4,6 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **`CLAUDE.md` ist ein Symlink auf `AGENTS.md`** — der Inhalt gilt für beide.
 
+## Letzter Durchlauf (2026-07-29)
+
+**Neuer „Statistik"-Bereich — grafische Konsum-Auswertung.** 6. Bottom-Nav-Tab
+(`/statistik`, Icon `BarChart3`) mit sofort lesbaren, dependency-freien Inline-SVG-
+Diagrammen (kein Charting-Lib, offline-APK-tauglich, warme Nacht-Palette). Alles
+clientseitig aus vorhandenen Endpunkten aggregiert — **kein Server-/DB-Code**.
+- **Neu:** `web/src/lib/analytics.ts` (Aggregations-/Mathematik-Schicht: `parseAmount`
+  für Freitext-Mengen, Ranglisten, Tages-Dosis-Serien, Tageszeit-Verteilung, Pearson-
+  Korrelation), `web/src/components/charts/` (VBars, HBars, Punchcard, DaypartChart,
+  DualAxis), `web/src/screens/StatistikScreen.tsx`.
+- **7 Module:** KPI-Band · Konsum-Kalender (Punchcard Substanz×Tag) · Menge über Zeit
+  (pro Substanz, in deren Einheit — Mengen **nie** über Substanzen summiert) ·
+  Top-Substanzen · Tageszeit-Muster · Plan-Treue über Zeit (reuse `isPlanIntake` +
+  Version-Recency-Indexing aus `HistoryScreen`) · Substanz × Wohlbefinden (Dosis vs.
+  11-Skalen-Metrik, `r` + „Korrelation ≠ Kausalität").
+- **Geändert:** `App.tsx` (Route), `BottomNav.tsx` (Tab). Verifiziert:
+  `typecheck:all` + `web build` grün, 39/39 Analytics-Smoke-Assertions grün.
+
 # meDiary — Medikations-Tagebuch
 
 Ein sorgfältig gestaltetes **Medikations-Tagebuch**: HTTP-API + SQLite +
@@ -18,8 +36,8 @@ TTS, ffmpeg-Transcode zu Opus/OGG).
 ```
 meDiary/
 ├── server/                  → HTTP-API (Express + TS + better-sqlite3, ESM)
-│   ├── src/routes/          → 12 Router (intakes, plan, dreams, chat, report, …)
-│   ├── src/lib/             → 20 Module (dreams, anthropic, minimax, elevenlabs,
+│   ├── src/routes/          → 13 Router (intakes, plan, dreams, chat, report, meta, …)
+│   ├── src/lib/             → 22 Module (dreams, anthropic, minimax, elevenlabs,
 │   │                          whatsapp, dream_delivery, diary, chat_agent, …)
 │   ├── src/index.ts         → Express-Mounts + Scheduler-Start + WhatsApp-Boot
 │   ├── src/db.ts            → idempotente Schema-Migration (alle Tabellen)
@@ -27,12 +45,14 @@ meDiary/
 │   ├── src/seed.ts          → CLI: `npm --prefix server run seed`
 │   └── src/import.ts        → CLI: `npm --prefix server run import`
 ├── web/                     → Frontend (React 18 + Vite 6 + Tailwind 3, Capacitor-fähig)
-│   ├── src/screens/         → 8 Screens (QuickEntry, History, Plan, Diary, Trends, Console,
-│   │                          Settings, **DefaultsEditor** = `/standardnotizen`)
+│   ├── src/screens/         → 9 Screens (QuickEntry, History, Plan, Diary, Trends, **Statistik**,
+│   │                          Console, Settings, **DefaultsEditor** = `/standardnotizen`)
 │   ├── src/components/      → inkl. SentDreamsLog, SentDreamDrawer, AdminWhatsappPanel,
+│   │                          **charts/{VBars, HBars, Punchcard, DaypartChart, DualAxis}**,
 │   │                          **DefaultsEditor/{StructuredView, SubstanceSection,
 │   │                          CompanionRow, ErweitertView, AddSubstanceSheet, SaveBar}**
 │   ├── src/lib/             → api.ts (Fetch-Wrapper), queries.ts (react-query Hooks), types.ts,
+│   │                          **analytics.ts** (Statistik-Aggregatoren + `parseAmount`),
 │   │                          **names.ts** (Client-Spiegel des Server-`nameKey()`)
 │   ├── android-native-src/  → Native Android-Widget-Quellen (NICHT in git getrackt;
 │   │                          web/android/ ist via .gitignore ausgeschlossen und
