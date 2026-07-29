@@ -4,7 +4,7 @@
 
 ## Wichtige Architektur-Punkte
 
-- **Statistik-Auswertung ist rein clientseitig & mengen-vorsichtig.** Der
+- **Statistik-Auswertung ist (fast) rein clientseitig & mengen-vorsichtig.** Der
   `StatistikScreen` aggregiert Einnahmen/Tagesbilder/Plan über
   `web/src/lib/analytics.ts` (kein Server-Endpunkt). Freitext-Mengen (`amount`:
   „150 mg", „1 Tablette", `null`) werden über `parseAmount()` in Zahl+Einheit
@@ -12,6 +12,16 @@
   gilt pro Substanz und pro dominanter Einheit; Substanzen ohne durchgängig
   parsebare Menge fallen auf Count (Einnahmen/Tag) zurück. Wer hier neue Charts
   ergänzt, muss diese Invariante wahren (sonst entstehen sinnlose mg+Stück-Summen).
+- **Ausnahme: die „Wirkstoff-Bilanz" braucht Weltwissen (LLM), aber rechnet
+  deterministisch.** Um Wirkstoffe (z. B. Koffein) quellenübergreifend zu summieren,
+  liefert das LLM **einmal pro Substanz** ein gecachtes Profil (`substance_profiles`,
+  `lib/ingredients.ts`): mg Wirkstoff pro Portion + Portionsdefinition. Die
+  Hochrechnung auf die protokollierte Menge (`scaleServings`/`applyProfile`/
+  `compoundReports` in `analytics.ts`) ist reine Client-Mathematik — das LLM schätzt
+  NUR die Gehalte, es summiert nicht. Analyse-Trigger `POST /api/ingredients/analyze`
+  ist CF-Access-geschützt und nutzt denselben Anthropic-/MiniMax-Client
+  (`generateText`, `config.anthropic`) wie das KI-Tagebuch (kein separater Key). Nicht
+  auflösbare Mengen werden als „unquantifiziert" ausgewiesen, nicht geraten.
 - **DEFAULTS.md wird bei JEDEM Schreibvorgang frisch gelesen** (kein Cache).
   Parser: `server/src/lib/defaults.ts → parse()`. Unterstützt `Menge:`/
   `Dosis:`, `Notiz:`/`Hinweis:` und `Mit:`/`Zusammen mit:` (Begleitsubstanz,

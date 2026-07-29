@@ -4,6 +4,40 @@
 
 ## Letzte Änderungen (jüngste zuerst)
 
+- **2026-07-29 — KI-„Wirkstoff-Bilanz": Gesamtkonsum eines Wirkstoffs über alle Quellen**:
+  - **Warum:** Die Statistik konnte Mengen nur pro Substanz zeigen. Frage wie „wie viel
+    **Koffein** nehme ich insgesamt zu mir?" (aus Energy-Drink + Cola + Kaffee + Tablette)
+    war nicht beantwortbar — dazu braucht es Weltwissen über den Wirkstoffgehalt je Quelle.
+  - **Architektur (smart + günstig):** Das LLM liefert **einmal pro Substanz** ein
+    gecachtes „Rezept" — wie viel eines Wirkstoffs in EINER üblichen Portion steckt +
+    eine Portionsdefinition (Einheit, optional ml/g). Die **Hochrechnung auf die
+    tatsächlich protokollierte Freitext-Menge macht deterministisch der Client** (liest
+    also Dose UND Notiz), summiert quellenübergreifend je Wirkstoff. Kein Modell-Call pro
+    Auswertung; Re-Analyse nur bei geänderter Eingabe (`input_hash` → „stale").
+  - **Server:** neue Tabelle `substance_profiles` (Cache, PK = nameKey) + Helfer in `db.ts`;
+    `lib/ingredients.ts` (Eingabe je Substanz aus DEFAULTS-Menge/-Notiz + beobachteten
+    Beispielen sammeln, Prompt mit kanonischen Wirkstoff-Schlüsseln + Few-Shot,
+    zod-validiertes JSON-Parsing tolerant ggü. Codefences/Prosa, Chunking à 25);
+    `routes/ingredients.ts`: `GET /api/ingredients` (offen: Profile + fehlende/veraltete),
+    `POST /api/ingredients/analyze` (Cloudflare Access + `anthropicAvailable`-503 +
+    In-Process-Busy-Lock; `scope` missing|all). Reuse `generateText` — dieselbe
+    Anthropic-/MiniMax-kompatible Integration wie das KI-Tagebuch (`config.anthropic`),
+    also **kein neuer API-Key**.
+  - **Client:** `analytics.ts` → `scaleServings` (Einheiten-Umrechnung mg↔g, ml↔l,
+    Portions-`milliliters`/`grams`, zählbare Einheit → Anzahl Portionen), `applyProfile`,
+    `compoundReports` (Tages-Serie + Quellen-Aufschlüsselung + „unquantifiziert"-Zähler),
+    `equivalentFor` („≈ N Tassen Kaffee"). Neues Statistik-Modul **Wirkstoff-Bilanz**:
+    KI-Analyse-Button (Status/Modell), Wirkstoff-Chips, mg/g-Headline + Vergleichsgröße,
+    Tages-Balken, **Quellen-Ranking** (welche Quelle wie viel beisteuert),
+    „So rechnet die KI"-Transparenz je Quelle, Hinweis „Schätzung ≠ Laborwert".
+    Types/api/queries (`useIngredients`, `useAnalyzeIngredients`) ergänzt.
+  - **Invariante:** Wirkstoff-Summen gelten je kanonischem `compound`-Schlüssel; nicht
+    auflösbare Mengen werden NICHT geschätzt, sondern als „N Einnahmen nicht einberechnet"
+    ausgewiesen (ehrlich statt erfunden).
+  - **Verifikation:** `typecheck:all` + `web build` grün; 22 Scaling-/Aggregations- +
+    13 Parse-Smoke-Assertions grün; E2E gegen `/tmp`-DB: `GET /api/ingredients` liefert
+    Zustand, `POST /analyze` ohne Key → 503, Tabelle wird angelegt.
+
 - **2026-07-29 — Neuer „Statistik"-Bereich (grafische Konsum-Auswertung)**:
   - **Warum:** Einnahmen & Tagesbilder waren bisher nur als Listen sichtbar
     (Verlauf, Werte). Es fehlte eine grafische Auswertung, die Muster auf einen

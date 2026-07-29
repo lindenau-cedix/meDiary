@@ -19,6 +19,7 @@ import { chatRouter } from './routes/chat.js';
 import { reportRouter } from './routes/report.js';
 import { whatsappRouter } from './routes/whatsapp.js';
 import { deliveriesRouter } from './routes/deliveries.js';
+import { ingredientsRouter } from './routes/ingredients.js';
 import { startDreamScheduler } from './lib/dream_scheduler.js';
 
 // Sicherstellen, dass jede jemals eingetragene Substanz eine QuickPick-Kachel
@@ -63,6 +64,7 @@ app.use('/api/chat', chatRouter);
 app.use('/api/report', reportRouter);
 app.use('/api/whatsapp', whatsappRouter);
 app.use('/api/deliveries', deliveriesRouter);
+app.use('/api/ingredients', ingredientsRouter);
 
 // Optional: gebautes Frontend ausliefern (für Single-Deployment)
 if (config.webDist && fs.existsSync(config.webDist)) {

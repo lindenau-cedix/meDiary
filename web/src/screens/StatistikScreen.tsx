@@ -1,16 +1,25 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { BarChart3, CalendarRange, Clock, Info, Sparkles } from 'lucide-react';
+import { BarChart3, CalendarRange, Clock, Info, Sparkles, FlaskConical, RefreshCw, ChevronDown } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
 import { SectionLabel, EmptyState, LoadingScreen } from '../components/ui/feedback';
 import { SubstanceSeal } from '../components/SubstanceSeal';
 import { TrendChart } from '../components/TrendChart';
+import { useToast } from '../components/Toaster';
 import { VBars, HBars, Punchcard, DaypartChart, DualAxis, type HBarItem, type PunchSelection } from '../components/charts';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { METRICS } from '../lib/metrics';
-import { dateNDaysAgo, todayStr, formatDayLabel, formatDayShort } from '../lib/format';
-import { useIntakes, useSubstances, useAssessments, usePlanVersionsWithItems } from '../lib/queries';
+import { dateNDaysAgo, todayStr, formatDayLabel, formatDayShort, colorForName } from '../lib/format';
+import {
+  useIntakes,
+  useSubstances,
+  useAssessments,
+  usePlanVersionsWithItems,
+  useIngredients,
+  useAnalyzeIngredients,
+} from '../lib/queries';
 import { isPlanIntake, planDoseIndex, nameKey, type PlanDoseEntry } from '../lib/plan';
 import {
   dayAxis,
@@ -20,11 +29,30 @@ import {
   daypartDistribution,
   pearson,
   correlationLabel,
+  compoundReports,
+  equivalentFor,
   formatNum,
+  formatMass,
   unitLabel,
   DAYPART_DEFS,
+  type CompoundReport,
 } from '../lib/analytics';
 import type { Intake } from '../lib/types';
+
+/** Wirkstoff-spezifische Farben (Fallback: stabile Ableitung aus dem Schlüssel). */
+const COMPOUND_COLORS: Record<string, string> = {
+  caffeine: '#9C6B43',
+  alcohol: '#7A5EA6',
+  sugar: '#C86B9C',
+  nicotine: '#6B7280',
+  thc: '#5E8C61',
+  cbd: '#4FA3A0',
+  taurine: '#C99A46',
+  theanine: '#5B8DB8',
+};
+function compoundColor(key: string): string {
+  return COMPOUND_COLORS[key] ?? colorForName(key);
+}
 
 const RANGES = [
   { days: 7, label: '7 T' },
@@ -140,6 +168,33 @@ export function StatistikScreen() {
     });
     return { series, dose, metricVals, r: pearson(xs, ys), pairs: xs.length };
   }, [wellStat, rangeIntakes, days, assessmentByDate, metric.key]);
+
+  // ── Wirkstoff-Bilanz (KI-Profile) ──
+  const { data: ingredients } = useIngredients();
+  const analyze = useAnalyzeIngredients();
+  const toast = useToast();
+  const reports = useMemo(
+    () => (ingredients?.profiles ? compoundReports(rangeIntakes, ingredients.profiles, substances, days) : []),
+    [ingredients?.profiles, rangeIntakes, substances, days],
+  );
+  const [compoundKey, setCompoundKey] = useState<string>('');
+  const report = reports.find((r) => r.compound === compoundKey) ?? reports[0] ?? null;
+  const [compoundSel, setCompoundSel] = useState<number | null>(null);
+  const [profilesOpen, setProfilesOpen] = useState(false);
+
+  const runAnalyze = async (scope: 'missing' | 'all') => {
+    try {
+      const res = await analyze.mutateAsync({ scope });
+      haptics.success();
+      toast.show({
+        message: 'KI-Analyse fertig',
+        detail: `${res.analyzed} analysiert${res.errors.length ? ` · ${res.errors.length} Fehler` : ''}`,
+      });
+    } catch (e) {
+      haptics.warning();
+      toast.show({ message: 'Analyse fehlgeschlagen', detail: (e as Error).message });
+    }
+  };
 
   // ── KPI-Werte ──
   const busiest = DAYPART_DEFS.reduce((a, b) => (daypart.counts[b.key] > daypart.counts[a.key] ? b : a), DAYPART_DEFS[0]);
@@ -286,6 +341,153 @@ export function StatistikScreen() {
                   </p>
                 )}
               </div>
+            )}
+          </Module>
+
+          {/* 3b) Wirkstoff-Bilanz (KI) */}
+          <Module
+            icon={<FlaskConical size={16} />}
+            title="Wirkstoff-Bilanz"
+            subtitle="KI-Schätzung: Gesamtkonsum eines Wirkstoffs über ALLE Quellen (z. B. Koffein aus Energy-Drink, Cola & Kaffee)"
+          >
+            {!ingredients ? (
+              <p className="text-[13px] text-ink-faint">Lädt …</p>
+            ) : !ingredients.available ? (
+              <p className="text-[13px] text-ink-muted leading-snug">
+                KI-Analyse ist nicht konfiguriert (<span className="tabular">ANTHROPIC_API_KEY</span> fehlt). Ohne
+                Schlüssel können keine Wirkstoff-Profile geschätzt werden.
+              </p>
+            ) : (
+              <>
+                <AnalyzeBar
+                  analyzed={Object.keys(ingredients.profiles).length}
+                  total={ingredients.total}
+                  pending={ingredients.missing.length + ingredients.stale.length}
+                  model={ingredients.model}
+                  pendingRun={analyze.isPending}
+                  onAnalyze={() => runAnalyze('missing')}
+                  onReanalyzeAll={() => runAnalyze('all')}
+                />
+
+                {report ? (
+                  <div className="mt-3">
+                    <CompoundChips
+                      reports={reports}
+                      activeKey={report.compound}
+                      onPick={(k) => { setCompoundKey(k); setCompoundSel(null); }}
+                    />
+
+                    {/* Headline */}
+                    <div className="mt-3 flex items-end justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-display text-[28px] leading-none text-ink tabular">
+                          {formatMass(report.totalMg)}
+                        </p>
+                        <p className="text-[12px] text-ink-muted mt-1">
+                          {report.label} gesamt · Ø {formatMass(report.avgPerActiveDay)} / aktivem Tag
+                        </p>
+                        {(() => {
+                          const eq = equivalentFor(report.compound, report.totalMg);
+                          return eq ? (
+                            <p className="text-[12px] text-ink-faint mt-0.5">
+                              ≈ {formatNum(eq.value)} {eq.unit}
+                            </p>
+                          ) : null;
+                        })()}
+                      </div>
+                      <div
+                        className="grid place-items-center size-11 rounded-2xl shrink-0"
+                        style={{ backgroundColor: `${compoundColor(report.compound)}24`, color: compoundColor(report.compound) }}
+                      >
+                        <FlaskConical size={20} />
+                      </div>
+                    </div>
+
+                    {/* Tages-Verlauf */}
+                    <div className="mt-3">
+                      <VBars
+                        values={report.perDay}
+                        color={compoundColor(report.compound)}
+                        avg={report.avgPerActiveDay}
+                        selectedIndex={compoundSel}
+                        onSelect={(i) => { haptics.select(); setCompoundSel((s) => (s === i ? null : i)); }}
+                      />
+                      <AxisTicks days={days} />
+                      {compoundSel != null && (
+                        <p className="mt-2 text-sm text-ink-muted">
+                          <span className="font-medium text-ink">{formatDayLabel(days[compoundSel])}</span>
+                          {' · '}
+                          {formatMass(report.perDay[compoundSel])} {report.label}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Quellen-Aufschlüsselung */}
+                    {report.bySource.length > 0 && (
+                      <div className="mt-4">
+                        <SectionLabel className="mb-2">Quellen</SectionLabel>
+                        <HBars
+                          items={report.bySource.map((s): HBarItem => ({
+                            key: s.key,
+                            label: s.name,
+                            value: s.mg,
+                            valueLabel: formatMass(s.mg),
+                            sub: `${Math.round((s.mg / report.totalMg) * 100)}%`,
+                            color: s.color,
+                            leading: <SubstanceSeal name={s.name} color={s.color} size="sm" />,
+                          }))}
+                        />
+                      </div>
+                    )}
+
+                    {report.unquantified > 0 && (
+                      <p className="mt-3 text-[11px] text-ink-faint leading-snug">
+                        {report.unquantified} Einnahme{report.unquantified === 1 ? '' : 'n'} ohne verwertbare Menge
+                        nicht einberechnet.
+                      </p>
+                    )}
+
+                    {/* Transparenz: So rechnet die KI */}
+                    <button
+                      onClick={() => { haptics.select(); setProfilesOpen((v) => !v); }}
+                      className="press mt-3 flex items-center gap-1.5 text-[12px] font-medium text-ink-muted"
+                      aria-expanded={profilesOpen}
+                    >
+                      So rechnet die KI
+                      <ChevronDown size={14} className={cx('transition-transform', profilesOpen && 'rotate-180')} />
+                    </button>
+                    {profilesOpen && (
+                      <div className="mt-2 space-y-1.5">
+                        {report.bySource.map((s) => {
+                          const prof = ingredients.profiles[s.key]?.profile;
+                          const ing = prof?.ingredients.find((x) => x.compound === report.compound);
+                          if (!prof || !ing) return null;
+                          return (
+                            <p key={s.key} className="text-[11px] text-ink-faint leading-snug">
+                              <span className="text-ink-muted font-medium">{s.name}</span> · {prof.serving.label || `1 ${prof.serving.unit}`} ·{' '}
+                              {formatNum(ing.mgPerServing)} mg {report.label}/Portion
+                            </p>
+                          );
+                        })}
+                        <p className="text-[11px] text-ink-faint leading-snug pt-1">
+                          Schätzwerte der KI ({ingredients.model}) — keine Laborwerte. Mengen werden aus der
+                          protokollierten Portion hochgerechnet.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : Object.keys(ingredients.profiles).length > 0 ? (
+                  <p className="mt-3 text-[13px] text-ink-muted">
+                    In den analysierten Substanzen wurden keine quantifizierbaren Wirkstoffe für diesen Zeitraum
+                    gefunden.
+                  </p>
+                ) : (
+                  <p className="mt-3 text-[13px] text-ink-muted leading-snug">
+                    Noch keine Wirkstoff-Profile. Lass die KI deine Substanzen analysieren, um z. B. dein
+                    Gesamt-Koffein über alle Quellen zu sehen.
+                  </p>
+                )}
+              </>
             )}
           </Module>
 
@@ -477,6 +679,92 @@ function SubstanceChips({
           {s.name}
         </button>
       ))}
+    </div>
+  );
+}
+
+/** Status + KI-Analyse-Auslöser der Wirkstoff-Bilanz. */
+function AnalyzeBar({
+  analyzed,
+  total,
+  pending,
+  model,
+  pendingRun,
+  onAnalyze,
+  onReanalyzeAll,
+}: {
+  analyzed: number;
+  total: number;
+  pending: number;
+  model: string;
+  pendingRun: boolean;
+  onAnalyze: () => void;
+  onReanalyzeAll: () => void;
+}) {
+  if (analyzed === 0) {
+    return (
+      <div className="rounded-2xl bg-primary-soft/40 ring-1 ring-primary/15 p-3.5 flex items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-medium text-ink">KI-Analyse starten</p>
+          <p className="text-[12px] text-ink-muted truncate">{total} Substanzen · Modell {model}</p>
+        </div>
+        <Button size="sm" icon={<Sparkles size={16} />} loading={pendingRun} onClick={onAnalyze}>
+          Analysieren
+        </Button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-3">
+      <div className="flex-1 min-w-0">
+        <p className="text-[12px] text-ink-muted tabular">
+          {analyzed}/{total} analysiert{pending > 0 ? ` · ${pending} offen/veraltet` : ''}
+        </p>
+        <p className="text-[11px] text-ink-faint truncate">Modell {model}</p>
+      </div>
+      {pending > 0 ? (
+        <Button size="sm" icon={<RefreshCw size={15} />} loading={pendingRun} onClick={onAnalyze}>
+          {pending} aktualisieren
+        </Button>
+      ) : (
+        <Button size="sm" variant="ghost" icon={<RefreshCw size={15} />} loading={pendingRun} onClick={onReanalyzeAll}>
+          Neu
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** Wirkstoff-Auswahl (nach Gesamt-mg sortiert), je Wirkstoff eingefärbt. */
+function CompoundChips({
+  reports,
+  activeKey,
+  onPick,
+}: {
+  reports: CompoundReport[];
+  activeKey: string;
+  onPick: (key: string) => void;
+}) {
+  return (
+    <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 pb-1">
+      {reports.map((r) => {
+        const active = r.compound === activeKey;
+        const c = compoundColor(r.compound);
+        return (
+          <button
+            key={r.compound}
+            onClick={() => { haptics.select(); onPick(r.compound); }}
+            className={cx(
+              'press shrink-0 inline-flex items-center gap-1.5 rounded-full h-8 px-3 text-[13px] font-medium ring-1 transition-colors',
+              active ? 'text-white ring-transparent' : 'bg-surface text-ink-muted ring-line hover:bg-surface2',
+            )}
+            style={active ? { backgroundColor: c } : undefined}
+          >
+            {!active && <span className="size-2 rounded-full" style={{ backgroundColor: c }} />}
+            {r.label}
+          </button>
+        );
+      })}
     </div>
   );
 }

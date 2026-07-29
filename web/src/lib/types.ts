@@ -467,3 +467,67 @@ export interface WhatsappTarget {
   enabled: number;       // 0 oder 1 (SQLite-Boolean)
   created_at: string;
 }
+
+// ───────────────────────── Wirkstoff-Profile (KI, Statistik „Wirkstoff-Bilanz") ─────────────────────────
+
+/** Typische Portion einer Substanz, wie der Nutzer sie protokolliert. */
+export interface SubstanceServing {
+  label: string;
+  value: number;
+  unit: string;
+  /** Volumen EINER Portion in ml (Getränke) — erlaubt ml-Umrechnung. */
+  milliliters?: number | null;
+  /** Masse EINER Portion in g (Feststoffe) — erlaubt g/mg-Umrechnung. */
+  grams?: number | null;
+}
+
+/** Ein Wirkstoff/Inhaltsstoff in einer Portion (mg). */
+export interface IngredientEntry {
+  /** Kanonischer, quellenübergreifend gleicher Schlüssel ("caffeine"). */
+  compound: string;
+  /** Deutscher Anzeigename ("Koffein"). */
+  label: string;
+  category: string;
+  mgPerServing: number;
+}
+
+/** KI-Profil einer Substanz (serving + ingredients). */
+export interface SubstanceProfile {
+  serving: SubstanceServing;
+  ingredients: IngredientEntry[];
+  summary: string;
+  confidence: 'low' | 'medium' | 'high';
+}
+
+/** Ein gecachtes Profil samt Metadaten (per nameKey adressiert). */
+export interface SubstanceProfileDTO {
+  name: string;
+  profile: SubstanceProfile;
+  model: string;
+  updatedAt: string;
+  /** True, wenn die Eingabe seit der Analyse verändert wurde. */
+  stale: boolean;
+}
+
+/** Zustand der KI-Wirkstoff-Analyse (GET /api/ingredients). */
+export interface IngredientsState {
+  available: boolean;
+  model: string;
+  /** Profile per nameKey. */
+  profiles: Record<string, SubstanceProfileDTO>;
+  /** Substanzen (mit Einnahmen) ohne Profil. */
+  missing: string[];
+  /** Substanzen mit veraltetem Profil. */
+  stale: string[];
+  /** Substanzen gesamt (mit ≥ 1 Einnahme). */
+  total: number;
+}
+
+/** Ergebnis von POST /api/ingredients/analyze. */
+export interface IngredientsAnalyzeResult {
+  analyzed: number;
+  skipped: number;
+  total: number;
+  errors: { names: string[]; error: string }[];
+  state: IngredientsState;
+}

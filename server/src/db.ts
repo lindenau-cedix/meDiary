@@ -180,10 +180,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_deliveries_dream_target ON dream_deliveries
 -- KI-Wirkstoff-Profile: gecachte LLM-Analyse pro Substanz. Damit die Statistik
 -- „Wirkstoff-Bilanz" (z. B. Gesamt-Koffein aus Energy-Drink + Cola + Kaffee)
 -- ohne jedes Mal einen Modell-Call auskommt. Pro Substanz genau EINE Zeile
--- (substance_key = nameKey = PK -> idempotenter UPSERT). `input_hash` bindet die
+-- (substance_key = nameKey = PK -> idempotenter UPSERT). input_hash bindet die
 -- Analyse an ihre Eingabe (Name + DEFAULTS-Menge/-Notiz + beobachtete Beispiele);
 -- ändert sich die Eingabe, gilt das Profil als „stale" und wird bei der nächsten
--- Analyse neu berechnet. `profile` ist das validierte JSON (serving + ingredients).
+-- Analyse neu berechnet. profile ist das validierte JSON (serving + ingredients).
 CREATE TABLE IF NOT EXISTS substance_profiles (
   substance_key  TEXT PRIMARY KEY,
   substance_name TEXT NOT NULL,
@@ -328,6 +328,19 @@ export interface DailyReportRow {
   date: string;
   report: string;
   source: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Gecachtes KI-Wirkstoff-Profil einer Substanz (Statistik „Wirkstoff-Bilanz"). */
+export interface SubstanceProfileRow {
+  substance_key: string;
+  substance_name: string;
+  /** Hash der Analyse-Eingabe; weicht er vom aktuellen ab, ist das Profil „stale". */
+  input_hash: string;
+  /** Validiertes Profil-JSON (serving + ingredients) — vom Aufrufer geparst. */
+  profile: string;
+  model: string;
   created_at: string;
   updated_at: string;
 }
@@ -490,6 +503,49 @@ export function upsertReport(date: string, report: string, source: string | null
 /** Tagesbericht löschen. Gibt true zurück, wenn etwas gelöscht wurde. */
 export function deleteReport(date: string): boolean {
   return db.prepare(`DELETE FROM daily_reports WHERE date = ?`).run(date).changes > 0;
+}
+
+// ---------- Wirkstoff-Profile (KI-Analyse) — Helfer ----------
+
+/** Profil einer Substanz (per nameKey), oder null. */
+export function getSubstanceProfile(key: string): SubstanceProfileRow | null {
+  return (
+    (db.prepare(`SELECT * FROM substance_profiles WHERE substance_key = ?`).get(key) as
+      | SubstanceProfileRow
+      | undefined) ?? null
+  );
+}
+
+/** Alle gecachten Wirkstoff-Profile. */
+export function listSubstanceProfiles(): SubstanceProfileRow[] {
+  return db.prepare(`SELECT * FROM substance_profiles ORDER BY substance_name`).all() as SubstanceProfileRow[];
+}
+
+/** Profil anlegen/überschreiben (idempotent pro Substanz). */
+export function upsertSubstanceProfile(input: {
+  key: string;
+  name: string;
+  inputHash: string;
+  profile: string;
+  model: string;
+}): SubstanceProfileRow {
+  const now = nowLocalISO();
+  db.prepare(
+    `INSERT INTO substance_profiles (substance_key, substance_name, input_hash, profile, model, created_at, updated_at)
+     VALUES (@key, @name, @inputHash, @profile, @model, @now, @now)
+     ON CONFLICT(substance_key) DO UPDATE SET
+       substance_name = @name,
+       input_hash = @inputHash,
+       profile = @profile,
+       model = @model,
+       updated_at = @now`,
+  ).run({ ...input, now });
+  return getSubstanceProfile(input.key)!;
+}
+
+/** Profil löschen. Gibt true zurück, wenn etwas gelöscht wurde. */
+export function deleteSubstanceProfile(key: string): boolean {
+  return db.prepare(`DELETE FROM substance_profiles WHERE substance_key = ?`).run(key).changes > 0;
 }
 
 // ---------- Plan-Helfer ----------

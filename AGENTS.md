@@ -14,13 +14,30 @@ clientseitig aus vorhandenen Endpunkten aggregiert — **kein Server-/DB-Code**.
   für Freitext-Mengen, Ranglisten, Tages-Dosis-Serien, Tageszeit-Verteilung, Pearson-
   Korrelation), `web/src/components/charts/` (VBars, HBars, Punchcard, DaypartChart,
   DualAxis), `web/src/screens/StatistikScreen.tsx`.
-- **7 Module:** KPI-Band · Konsum-Kalender (Punchcard Substanz×Tag) · Menge über Zeit
+- **8 Module:** KPI-Band · Konsum-Kalender (Punchcard Substanz×Tag) · Menge über Zeit
   (pro Substanz, in deren Einheit — Mengen **nie** über Substanzen summiert) ·
-  Top-Substanzen · Tageszeit-Muster · Plan-Treue über Zeit (reuse `isPlanIntake` +
-  Version-Recency-Indexing aus `HistoryScreen`) · Substanz × Wohlbefinden (Dosis vs.
-  11-Skalen-Metrik, `r` + „Korrelation ≠ Kausalität").
+  **Wirkstoff-Bilanz (KI)** · Top-Substanzen · Tageszeit-Muster · Plan-Treue über Zeit
+  (reuse `isPlanIntake` + Version-Recency-Indexing aus `HistoryScreen`) ·
+  Substanz × Wohlbefinden (Dosis vs. 11-Skalen-Metrik, `r` + „Korrelation ≠ Kausalität").
 - **Geändert:** `App.tsx` (Route), `BottomNav.tsx` (Tab). Verifiziert:
   `typecheck:all` + `web build` grün, 39/39 Analytics-Smoke-Assertions grün.
+
+**KI-„Wirkstoff-Bilanz" — Gesamtkonsum eines Wirkstoffs über ALLE Quellen.** Liest Dose
++ Notiz und rechnet z. B. das **Gesamt-Koffein** aus Energy-Drink + Cola + Kaffee +
+Tablette zusammen. Architektur: das LLM liefert **einmal pro Substanz** ein gecachtes
+„Rezept" (mg Wirkstoff pro Portion + Portionsdefinition), die **Hochrechnung auf die
+protokollierte Menge macht deterministisch der Client**.
+- **Server:** Tabelle `substance_profiles` (Cache, `input_hash` → Stale-Erkennung),
+  `lib/ingredients.ts` (Eingabe sammeln, Prompt, zod-Parse, Chunking à 25),
+  `routes/ingredients.ts` (`GET /api/ingredients` offen; `POST /api/ingredients/analyze`
+  CF-Access + `anthropicAvailable`-503 + Busy-Lock). Reuse `generateText` (dieselbe
+  Anthropic-/MiniMax-Integration wie das KI-Tagebuch, `config.anthropic`).
+- **Client:** `analytics.ts` (`scaleServings`/`applyProfile`/`compoundReports` +
+  Einheiten-Umrechnung mg↔g, ml↔l, Portions-`milliliters`/`grams`, count→Portionen;
+  `equivalentFor` „≈ N Tassen Kaffee") · Modul mit KI-Analyse-Button, Wirkstoff-Chips,
+  Quellen-Aufschlüsselung, „So rechnet die KI"-Transparenz, „Schätzung ≠ Laborwert".
+  Verifiziert: 22 Scaling/Aggregations- + 13 Parse-Smoke-Assertions grün, E2E-Endpunkt
+  (503-Guard) grün.
 
 # meDiary — Medikations-Tagebuch
 
@@ -36,9 +53,11 @@ TTS, ffmpeg-Transcode zu Opus/OGG).
 ```
 meDiary/
 ├── server/                  → HTTP-API (Express + TS + better-sqlite3, ESM)
-│   ├── src/routes/          → 13 Router (intakes, plan, dreams, chat, report, meta, …)
-│   ├── src/lib/             → 22 Module (dreams, anthropic, minimax, elevenlabs,
-│   │                          whatsapp, dream_delivery, diary, chat_agent, …)
+│   ├── src/routes/          → 14 Router (intakes, plan, dreams, chat, report, meta,
+│   │                          **ingredients**, …)
+│   ├── src/lib/             → 23 Module (dreams, anthropic, minimax, elevenlabs,
+│   │                          whatsapp, dream_delivery, diary, chat_agent,
+│   │                          **ingredients** = KI-Wirkstoff-Profile, …)
 │   ├── src/index.ts         → Express-Mounts + Scheduler-Start + WhatsApp-Boot
 │   ├── src/db.ts            → idempotente Schema-Migration (alle Tabellen)
 │   ├── src/dream.ts         → CLI: `npm --prefix server run dream`

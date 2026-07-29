@@ -22,6 +22,7 @@ export const qk = {
   whatsappStatus: () => ['whatsapp', 'status'] as const,
   whatsappQr: () => ['whatsapp', 'qr'] as const,
   whatsappTargets: () => ['whatsapp', 'targets'] as const,
+  ingredients: () => ['ingredients'] as const,
 };
 
 // ---------- Substanzen ----------
@@ -275,6 +276,23 @@ export function useRedeliverDream() {
     mutationFn: (date: string) => api.dreams.redeliver(date),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['deliveries'] });
+    },
+  });
+}
+
+// ---------- Wirkstoff-Profile (KI, Statistik „Wirkstoff-Bilanz") ----------
+export function useIngredients() {
+  return useQuery({ queryKey: qk.ingredients(), queryFn: () => api.ingredients.get(), staleTime: 60_000 });
+}
+export function useAnalyzeIngredients() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { scope?: 'missing' | 'all' } = {}) => api.ingredients.analyze(body),
+    onSuccess: (res) => {
+      // Server liefert den frischen Zustand gleich mit → Cache direkt setzen,
+      // zusätzlich invalidieren für Konsistenz.
+      qc.setQueryData(qk.ingredients(), res.state);
+      qc.invalidateQueries({ queryKey: qk.ingredients() });
     },
   });
 }

@@ -30,6 +30,8 @@ import type {
   WhatsappStatus,
   WhatsappQrResponse,
   WhatsappTarget,
+  IngredientsState,
+  IngredientsAnalyzeResult,
 } from './types';
 import { mirrorApiBaseToWidgets } from './widgetBridge';
 
@@ -298,6 +300,21 @@ export const api = {
           body: JSON.stringify(body),
         }),
     },
+  },
+
+  /**
+   * KI-Wirkstoff-Profile für die Statistik „Wirkstoff-Bilanz". `get()` ist offen
+   * lesbar (gecachte Profile + was fehlt/veraltet ist); `analyze()` ist eine
+   * geschützte (Cloudflare Access) + kostenverursachende LLM-Aktion, die die
+   * fehlenden (oder alle) Substanzen analysiert und cached.
+   */
+  ingredients: {
+    get: () => request<IngredientsState>('/api/ingredients'),
+    analyze: (body: { scope?: 'missing' | 'all' } = {}) =>
+      request<IngredientsAnalyzeResult>('/api/ingredients/analyze', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
   },
 
   /**
