@@ -1,12 +1,12 @@
 import { cx } from '../lib/cx';
 
 /**
- * Wenige 1px-Sterne mit niedriger Deckkraft, deterministisch platziert
- * (keine Zufallszahlen → stabil über Re-Renders). Optionales sehr langsames
- * Funkeln (per CSS, automatisch aus bei `prefers-reduced-motion`).
+ * A handful of 1px stars with low opacity, placed deterministically (no
+ * random numbers → stable across re-renders). Optional very slow twinkle
+ * via CSS, automatically disabled when `prefers-reduced-motion` is set.
  */
 
-// Deterministische „zufällig wirkende" Positionen (x%, y%, größe px, delay s).
+// Deterministic "random-looking" positions (x%, y%, size px, delay s).
 const STARS: [number, number, number, number][] = [
   [8, 18, 1, 0],
   [22, 9, 1, 1.4],

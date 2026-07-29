@@ -2,23 +2,25 @@ import { Fragment, type ReactNode } from 'react';
 import { cx } from '../lib/cx';
 
 /**
- * Leichtgewichtiger Renderer für den Traum-Text (die KI-Auswertung). Der Text
- * kommt als einfaches Markdown (Überschriften `##`, Listen `-`/`1.`, **fett**,
- * Absätze). Keine Markdown-Dependency — wir parsen genau die Formen, die
- * `system_prompt.md` erzeugt, und bleiben sonst tolerant.
+ * Lightweight renderer for the dream text (the AI-generated summary). The
+ * content arrives as simple Markdown (headings `##`, lists `-`/`1.`,
+ * **bold**, paragraphs). No Markdown dependency — we parse exactly the
+ * shapes `system_prompt.md` produces and stay tolerant otherwise.
  *
  * `tone`:
- *   'surface' — Lesefläche auf der normalen App-Karte (Traum-Tab): beste
- *               Lesbarkeit/AA-Kontrast in Light & Dark.
- *   'night'   — auf dem Nacht-Verlauf (Startup-Dialog): weiches Off-White.
+ *   'surface' — reading surface on the regular app card (Dreams tab): best
+ *               readability/AA contrast in light & dark.
+ *   'night'   — on the night backdrop (startup dialog): soft off-white.
+ *
+ * The dream text is data — never translated.
  */
 type Tone = 'surface' | 'night';
 
 function renderInline(text: string, key: number): ReactNode {
-  // **fett** → <strong>. Paart `**` non-greedy und erlaubt einzelne `*` im
-  // Innern (z. B. „**Schlaf*qualität* gut**"), ohne rohe Marker zu zeigen.
-  // Unbalancierte/überzählige `**` bleiben als Klartext im Zwischensegment
-  // stehen — es entsteht NIE ein verwaister einzelner `*`-Marker.
+  // **bold** → <strong>. Pairs `**` non-greedily and allows single `*` inside
+  // (e.g. "**sleep *quality* good**"), without exposing raw markers.
+  // Unbalanced/extra `**` stay as plain text in the surrounding segment —
+  // there is never an orphaned lone `*` marker.
   const re = /\*\*([\s\S]+?)\*\*/g;
   const nodes: ReactNode[] = [];
   let last = 0;
@@ -79,7 +81,7 @@ export function DreamProse({ content, tone = 'surface', className }: { content: 
 
   for (const raw of lines) {
     const line = raw.trimEnd();
-    // Horizontale Linie (`---`, `***`, `___`) ignorieren statt als Klartext zu zeigen.
+    // Horizontal rule (`---`, `***`, `___`) — ignore instead of showing as plain text.
     if (/^\s*([-*_])\1{2,}\s*$/.test(line)) {
       flushPara();
       flushList();

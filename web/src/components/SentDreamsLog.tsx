@@ -8,31 +8,38 @@ import { formatFull, formatTime } from '../lib/format';
 import { useDeliveries, useWhatsappStatus, useRedeliverDream } from '../lib/queries';
 import { useToast } from './Toaster';
 import type { DreamDelivery, DeliveryStatus } from '../lib/types';
+import { activeIntlLocale, useT } from '../lib/i18n';
 
-// Uhrzeit-/Datumsanzeige der Zustellung. `takenAt`-Strings sind lokale
-// Wanduhr ("YYYY-MM-DDTHH:mm:ss"); formatTime schneidet HH:MM heraus.
-const monthFmt = new Intl.DateTimeFormat('de-DE', { month: 'long', year: 'numeric' });
-/** "Juni 2026" für die Monats-Gruppierung. */
+/**
+ * Timestamp/date display for a delivery. `takenAt` strings are local
+ * wall-clock timestamps ("YYYY-MM-DDTHH:mm:ss"); `formatTime` slices out
+ * HH:MM. Formatters are built inside render (not as module constants) so a
+ * language switch takes effect on the next render.
+ */
+
 function formatMonthLabel(date: string): string {
-  return monthFmt.format(new Date(`${date}T12:00:00`));
+  const fmt = new Intl.DateTimeFormat(activeIntlLocale(), { month: 'long', year: 'numeric' });
+  return fmt.format(new Date(`${date}T12:00:00`));
 }
 
-const dateFmt = new Intl.DateTimeFormat('de-DE', { day: 'numeric', month: 'short' });
-/** "16. Juni · 04:20" aus einem lokalen Zeitstempel. */
+/** "16 June · 04:20" from a local timestamp. */
 function formatDeliveryStamp(ts: string): string {
+  const fmt = new Intl.DateTimeFormat(activeIntlLocale(), { day: 'numeric', month: 'short' });
   const d = new Date(ts.replace(' ', 'T'));
   if (Number.isNaN(d.getTime())) return ts;
-  return `${dateFmt.format(d)} · ${formatTime(ts.length > 10 ? ts : `${ts}T00:00`)}`;
+  return `${fmt.format(d)} · ${formatTime(ts.length > 10 ? ts : `${ts}T00:00`)}`;
 }
 
-const STATUS_META: Record<DeliveryStatus, { label: string; pill: string }> = {
-  sent: { label: 'Gesendet', pill: 'bg-emerald-900/40 text-emerald-300' },
-  failed: { label: 'Fehlgeschlagen', pill: 'bg-amber-900/40 text-amber-300' },
-  abandoned: { label: 'Abgebrochen', pill: 'bg-rose-900/40 text-rose-300' },
-  pending: { label: 'Ausstehend', pill: 'bg-zinc-800 text-zinc-400' },
+// Status pills — visual styling is fixed; only the label is translated.
+const STATUS_PILL: Record<DeliveryStatus, string> = {
+  sent: 'bg-emerald-900/40 text-emerald-300',
+  failed: 'bg-amber-900/40 text-amber-300',
+  abandoned: 'bg-rose-900/40 text-rose-300',
+  pending: 'bg-zinc-800 text-zinc-400',
 };
 
 export function SentDreamsLog() {
+  const t = useT();
   const { data, isLoading, error, refetch } = useDeliveries({ limit: 200 });
   const { data: status } = useWhatsappStatus();
   const adminEnabled = status?.adminEnabled ?? false;
@@ -44,12 +51,12 @@ export function SentDreamsLog() {
     return (
       <div className="flex flex-col items-center gap-3 py-16 text-center">
         <AlertCircle size={26} className="text-ink-muted" />
-        <p className="text-sm text-ink-muted">Der Zustell-Verlauf konnte nicht geladen werden.</p>
+        <p className="text-sm text-ink-muted">{t('components.sentDreams.loadError')}</p>
         <button
           onClick={() => refetch()}
           className="press inline-flex items-center gap-1.5 rounded-xl bg-surface2 px-3 h-9 text-sm font-semibold text-ink hover:bg-line/60"
         >
-          <RefreshCw size={15} /> Erneut versuchen
+          <RefreshCw size={15} /> {t('action.retry')}
         </button>
       </div>
     );
@@ -66,7 +73,7 @@ export function SentDreamsLog() {
     );
   }
 
-  // Nach Monat gruppieren (Server liefert absteigend nach Datum).
+  // Group by month (server already returns descending by date).
   const groups: { month: string; items: DreamDelivery[] }[] = [];
   for (const d of deliveries) {
     const m = formatMonthLabel(d.dreamDate);
@@ -114,9 +121,9 @@ function DeliveryRow({
   adminEnabled: boolean;
   onOpen: () => void;
 }) {
+  const t = useT();
   const { mutate: redeliver, isPending } = useRedeliverDream();
   const toast = useToast();
-  const meta = STATUS_META[delivery.status];
   const stamp = delivery.sentAt ?? delivery.updatedAt;
   const canRetry = adminEnabled && (delivery.status === 'failed' || delivery.status === 'abandoned');
 
@@ -124,11 +131,22 @@ function DeliveryRow({
     e.stopPropagation();
     haptics.select();
     redeliver(delivery.dreamDate, {
-      onSuccess: () => toast.show({ message: 'Erneut gesendet', tone: 'success' }),
+      onSuccess: () => toast.show({ message: t('components.sentDreams.resent'), tone: 'success' }),
       onError: (err) =>
-        toast.show({ message: 'Erneut senden fehlgeschlagen', detail: (err as Error).message, tone: 'warning' }),
+        toast.show({
+          message: t('components.sentDreams.resendFailed'),
+          detail: (err as Error).message,
+          tone: 'warning',
+        }),
     });
   };
+
+  const statusKey =
+    `components.delivery.status.${delivery.status}` as
+      | 'components.delivery.status.sent'
+      | 'components.delivery.status.failed'
+      | 'components.delivery.status.abandoned'
+      | 'components.delivery.status.pending';
 
   return (
     <button
@@ -139,14 +157,14 @@ function DeliveryRow({
         <h3 className="font-display text-[16px] text-[#ECE7DB] leading-tight min-w-0">
           {formatFull(delivery.dreamDate)}
         </h3>
-        <span className={cx('shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold', meta.pill)}>
-          {meta.label}
+        <span className={cx('shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-semibold', STATUS_PILL[delivery.status])}>
+          {t(statusKey)}
         </span>
       </div>
       <div className="mt-1 flex items-center justify-between gap-3">
         <div className="min-w-0">
           {delivery.voiceStatus === 'failed' && (
-            <p className="text-[12px] text-amber-400 leading-snug">Sprachnachricht fehlgeschlagen</p>
+            <p className="text-[12px] text-amber-400 leading-snug">{t('components.sentDreams.voiceFailed')}</p>
           )}
           {stamp && <p className="text-[12px] text-white/35 leading-snug tabular">{formatDeliveryStamp(stamp)}</p>}
         </div>
@@ -156,7 +174,7 @@ function DeliveryRow({
             disabled={isPending}
             className="press shrink-0 inline-flex items-center gap-1.5 rounded-xl bg-amber-900/30 px-2.5 h-8 text-[12px] font-semibold text-amber-200 hover:bg-amber-900/50 disabled:opacity-50"
           >
-            <RefreshCw size={13} className={cx(isPending && 'animate-spin')} /> Erneut senden
+            <RefreshCw size={13} className={cx(isPending && 'animate-spin')} /> {t('components.sentDreams.retry')}
           </button>
         )}
       </div>
@@ -164,8 +182,9 @@ function DeliveryRow({
   );
 }
 
-/** Listenkopf mit dezentem Nacht-Akzent (Halo + Sternchen). */
+/** List header with a subtle night accent (halo + tiny stars). */
 function SentDreamsHeader() {
+  const t = useT();
   return (
     <div className="relative overflow-hidden rounded-3xl dream-night dream-grain px-5 py-4 ring-1 ring-[rgb(var(--periwinkle))]/20">
       <Starfield count={8} className="opacity-80" />
@@ -174,10 +193,8 @@ function SentDreamsHeader() {
           <Moon size={18} />
         </span>
         <div className="min-w-0">
-          <p className="font-display text-[17px] dream-ink leading-tight">Gesendete Träume</p>
-          <p className="text-[12px] dream-ink-soft leading-snug">
-            Jede Nacht träumt die App und schickt den Traum direkt auf WhatsApp — hier siehst du das Zustell-Protokoll.
-          </p>
+          <p className="font-display text-[17px] dream-ink leading-tight">{t('components.sentDreams.title')}</p>
+          <p className="text-[12px] dream-ink-soft leading-snug">{t('components.sentDreams.subtitle')}</p>
         </div>
       </div>
     </div>
@@ -185,6 +202,7 @@ function SentDreamsHeader() {
 }
 
 function SentDreamsEmpty() {
+  const t = useT();
   return (
     <div className="space-y-4">
       <SentDreamsHeader />
@@ -200,8 +218,7 @@ function SentDreamsEmpty() {
             />
           </svg>
           <p className="text-sm text-[#ECE7DB]/80 leading-relaxed max-w-xs">
-            Noch keine gesendeten Träume. Die App träumt heute Nacht um 04:20 Uhr und schickt den Traum direkt auf
-            WhatsApp.
+            {t('components.sentDreams.empty')}
           </p>
         </div>
       </div>

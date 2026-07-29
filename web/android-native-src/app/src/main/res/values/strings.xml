@@ -1,34 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Ergänzungen für meDiary-Sample-Widget.
+  Additions for the meDiary sample widget.
 
-  Diese Datei ist als Additiv gedacht — der bestehende Capacitor-
-  Scaffold legt bereits eine strings.xml an. Beim Install-Skript
-  werden die <string>-Einträge per `xmllint` oder manuell in die
-  bestehende Datei gemergt (siehe android-native-src/install.sh).
+  This file is intended as an additive resource file—the existing Capacitor
+  scaffold already creates a strings.xml. The install script merges these
+  <string> entries into the existing file (see android-native-src/install.sh).
 -->
 <resources>
-    <string name="widget_label">meDiary-Sample</string>
-    <string name="widget_config_label">Sample auswählen</string>
-    <string name="widget_config_title">Welches Sample?</string>
-    <string name="widget_config_substance_hint">Substanz</string>
-    <string name="widget_config_amount_hint">Menge (optional)</string>
-    <string name="widget_config_slot_hint">Tageszeit</string>
-    <string name="widget_config_save">Widget anlegen</string>
-    <string name="widget_config_no_api_base">Bitte zuerst die meDiary-App öffnen, damit die Server-Adresse gesetzt wird.</string>
-    <string name="widget_config_loading">Substanzen werden geladen …</string>
-    <string name="widget_config_load_failed">Substanzen konnten nicht geladen werden. Verbindung prüfen.</string>
-    <string name="widget_config_pick_substance">Bitte eine Substanz wählen.</string>
+    <string name="widget_label">meDiary Sample</string>
+    <string name="widget_config_label">Choose sample</string>
+    <string name="widget_config_title">Which sample?</string>
+    <string name="widget_config_substance_hint">Substance</string>
+    <string name="widget_config_amount_hint">Amount (optional)</string>
+    <string name="widget_config_amount_example">e.g. 50 mg</string>
+    <string name="widget_config_slot_hint">Time of day</string>
+    <string name="widget_config_save">Add widget</string>
+    <string name="widget_config_no_api_base">Open the meDiary app first so the server address can be set.</string>
+    <string name="widget_config_loading">Loading substances…</string>
+    <string name="widget_config_load_failed">Could not load substances. Check your connection.</string>
+    <string name="widget_config_pick_substance">Choose a substance.</string>
 
-    <string name="widget_toast_success">Erfasst: %1$s</string>
-    <string name="widget_toast_offline">Server nicht erreichbar</string>
-    <string name="widget_toast_unauth">Bitte App öffnen (Login abgelaufen)</string>
-    <string name="widget_toast_no_api_base">Bitte zuerst die meDiary-App öffnen</string>
-    <string name="widget_toast_unknown">Fehler: %1$s</string>
+    <string name="widget_toast_success">Recorded: %1$s</string>
+    <string name="widget_toast_offline">Server unavailable</string>
+    <string name="widget_toast_unauth">Open the app (login expired)</string>
+    <string name="widget_toast_no_api_base">Open the meDiary app first</string>
+    <string name="widget_toast_unknown">Error: %1$s</string>
+    <string name="widget_toast_no_widget_id">No widget ID</string>
+    <string name="widget_toast_no_binding">No widget configuration</string>
+    <string name="widget_toast_default_intake">Intake</string>
 
-    <string name="widget_slot_morning">Morgens (08:00)</string>
-    <string name="widget_slot_noon">Mittags (13:00)</string>
-    <string name="widget_slot_evening">Abends (19:00)</string>
-    <string name="widget_slot_night">Nachts (22:30)</string>
-    <string name="widget_slot_now">Jetzt (aktuelle Zeit)</string>
+    <string name="widget_slot_morning">Morning (08:00)</string>
+    <string name="widget_slot_noon">Noon (13:00)</string>
+    <string name="widget_slot_evening">Evening (19:00)</string>
+    <string name="widget_slot_night">Night (22:30)</string>
+    <string name="widget_slot_now">Now (current time)</string>
 </resources>

@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { X } from 'lucide-react';
 import { cx } from '../../lib/cx';
 import { IconButton } from './IconButton';
+import { useT } from '../../lib/i18n';
 
 interface SheetProps {
   open: boolean;
@@ -22,6 +23,7 @@ const sizeClass: Record<string, string> = {
 };
 
 export function Sheet({ open, onClose, title, subtitle, children, footer, size = 'md' }: SheetProps) {
+  const t = useT();
   useEffect(() => {
     if (!open) return;
     const prev = document.body.style.overflow;
@@ -64,7 +66,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, size =
               if (info.offset.y > 120 || info.velocity.y > 600) onClose();
             }}
           >
-            {/* Greifer */}
+            {/* Drag handle */}
             <div className="pt-2.5 pb-1 grid place-items-center sm:hidden">
               <span className="h-1.5 w-11 rounded-full bg-line" />
             </div>
@@ -75,7 +77,7 @@ export function Sheet({ open, onClose, title, subtitle, children, footer, size =
                   {title && <h2 className="font-display text-[22px] leading-tight text-ink truncate">{title}</h2>}
                   {subtitle && <p className="text-sm text-ink-muted mt-0.5">{subtitle}</p>}
                 </div>
-                <IconButton label="Schließen" onClick={onClose} className="-mr-1 mt-0.5">
+                <IconButton label={t('action.close')} onClick={onClose} className="-mr-1 mt-0.5">
                   <X size={20} />
                 </IconButton>
               </header>

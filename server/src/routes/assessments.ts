@@ -7,7 +7,7 @@ import { METRIC_KEYS } from '../lib/metrics.js';
 
 export const assessmentsRouter = Router();
 
-/** Liste für Trends. ?from=YYYY-MM-DD&to=YYYY-MM-DD (aufsteigend nach Datum). */
+/** List for trends. ?from=YYYY-MM-DD&to=YYYY-MM-DD (ascending by date). */
 assessmentsRouter.get('/', (req, res) => {
   const where: string[] = [];
   const params: Record<string, unknown> = {};
@@ -25,7 +25,7 @@ assessmentsRouter.get('/', (req, res) => {
   res.json(rows.map(serializeAssessment));
 });
 
-/** Einzelner Tag. Liefert immer 200 (mit exists-Flag), zum Vorbefüllen des Sheets. */
+/** Single day. Always returns 200 (with an exists flag), for pre-filling the sheet. */
 assessmentsRouter.get('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
   const row = db.prepare(`SELECT * FROM daily_assessments WHERE date = ?`).get(date) as AssessmentRow | undefined;
@@ -35,15 +35,15 @@ assessmentsRouter.get('/:date', (req, res) => {
 
 const scoresSchema = z.record(z.number().int().min(1).max(10));
 
-/** Upsert eines Tages-Assessments. */
+/** Upsert a daily assessment. */
 assessmentsRouter.put('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Ungültiges Datum' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Invalid date' });
 
   const parsed = z.object({ scores: scoresSchema, note: z.string().nullish() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  // nur bekannte Metriken zulassen
+  // only allow known metrics
   const scores: Record<string, number> = {};
   for (const [k, v] of Object.entries(parsed.data.scores)) {
     if (METRIC_KEYS.includes(k)) scores[k] = v;
@@ -66,6 +66,6 @@ assessmentsRouter.put('/:date', (req, res) => {
 assessmentsRouter.delete('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
   const info = db.prepare(`DELETE FROM daily_assessments WHERE date = ?`).run(date);
-  if (info.changes === 0) return res.status(404).json({ error: 'Kein Assessment für diesen Tag' });
+  if (info.changes === 0) return res.status(404).json({ error: 'No assessment for this day' });
   res.status(204).end();
 });

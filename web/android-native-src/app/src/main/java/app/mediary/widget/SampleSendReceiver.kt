@@ -14,16 +14,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Empfängt den Tap auf das Widget. Macht den eigentlichen `POST /api/intakes`
- * und blendet einen Toast ein:
+ * Receives widget taps. Performs the actual `POST /api/intakes` and displays
+ * a toast:
  *
- *  - 201 → "Erfasst: <Substanz> <Menge>"
- *  - 401 → App öffnen (Cookie abgelaufen) + "Bitte App öffnen"
- *  - 0/Netzwerkfehler → "Server nicht erreichbar"
- *  - sonst → "Fehler: <message>"
+ *  - 201 → "Recorded: <substance> <amount>"
+ *  - 401 → open the app (expired cookie) + "Open the app"
+ *  - 0/network error → "Server unavailable"
+ *  - otherwise → "Error: <message>"
  *
- * `goAsync()` ist nötig, weil OkHttp + JSON-Parsing blockieren — der
- * Receiver-Destroy darf erst NACH `pending.finish()` passieren.
+ * `goAsync()` is required because OkHttp and JSON parsing block. The receiver
+ * must not be destroyed until AFTER `pending.finish()`.
  */
 class SampleSendReceiver : BroadcastReceiver() {
 
@@ -35,12 +35,12 @@ class SampleSendReceiver : BroadcastReceiver() {
         if (intent.action != ACTION_SEND_SAMPLE) return
         val widgetId = intent.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, -1)
         if (widgetId < 0) {
-            toast(context, context.getString(R.string.widget_toast_unknown, "Keine Widget-ID"))
+            toast(context, context.getString(R.string.widget_toast_unknown, context.getString(R.string.widget_toast_no_widget_id)))
             return
         }
         val binding = SampleWidgetPrefs.read(context, widgetId)
         if (binding == null) {
-            toast(context, context.getString(R.string.widget_toast_unknown, "Keine Bindung"))
+            toast(context, context.getString(R.string.widget_toast_unknown, context.getString(R.string.widget_toast_no_binding)))
             return
         }
 
@@ -65,7 +65,10 @@ class SampleSendReceiver : BroadcastReceiver() {
                         result.ok -> {
                             toast(
                                 context,
-                                context.getString(R.string.widget_toast_success, label.ifBlank { "Einnahme" }),
+                                context.getString(
+                                    R.string.widget_toast_success,
+                                    label.ifBlank { context.getString(R.string.widget_toast_default_intake) },
+                                ),
                             )
                         }
                         result.status == 401 -> {

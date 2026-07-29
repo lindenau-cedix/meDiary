@@ -9,6 +9,7 @@ import { EmptyState, LoadingScreen } from '../components/ui/feedback';
 import { SubstanceSeal } from '../components/SubstanceSeal';
 import { useToast } from '../components/Toaster';
 import { cx } from '../lib/cx';
+import { useT } from '../lib/i18n';
 import { haptics } from '../lib/haptics';
 import { formatTime, formatDayLabel, dateNDaysAgo } from '../lib/format';
 import { useIntakes, useSubstances, useIntakeMutations, usePlanVersionsWithItems } from '../lib/queries';
@@ -16,18 +17,19 @@ import { isPlanIntake, planDoseIndex, type PlanDoseEntry } from '../lib/plan';
 import type { Intake, Substance } from '../lib/types';
 import { History as HistoryIcon } from 'lucide-react';
 
-/** Stabiler Leer-Index für Einnahmen, für die keine Plan-Version wirksam war. */
+/** Stable empty index for intakes without an effective plan version. */
 const EMPTY_INDEX: Map<string, PlanDoseEntry> = new Map();
 
 export function HistoryScreen() {
+  const t = useT();
   const { data: substances = [] } = useSubstances(true);
   const { data: intakes = [], isLoading } = useIntakes({ from: dateNDaysAgo(120), limit: 1000 });
   const { data: planVersions = [] } = usePlanVersionsWithItems();
-  // „planmäßig" wird zeitpunktgenau bewertet: jede Einnahme gegen die zu ihrem
-  // `takenAt` WIRKSAME Plan-Version (nicht gegen den heute gültigen Plan) —
-  // sonst verlöre eine damals korrekte Einnahme nach einer Dosisänderung den
-  // Badge. Ein Dosis-Index je Version, plus die Versionen nach Wirkungsdatum
-  // (mirror von planVersionAt: effective_from DESC, id DESC).
+  // "On plan" is evaluated at the exact intake time: each intake is checked
+  // against the plan version effective at its `takenAt`, not today's plan.
+  // Otherwise an intake that was correct at the time would lose its badge after
+  // a dose change. Keep one dose index per version and sort versions by recency
+  // (mirroring planVersionAt: effective_from DESC, id DESC).
   const indexByVersion = useMemo(() => {
     const m = new Map<number, Map<string, PlanDoseEntry>>();
     for (const v of planVersions) m.set(v.versionId, planDoseIndex({ items: v.items }));
@@ -70,11 +72,11 @@ export function HistoryScreen() {
 
   return (
     <>
-      <PageHeader title="Verlauf" eyebrow={`${intakes.length} Einnahmen erfasst`} />
+      <PageHeader title={t('history.title')} eyebrow={t('history.count', { count: intakes.length })} />
 
       {usedSubstances.length > 0 && (
         <div className="flex gap-2 overflow-x-auto no-scrollbar -mx-4 px-4 pb-1 mb-4">
-          <FilterChip active={filter === null} onClick={() => setFilter(null)} label="Alle" />
+          <FilterChip active={filter === null} onClick={() => setFilter(null)} label={t('history.filterAll')} />
           {usedSubstances.map((s) => (
             <FilterChip
               key={s.id}
@@ -92,8 +94,8 @@ export function HistoryScreen() {
       ) : groups.length === 0 ? (
         <EmptyState
           icon={<HistoryIcon size={26} />}
-          title="Noch nichts erfasst"
-          description="Erfasste Einnahmen erscheinen hier — chronologisch nach Tagen gruppiert."
+          title={t('history.empty.title')}
+          description={t('history.empty.description')}
         />
       ) : (
         <div className="space-y-6">
@@ -101,7 +103,7 @@ export function HistoryScreen() {
             <section key={date}>
               <div className="flex items-baseline justify-between mb-2 px-1">
                 <h2 className="font-display text-lg text-ink">{formatDayLabel(date)}</h2>
-                <span className="text-xs text-ink-faint tabular">{items.length} Einträge</span>
+                <span className="text-xs text-ink-faint tabular">{t('history.entries', { count: items.length })}</span>
               </div>
               <Card className="divide-y divide-hairline overflow-hidden">
                 {items.map((it) => {
@@ -129,10 +131,10 @@ export function HistoryScreen() {
                           <span className="truncate">{it.substanceName}</span>
                           {inPlan && (
                             <span
-                              title="Substanz und Dosis stimmen mit dem aktuellen Medikationsplan überein"
+                              title={t('history.planMatchTitle')}
                               className="shrink-0 rounded-full bg-primary/15 text-primary text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5"
                             >
-                              Plan
+                              {t('history.planBadge')}
                             </span>
                           )}
                           {it.amount && <span className="font-normal text-ink-muted"> · {it.amount}</span>}
@@ -191,6 +193,7 @@ function IntakeEditSheet({
   substances: Substance[];
   onClose: () => void;
 }) {
+  const t = useT();
   const toast = useToast();
   const { update, remove } = useIntakeMutations();
   const [data, setData] = useState<Intake | null>(intake);
@@ -198,8 +201,7 @@ function IntakeEditSheet({
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
 
-  // Felder befüllen, sobald ein Eintrag geöffnet wird (Daten während der
-  // Schließen-Animation behalten).
+  // Populate fields when an entry opens, retaining data during the close animation.
   useEffect(() => {
     if (intake) {
       setData(intake);
@@ -216,13 +218,13 @@ function IntakeEditSheet({
   const onSave = async () => {
     await update.mutateAsync({ id: current.id, body: { takenAt, amount: amount.trim() || null, notes: note.trim() || null } });
     haptics.success();
-    toast.show({ message: 'Aktualisiert', detail: current.substanceName });
+    toast.show({ message: t('history.updated'), detail: current.substanceName });
     onClose();
   };
   const onDelete = async () => {
     await remove.mutateAsync(current.id);
     haptics.medium();
-    toast.show({ message: 'Gelöscht', detail: current.substanceName });
+    toast.show({ message: t('history.deleted'), detail: current.substanceName });
     onClose();
   };
   const intakeView = current;
@@ -240,20 +242,20 @@ function IntakeEditSheet({
       footer={
         <div className="flex items-center gap-3">
           <Button variant="danger" icon={<Trash2 size={17} />} onClick={onDelete} loading={remove.isPending}>
-            Löschen
+            {t('action.delete')}
           </Button>
           <div className="flex-1" />
           <Button variant="ghost" onClick={onClose}>
-            Abbrechen
+            {t('action.cancel')}
           </Button>
           <Button icon={<Check size={18} />} onClick={onSave} loading={update.isPending}>
-            Speichern
+            {t('action.save')}
           </Button>
         </div>
       }
     >
       <div className="space-y-3 pt-1">
-        <Field label="Zeitpunkt">
+        <Field label={t('history.field.time')}>
           <div className="flex items-center gap-2">
             <Clock3 size={18} className="text-ink-muted" />
             <input
@@ -264,11 +266,11 @@ function IntakeEditSheet({
             />
           </div>
         </Field>
-        <Field label="Menge">
-          <TextInput value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="z. B. 150 mg" />
+        <Field label={t('history.field.amount')}>
+          <TextInput value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t('history.field.amountPlaceholder')} />
         </Field>
-        <Field label="Notiz">
-          <TextArea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder="Notiz …" />
+        <Field label={t('history.field.note')}>
+          <TextArea value={note} onChange={(e) => setNote(e.target.value)} rows={3} placeholder={t('history.field.notePlaceholder')} />
         </Field>
       </div>
     </Sheet>

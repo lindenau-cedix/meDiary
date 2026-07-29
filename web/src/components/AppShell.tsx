@@ -7,7 +7,7 @@ export function AppShell() {
   const reduce = useReducedMotion();
   return (
     <div className="min-h-dvh flex flex-col">
-      {/* Statusleisten-Bereich (Notch / Android-Statusbar) */}
+      {/* Status-bar area (notch / Android status bar). */}
       <div className="h-safe-top shrink-0" />
       <main className="flex-1">
         <div className="mx-auto max-w-app px-4 pb-safe-nav pt-2">

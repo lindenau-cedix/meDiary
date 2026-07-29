@@ -271,7 +271,64 @@ export function assembleDiary(entries: DiaryEntry[], generatedAt: string): strin
 
 // ───────────────────────── KI-Generierung ─────────────────────────
 
-const SYSTEM_PROMPT = [
+type DiaryLang = 'de' | 'en';
+
+/**
+ * Sprachabhängige Prompt-Scaffolding-Strings für die KI-Tagebuch-Generierung.
+ * Bewusst klein gehalten: nur die Überschriften und kurzen Hinweistexte,
+ * nicht die Domain-Daten (Einnahme-Notizen, METRIC-Labels, Hermes-Bericht).
+ */
+const DIARY_LABELS: Record<DiaryLang, {
+  dateLine: (label: string) => string;
+  intakesHeader: string;
+  assessmentHeader: string;
+  assessmentNoteLine: (text: string) => string;
+  habitHeader: (parts: string) => string;
+  habitFull: (first: string, last: string, hours: string) => string;
+  habitHint: string;
+  habitLast: (time: string) => string;
+  habitFirst: (time: string) => string;
+  reportLine: (source: string | null, text: string) => string;
+  closing: string;
+}> = {
+  de: {
+    dateLine: (label) => `Datum: ${label}`,
+    intakesHeader: 'Einnahmen:',
+    assessmentHeader: 'Tagesbild (Skala 1–10):',
+    assessmentNoteLine: (text) => `Tagesnotiz: ${text}`,
+    habitHeader: (parts) => `Gewohnheiten: ${parts}.`,
+    habitFull: (first, last, hours) => `Wachzeit ${first}–${last} (≈ ${hours} h wach)`,
+    habitHint:
+      'Wichtig für die schreibende KI: Das ist die **Wachzeit** (Aufwachen bis Einschlafen), abgeleitet aus Einnahme-Zeitpunkten und einem PC-Interaktions-Webhook. **NICHT** Bildschirmzeit! Die Dauer ist die Spanne vom frühesten Wach-Moment bis zum letzten Wach-Moment des Tages.',
+    habitLast: (time) => `Letzte Wach-Aktivität: ${time}`,
+    habitFirst: (time) => `Erste Wach-Aktivität: ${time}`,
+    reportLine: (source, text) =>
+      `Hermes-Agent-Bericht${source ? ` (Quelle: ${source})` : ''}: ${text}`,
+    closing: 'Schreibe daraus einen Tagebucheintrag für diesen Tag.',
+  },
+  en: {
+    dateLine: (label) => `Date: ${label}`,
+    intakesHeader: 'Intakes:',
+    assessmentHeader: 'Daily assessment (scale 1–10):',
+    assessmentNoteLine: (text) => `Daily note: ${text}`,
+    habitHeader: (parts) => `Habits: ${parts}.`,
+    habitFull: (first, last, hours) => `Wake time ${first}–${last} (≈ ${hours} h awake)`,
+    habitHint:
+      'Important for the writing AI: this is the **wake time** (wake-up to sleep), derived from intake timestamps and a PC-interaction webhook. **NOT** screen time! The duration is the span from the earliest waking moment to the last waking moment of the day.',
+    habitLast: (time) => `Last waking activity: ${time}`,
+    habitFirst: (time) => `First waking activity: ${time}`,
+    reportLine: (source, text) =>
+      `Hermes agent report${source ? ` (source: ${source})` : ''}: ${text}`,
+    closing: 'Write a diary entry for this day from these notes.',
+  },
+};
+
+/**
+ * Deutsche Tagebuch-Persona (Default). Andere Sprachen bekommen die englische
+ * Variante unten — die Persona-Beschreibung wird via `localizedSystemPrompt(lang)`
+ * umgeschaltet.
+ */
+const SYSTEM_PROMPT_DE = [
   'Du bist ein Assistent, der aus stichpunktartigen Notizen eines',
   'Medikations-Tagebuchs einen kurzen, zusammenhängenden Tagebucheintrag in',
   'der Ich-Form auf Deutsch schreibt.',
@@ -285,10 +342,55 @@ const SYSTEM_PROMPT = [
   '  keine Anrede, keine Meta-Kommentare.',
 ].join('\n');
 
-function buildDayPrompt(day: DiaryDay): string {
-  const lines: string[] = [`Datum: ${day.label}`, ''];
+const SYSTEM_PROMPT_EN = [
+  'You are an assistant who turns the bullet-pointed notes of a medication diary',
+  'into a short, coherent first-person diary entry written in English.',
+  '',
+  'Rules:',
+  '- Write strictly from the supplied facts. Do not invent, do not imply',
+  '  diagnoses, do not give medical advice.',
+  '- Mention the substances taken and the observations naturally in the prose.',
+  '- One or two short paragraphs, around 60–160 words. Calm, matter-of-fact tone.',
+  '- Return ONLY the prose — no heading, no bullet points, no salutation,',
+  '  no meta-commentary.',
+].join('\n');
+
+/**
+ * Sprach-Direktive, die AN DEN SYSTEM-PROMPT angehängt wird. Stärker als die
+ * normale Persona, weil das Tagebuch-Feature historisch deutsch ist und ohne
+ * explizite Direktive gerne mal wieder auf Deutsch zurückspringt.
+ */
+function diaryLanguageDirective(lang: 'de' | 'en'): string {
+  if (lang === 'en') {
+    return [
+      '',
+      '## Output language (mandatory, overrides anything above)',
+      '',
+      'You MUST write the diary entry in English — in first person, present/past tense,',
+      'as set up by the system prompt above. Even if parts of the user-supplied notes',
+      'below are in German (substance names, intake notes, the user’s own daily notes,',
+      'the Hermes agent report), your OUTPUT stays English. Do NOT translate quoted',
+      'user data — leave it as-is.',
+    ].join('\n');
+  }
+  return '';
+}
+
+/**
+ * Wählt den passenden System-Prompt (DE bleibt unverändert = bisheriges Verhalten,
+ * EN ersetzt die Persona). Die Sprach-Direktive wird NUR im EN-Fall angehängt —
+ * bei DE ist die Persona selbst schon deutsch und braucht keine Extra-Direktive.
+ */
+function localizedSystemPrompt(lang: 'de' | 'en'): string {
+  const base = lang === 'en' ? SYSTEM_PROMPT_EN : SYSTEM_PROMPT_DE;
+  return base + diaryLanguageDirective(lang);
+}
+
+function buildDayPrompt(day: DiaryDay, lang: DiaryLang = 'de'): string {
+  const L = DIARY_LABELS[lang];
+  const lines: string[] = [L.dateLine(day.label), ''];
   if (day.intakes.length) {
-    lines.push('Einnahmen:');
+    lines.push(L.intakesHeader);
     for (const it of day.intakes) {
       const parts = [`${it.time}`, it.substanceName];
       if (it.amount) parts.push(it.amount);
@@ -301,7 +403,7 @@ function buildDayPrompt(day: DiaryDay): string {
   if (day.assessment) {
     const scoreKeys = Object.keys(day.assessment.scores);
     if (scoreKeys.length) {
-      lines.push('Tagesbild (Skala 1–10):');
+      lines.push(L.assessmentHeader);
       for (const m of METRICS) {
         const v = day.assessment.scores[m.key];
         if (typeof v === 'number') lines.push(`- ${METRIC_LABEL.get(m.key) ?? m.key}: ${v}`);
@@ -309,7 +411,7 @@ function buildDayPrompt(day: DiaryDay): string {
       lines.push('');
     }
     if (day.assessment.note) {
-      lines.push(`Tagesnotiz: ${day.assessment.note}`);
+      lines.push(L.assessmentNoteLine(day.assessment.note));
       lines.push('');
     }
   }
@@ -320,33 +422,36 @@ function buildDayPrompt(day: DiaryDay): string {
       const fmt = (u: number) => {
         const d = new Date(u * 1000);
         const pad = (n: number) => String(n).padStart(2, '0');
-        return `${pad(d.getHours())}:${pad(d.getMinutes())} Uhr`;
+        // Im DE-Modus bleibt "Uhr" als gewohntes Suffix; im EN-Modus ohne Suffix.
+        return lang === 'de'
+          ? `${pad(d.getHours())}:${pad(d.getMinutes())} Uhr`
+          : `${pad(d.getHours())}:${pad(d.getMinutes())}`;
       };
       const parts: string[] = [];
       if (first != null && last != null) {
-        // Wichtig für die schreibende KI: Das ist die **Wachzeit** (Aufwachen
-        // bis Einschlafen), abgeleitet aus Einnahme-Zeitpunkten und einem
-        // PC-Interaktions-Webhook. **NICHT** Bildschirmzeit! Die Dauer ist
-        // die Spanne vom frühesten Wach-Moment bis zum letzten Wach-Moment
-        // des Tages.
         const hours = Math.max(0, (last - first) / 3600);
-        parts.push(`Wachzeit ${fmt(first)}–${fmt(last)} (≈ ${hours.toFixed(1)} h wach)`);
+        parts.push(L.habitFull(fmt(first), fmt(last), hours.toFixed(1)));
       } else if (last != null) {
-        parts.push(`Letzte Wach-Aktivität: ${fmt(last)}`);
+        parts.push(L.habitLast(fmt(last)));
       } else if (first != null) {
-        parts.push(`Erste Wach-Aktivität: ${fmt(first)}`);
+        parts.push(L.habitFirst(fmt(first)));
       }
-      lines.push(`Gewohnheiten: ${parts.join('; ')}.`);
+      lines.push(L.habitHeader(parts.join('; ')));
+      // Hinweis (DE) bzw. (EN) folgt in der Zielsprache — nicht doppelt, daher
+      // kompakt ans Sektionen-Ende angehängt. Damit die KI die wichtige
+      // Wachzeit-Definition sicher liest.
+      if (lang === 'en') {
+        lines.push('');
+        lines.push(L.habitHint);
+      }
       lines.push('');
     }
   }
   if (day.report) {
-    lines.push(
-      `Hermes-Agent-Bericht${day.report.source ? ` (Quelle: ${day.report.source})` : ''}: ${day.report.report}`,
-    );
+    lines.push(L.reportLine(day.report.source, day.report.report));
     lines.push('');
   }
-  lines.push('Schreibe daraus einen Tagebucheintrag für diesen Tag.');
+  lines.push(L.closing);
   return lines.join('\n');
 }
 
@@ -371,8 +476,11 @@ export async function generateDiary(opts: {
   to?: string;
   max?: number;
   now: string;
+  /** Ausgabesprache (Default: config.aiLanguage). */
+  language?: 'de' | 'en';
 }): Promise<DiaryGenerateResult> {
   const scope = opts.scope ?? 'missing';
+  const language = opts.language ?? config.aiLanguage;
   // `all` (explizite Nutzer-Aktion „Alles neu") regeneriert standardmäßig bis
   // zur Obergrenze — deckt reale Tagebücher in einem Aufruf komplett ab;
   // `missing` ergänzt in 30er-Schritten. Hard-Cap 120 Tage/Aufruf.
@@ -393,13 +501,17 @@ export async function generateDiary(opts: {
   // überschreibt nur die `targets`; alles andere bleibt unangetastet.
   const result = new Map<string, DiaryEntry>(existing);
 
+  // System-Prompt EINMAL pro Lauf materialisieren (Persona hängt nicht vom
+  // Einzeltag ab) — spart Prompt-Tokens, die sonst 30× am Tag wiederholt würden.
+  const system = localizedSystemPrompt(language);
+
   let generated = 0;
   for (const day of targets) {
     try {
       // Kein harter maxTokens-Cap hier: der konfigurierte Default
       // (config.anthropic.maxTokens / DIARY_MAX_TOKENS) gibt adaptivem Denken
       // genug Spielraum, ohne den kurzen Tagebuchtext abzuschneiden.
-      const body = await generateText({ system: SYSTEM_PROMPT, prompt: buildDayPrompt(day) });
+      const body = await generateText({ system, prompt: buildDayPrompt(day, language) });
       result.set(day.date, { date: day.date, heading: day.label, body });
       generated++;
     } catch (e) {

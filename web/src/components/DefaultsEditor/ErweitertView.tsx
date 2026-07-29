@@ -1,23 +1,29 @@
 import { TextArea } from '../ui/inputs';
+import { useT } from '../../lib/i18n';
 import type { DefaultsSection } from '../../lib/types';
 
 interface ErweitertViewProps {
-  /** Live-Edit-Puffer im Raw-Modus. */
+  /** Live-edit buffer in raw mode. */
   value: string;
   onChange: (next: string) => void;
-  /** Vorschau-Parsing: was die aktuell im Buffer stehenden Sections nach
-   *  dem nächsten Save ergeben würden. Read-only. */
+  /** Preview parsing: what the sections currently in the buffer would become
+   *  after the next save. Read-only. */
   parsedSections: DefaultsSection[];
 }
 
 /**
- * Raw-Markdown-Editor. Bewusst plain, ohne Syntax-Highlighter —
- * bleibt dependency-frei und spiegelt das aktuelle Verhalten der
- * in-page-Textarea in SettingsScreen. Wird ergänzend zum strukturierten
- * Editor angeboten, damit NACH:/Vorbehalts-Blöcke verlustfrei gepflegt
- * werden können.
+ * Raw Markdown editor. Deliberately plain, no syntax highlighter — keeps
+ * the bundle dependency-free and mirrors the in-page textarea that
+ * SettingsScreen used before this editor existed. It is offered in
+ * addition to the structured editor so AFTER:/reservation blocks can be
+ * maintained losslessly.
+ *
+ * The placeholder text uses the German parser tokens (`## Substanzname`,
+ * `Menge:`, `Notiz:`, `Mit:`) — these are part of the Markdown grammar the
+ * server parses, NOT UI copy.
  */
 export function ErweitertView({ value, onChange, parsedSections }: ErweitertViewProps) {
+  const t = useT();
   return (
     <div className="space-y-3">
       <TextArea
@@ -28,22 +34,26 @@ export function ErweitertView({ value, onChange, parsedSections }: ErweitertView
         autoCapitalize="off"
         autoCorrect="off"
         className="font-mono text-[13px] leading-relaxed"
-        placeholder={'## Substanzname\nMenge: …\nNotiz: …\nMit: … | … | …'}
+        placeholder={t('defaults.raw.placeholder')}
       />
 
       <div className="rounded-3xl bg-surface ring-1 ring-line p-4 space-y-2">
-        <p className="text-sm font-medium text-ink">Aktuell geparst</p>
+        <p className="text-sm font-medium text-ink">{t('defaults.raw.parsedHeading')}</p>
         {parsedSections.length === 0 ? (
-          <p className="text-xs text-ink-faint">Keine Sektionen erkannt.</p>
+          <p className="text-xs text-ink-faint">{t('defaults.raw.parsedEmpty')}</p>
         ) : (
           <ul className="text-xs text-ink-muted space-y-1 font-mono">
             {parsedSections.map((s, idx) => (
               <li key={idx}>
                 ## {s.name}
-                {s.amount && <span className="text-good"> · Menge {s.amount}</span>}
-                {s.note && <span className="text-accent"> · Notiz</span>}
+                {s.amount && <span className="text-good">{t('defaults.raw.parsedWithAmount', { value: s.amount })}</span>}
+                {s.note && <span className="text-accent">{t('defaults.raw.parsedWithNote')}</span>}
                 {s.companions.length > 0 && (
-                  <span className="text-primary"> · {s.companions.length} Mit:</span>
+                  <span className="text-primary">
+                    {s.companions.length === 1
+                      ? t('defaults.raw.parsedWithCompanions.one')
+                      : t('defaults.raw.parsedWithCompanions.many', { count: s.companions.length })}
+                  </span>
                 )}
               </li>
             ))}
@@ -52,11 +62,7 @@ export function ErweitertView({ value, onChange, parsedSections }: ErweitertView
       </div>
 
       <p className="text-xs text-ink-faint leading-relaxed">
-        Pro Substanz eine <code className="text-ink-muted">## Substanzname</code>-Überschrift, darunter optional
-        <code className="text-ink-muted"> Menge:</code>, <code className="text-ink-muted">Notiz:</code> und
-        <code className="text-ink-muted"> Mit:</code>. Menge/Notiz werden beim Eintragen übernommen, wenn sie nicht selbst
-        angegeben wurden. <code className="text-ink-muted">Mit: Name | Menge | Notiz</code> trägt die genannte
-        Begleitsubstanz automatisch als eigene Einnahme mit ein. Wird bei jedem Eintrag frisch gelesen.
+        {t('defaults.raw.helpText')}
       </p>
     </div>
   );

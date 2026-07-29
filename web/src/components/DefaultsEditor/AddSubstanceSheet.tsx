@@ -6,18 +6,20 @@ import { Field, TextInput } from '../ui/inputs';
 import { useToast } from '../Toaster';
 import { haptics } from '../../lib/haptics';
 import { useSubstances, useSubstanceMutations } from '../../lib/queries';
+import { useT } from '../../lib/i18n';
 
 interface AddSubstanceSheetProps {
   open: boolean;
   onClose: () => void;
-  /** Wird mit dem frisch angelegt Substance-Datensatz aufgerufen, damit
-   *  der Editor die Substanz gleich als Substanz-Tile anbieten kann. */
+  /** Called with the freshly created substance record so the editor can
+   *  offer the substance as a tile right away. */
   onCreated: (name: string) => void;
 }
 
-/** Form-Sheet zum Anlegen einer neuen Substanz inline im DEFAULTS-Editor. */
+/** Form sheet to create a new substance inline from the DEFAULTS editor. */
 export function AddSubstanceSheet({ open, onClose, onCreated }: AddSubstanceSheetProps) {
   const toast = useToast();
+  const t = useT();
   const { data: subs = [] } = useSubstances(false);
   const { create } = useSubstanceMutations();
   const [name, setName] = useState('');
@@ -25,6 +27,9 @@ export function AddSubstanceSheet({ open, onClose, onCreated }: AddSubstanceShee
   const [unit, setUnit] = useState('');
 
   const trimmed = name.trim();
+  // The `'de'` locale tag below is a DATA INVARIANT — it gives umlaut-aware
+  // `nameKey` semantics used for duplicate detection across the app. Do
+  // not change.
   const duplicates = trimmed && subs.some((s) => s.name.toLocaleLowerCase('de') === trimmed.toLocaleLowerCase('de'));
 
   const submit = async () => {
@@ -37,7 +42,7 @@ export function AddSubstanceSheet({ open, onClose, onCreated }: AddSubstanceShee
       };
       await create.mutateAsync(body);
       haptics.success();
-      toast.show({ message: 'Substanz angelegt', detail: trimmed });
+      toast.show({ message: t('defaults.toast.substanceCreated'), detail: trimmed });
       onCreated(trimmed);
       setName('');
       setDose('');
@@ -45,40 +50,40 @@ export function AddSubstanceSheet({ open, onClose, onCreated }: AddSubstanceShee
       onClose();
     } catch (e) {
       haptics.warning();
-      toast.show({ tone: 'warning', message: 'Substanz konnte nicht angelegt werden', detail: (e as Error).message });
+      toast.show({ tone: 'warning', message: t('defaults.toast.substanceCreateFailed'), detail: (e as Error).message });
     }
   };
 
   return (
-    <Sheet open={open} onClose={onClose} size="md" title="Neue Substanz" subtitle="Wird als QuickPick-Kachel verfügbar">
+    <Sheet open={open} onClose={onClose} size="md" title={t('defaults.addSheet.title')} subtitle={t('defaults.addSheet.subtitle')}>
       <div className="space-y-3">
-        <Field label="Name" hint="Wird zum Tippen in der Einnahme-Auswahl angezeigt.">
+        <Field label={t('defaults.addSheet.fieldName')} hint={t('defaults.addSheet.fieldNameHint')}>
           <TextInput
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="z. B. Modafinil"
+            placeholder={t('defaults.addSheet.fieldNamePlaceholder')}
             autoCapitalize="off"
             spellCheck={false}
           />
         </Field>
         {duplicates && (
-          <p className="text-xs text-bad pl-1">Eine Substanz mit diesem Namen existiert bereits.</p>
+          <p className="text-xs text-bad pl-1">{t('defaults.addSheet.duplicate')}</p>
         )}
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Standard-Dosis" hint="Optional">
+          <Field label={t('defaults.addSheet.fieldDose')} hint={t('defaults.addSheet.fieldDoseHint')}>
             <TextInput
               value={dose}
               onChange={(e) => setDose(e.target.value)}
-              placeholder="z. B. 100"
+              placeholder={t('defaults.addSheet.fieldDosePlaceholder')}
               inputMode="decimal"
               spellCheck={false}
             />
           </Field>
-          <Field label="Einheit" hint="Optional">
+          <Field label={t('defaults.addSheet.fieldUnit')} hint={t('defaults.addSheet.fieldUnitHint')}>
             <TextInput
               value={unit}
               onChange={(e) => setUnit(e.target.value)}
-              placeholder="z. B. mg"
+              placeholder={t('defaults.addSheet.fieldUnitPlaceholder')}
               spellCheck={false}
             />
           </Field>
@@ -87,7 +92,7 @@ export function AddSubstanceSheet({ open, onClose, onCreated }: AddSubstanceShee
 
       <div className="mt-5 flex items-center justify-end gap-2">
         <Button variant="ghost" size="md" icon={<X size={16} />} onClick={onClose}>
-          Abbrechen
+          {t('defaults.addSheet.cancel')}
         </Button>
         <Button
           variant="primary"
@@ -97,7 +102,7 @@ export function AddSubstanceSheet({ open, onClose, onCreated }: AddSubstanceShee
           loading={create.isPending}
           disabled={!trimmed || !!duplicates}
         >
-          Anlegen
+          {t('defaults.addSheet.create')}
         </Button>
       </div>
     </Sheet>

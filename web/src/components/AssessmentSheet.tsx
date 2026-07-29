@@ -5,12 +5,13 @@ import { Scale } from './ui/Scale';
 import { Button } from './ui/Button';
 import { TextArea } from './ui/inputs';
 import { useToast } from './Toaster';
-import { METRICS } from '../lib/metrics';
+import { metricList } from '../lib/metrics';
 import { scoreColor } from '../lib/colors';
 import { formatFull, relativeDays, dateNDaysAgo } from '../lib/format';
 import { haptics } from '../lib/haptics';
 import { useAssessment, useAssessments, useSaveAssessment } from '../lib/queries';
 import { consumptionToday } from '../lib/time';
+import { useT } from '../lib/i18n';
 
 export function AssessmentSheet({
   open,
@@ -21,24 +22,27 @@ export function AssessmentSheet({
   onClose: () => void;
   date: string;
 }) {
+  const t = useT();
   const toast = useToast();
   const existing = useAssessment(date, open);
   const history = useAssessments(dateNDaysAgo(60), date);
   const save = useSaveAssessment();
-  // `date` ist der **Konsum-Tag** (03:30-Tagesgrenze). Wir kennzeichnen
-  // das im Subtitle explizit — vor allem, wenn er ein anderer ist als der
-  // aktuelle Wand­uhr-Tag (z. B. bei Nachtrag um 02:30, das zum Vortag
-  // gehört) oder wenn der Sheet rückwirkend aus dem "Werte"-Tab geöffnet
-  // wurde (kann jeder beliebige Konsum-Tag sein).
+  // `date` is the consumption day (the 03:30 boundary). We surface that
+  // explicitly in the subtitle — especially when it differs from the
+  // current wall-clock day (e.g. a backdated log at 02:30 that belongs to
+  // the previous day) or when the sheet was opened retroactively from the
+  // "Trends" tab (any consumption day).
   const today = consumptionToday();
-  const subtitle = `${formatFull(date)} · ${date === today ? 'Heute' : relativeDays(date)}`;
+  const isToday = date === today;
+  const relative = isToday ? t('date.today') : relativeDays(date);
+  const subtitle = t('components.assessmentSheet.subtitle', { date: formatFull(date), when: relative });
 
   const [scores, setScores] = useState<Record<string, number>>({});
   const [note, setNote] = useState('');
   const [carried, setCarried] = useState(false);
   const initFor = useRef<string | null>(null);
 
-  // Initialisieren, sobald das Sheet öffnet und Daten geladen sind
+  // Initialise once the sheet opens and the data has loaded.
   useEffect(() => {
     if (!open) {
       initFor.current = null;
@@ -53,7 +57,7 @@ export function AssessmentSheet({
       setNote(existing.data.note ?? '');
       setCarried(false);
     } else {
-      // Werte des letzten erfassten Tages übernehmen (nur Anpassen, was sich ändert)
+      // Carry forward the most recent logged day's values (only adjust what changed).
       const prior = (history.data ?? []).filter((a) => a.date < date).at(-1);
       if (prior) {
         setScores({ ...prior.scores });
@@ -66,18 +70,30 @@ export function AssessmentSheet({
     }
   }, [open, date, existing.isLoading, existing.data, history.data]);
 
+  const metrics = metricList();
   const setMetric = (key: string, v: number) => setScores((s) => ({ ...s, [key]: v }));
-  const filledCount = METRICS.filter((m) => scores[m.key] != null).length;
+  const filledCount = metrics.filter((m) => scores[m.key] != null).length;
 
   const onSave = async () => {
     try {
       await save.mutateAsync({ date, scores, note: note.trim() || null });
       haptics.success();
-      toast.show({ message: 'Tagesbild gespeichert', detail: `${formatFull(date)} · ${filledCount}/${METRICS.length} Werte` });
+      toast.show({
+        message: t('components.assessmentSheet.savedToast'),
+        detail: t('components.assessmentSheet.savedDetail', {
+          date: formatFull(date),
+          filled: filledCount,
+          total: metrics.length,
+        }),
+      });
       onClose();
     } catch (e) {
       haptics.warning();
-      toast.show({ tone: 'warning', message: 'Speichern fehlgeschlagen', detail: (e as Error).message });
+      toast.show({
+        tone: 'warning',
+        message: t('components.assessmentSheet.failedToast'),
+        detail: (e as Error).message,
+      });
     }
   };
 
@@ -89,39 +105,38 @@ export function AssessmentSheet({
       title={
         <span className="flex items-center gap-2">
           <Moon size={20} className="text-accent" />
-          Tagesbild
+          {t('components.assessmentSheet.title')}
         </span>
       }
       subtitle={subtitle}
       footer={
         <div className="flex items-center gap-3">
           <div className="flex-1 text-sm text-ink-muted">
-            <span className="tabular font-semibold text-ink">{filledCount}</span>/{METRICS.length} erfasst
+            <span className="tabular font-semibold text-ink">{filledCount}</span>/{metrics.length}
+            <span className="ml-1.5">{t('components.assessmentSheet.counterLabel')}</span>
           </div>
           <Button variant="ghost" size="md" onClick={onClose}>
-            Später
+            {t('components.assessmentSheet.later')}
           </Button>
           <Button size="md" icon={<Check size={18} />} loading={save.isPending} onClick={onSave}>
-            Speichern
+            {t('action.save')}
           </Button>
         </div>
       }
     >
       <p className="text-sm text-ink-muted leading-relaxed mb-1">
-        {date === today
-          ? 'Die Nachtmedikation ist erfasst. Wie war der heutige Tag? Skala 1–10.'
+        {isToday
+          ? t('components.assessmentSheet.promptToday')
           : date < today
-            ? `Werte für ${relativeDays(date)} nachtragen oder anpassen. Skala 1–10.`
-            : 'Werte für den kommenden Konsum-Tag voraus-planen. Skala 1–10.'}
+            ? t('components.assessmentSheet.promptPast', { when: relative })
+            : t('components.assessmentSheet.promptFuture')}
       </p>
       {carried && (
-        <p className="text-xs text-accent mb-4">
-          Werte vom letzten Eintrag übernommen — passe nur an, was sich verändert hat.
-        </p>
+        <p className="text-xs text-accent mb-4">{t('components.assessmentSheet.carriedHint')}</p>
       )}
 
       <div className="space-y-5 pb-2">
-        {METRICS.map((m) => {
+        {metrics.map((m) => {
           const v = scores[m.key] ?? null;
           return (
             <div key={m.key}>
@@ -145,7 +160,7 @@ export function AssessmentSheet({
 
         <div className="pt-1">
           <TextArea
-            placeholder="Notiz zum Tag (optional) — Auffälligkeiten, Auslöser, Kontext …"
+            placeholder={t('components.assessmentSheet.notePlaceholder')}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             rows={2}

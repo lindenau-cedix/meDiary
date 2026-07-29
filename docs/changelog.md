@@ -1,304 +1,307 @@
-# meDiary — Letzte Änderungen (Detailhistorie)
+# meDiary — Recent Changes (Detailed History)
 
-> Teil der meDiary-Projektdoku — Übersicht & Index in [CLAUDE.md](../CLAUDE.md).
+> Originally written in German; entries below were translated for the bilingual UI rollout. Entries predate the English UI.
 
-## Letzte Änderungen (jüngste zuerst)
+> Part of the meDiary project documentation — overview & index in [CLAUDE.md](../CLAUDE.md).
 
-- **2026-07-29 — KI-„Wirkstoff-Bilanz": Gesamtkonsum eines Wirkstoffs über alle Quellen**:
-  - **Warum:** Die Statistik konnte Mengen nur pro Substanz zeigen. Frage wie „wie viel
-    **Koffein** nehme ich insgesamt zu mir?" (aus Energy-Drink + Cola + Kaffee + Tablette)
-    war nicht beantwortbar — dazu braucht es Weltwissen über den Wirkstoffgehalt je Quelle.
-  - **Architektur (smart + günstig):** Das LLM liefert **einmal pro Substanz** ein
-    gecachtes „Rezept" — wie viel eines Wirkstoffs in EINER üblichen Portion steckt +
-    eine Portionsdefinition (Einheit, optional ml/g). Die **Hochrechnung auf die
-    tatsächlich protokollierte Freitext-Menge macht deterministisch der Client** (liest
-    also Dose UND Notiz), summiert quellenübergreifend je Wirkstoff. Kein Modell-Call pro
-    Auswertung; Re-Analyse nur bei geänderter Eingabe (`input_hash` → „stale").
-  - **Server:** neue Tabelle `substance_profiles` (Cache, PK = nameKey) + Helfer in `db.ts`;
-    `lib/ingredients.ts` (Eingabe je Substanz aus DEFAULTS-Menge/-Notiz + beobachteten
-    Beispielen sammeln, Prompt mit kanonischen Wirkstoff-Schlüsseln + Few-Shot,
-    zod-validiertes JSON-Parsing tolerant ggü. Codefences/Prosa, Chunking à 25);
-    `routes/ingredients.ts`: `GET /api/ingredients` (offen: Profile + fehlende/veraltete),
-    `POST /api/ingredients/analyze` (Cloudflare Access + 503-Guard + In-Process-Busy-Lock;
-    `scope` missing|all). **Läuft standardmäßig über das MiniMax-Abo** (`config.ingredients`:
-    `INGREDIENTS_API_KEY` > `CHAT_API_KEY` > `MINIMAX_API_KEY`; Anthropic-kompatibler
-    MiniMax-Endpunkt `…/anthropic`, Modell `MiniMax-M3`) — wie die Daten-Konsole, also
-    **kein Anthropic-Key nötig**. Dafür nimmt `generateText` (lib/anthropic.ts) jetzt einen
-    optionalen `client`-Param (`AnthropicClientConfig`), Default weiterhin `config.anthropic`
-    (KI-Tagebuch unverändert).
-  - **Client:** `analytics.ts` → `scaleServings` (Einheiten-Umrechnung mg↔g, ml↔l,
-    Portions-`milliliters`/`grams`, zählbare Einheit → Anzahl Portionen), `applyProfile`,
-    `compoundReports` (Tages-Serie + Quellen-Aufschlüsselung + „unquantifiziert"-Zähler),
-    `equivalentFor` („≈ N Tassen Kaffee"). Neues Statistik-Modul **Wirkstoff-Bilanz**:
-    KI-Analyse-Button (Status/Modell), Wirkstoff-Chips, mg/g-Headline + Vergleichsgröße,
-    Tages-Balken, **Quellen-Ranking** (welche Quelle wie viel beisteuert),
-    „So rechnet die KI"-Transparenz je Quelle, Hinweis „Schätzung ≠ Laborwert".
-    Types/api/queries (`useIngredients`, `useAnalyzeIngredients`) ergänzt.
-  - **Invariante:** Wirkstoff-Summen gelten je kanonischem `compound`-Schlüssel; nicht
-    auflösbare Mengen werden NICHT geschätzt, sondern als „N Einnahmen nicht einberechnet"
-    ausgewiesen (ehrlich statt erfunden).
-  - **Verifikation:** `typecheck:all` + `web build` grün; 22 Scaling-/Aggregations- +
-    13 Parse-Smoke-Assertions grün; E2E gegen `/tmp`-DB: `GET /api/ingredients` liefert
-    Zustand, `POST /analyze` ohne Key → 503, Tabelle wird angelegt.
+## Recent Changes (newest first)
 
-- **2026-07-29 — Neuer „Statistik"-Bereich (grafische Konsum-Auswertung)**:
-  - **Warum:** Einnahmen & Tagesbilder waren bisher nur als Listen sichtbar
-    (Verlauf, Werte). Es fehlte eine grafische Auswertung, die Muster auf einen
-    Blick zeigt („wann wurde wie viel von was konsumiert", Tageszeit-Rhythmus,
-    Plan-Treue, Zusammenhang mit dem Wohlbefinden).
-  - **Neu:** 6. Bottom-Nav-Tab **`/statistik`** (Icon `BarChart3`). Diagramme
-    dependency-frei als Inline-SVG (wie `TrendChart`) — **keine Charting-Library**,
-    offline-APK-tauglich, warme Nacht-Palette. Alles clientseitig aus vorhandenen
-    Endpunkten aggregiert — **kein neuer Server-/DB-Code**.
-  - **Dateien:** `web/src/lib/analytics.ts` (reine Aggregations-/Mathematik-Schicht:
-    `parseAmount` für Freitext-Mengen inkl. Bereichen/Komma/Plural, Ranglisten,
-    Tages-Dosis-Serien mit Dosis-/Count-Fallback, Tageszeit-Verteilung, Pearson-
-    Korrelation); `web/src/components/charts/` (VBars, HBars, Punchcard,
-    DaypartChart, DualAxis + Barrel); `web/src/screens/StatistikScreen.tsx`.
-    Geändert: `App.tsx` (Route), `BottomNav.tsx` (Tab).
-  - **7 Module:** KPI-Band · **Konsum-Kalender** (Punchcard Substanz×Tag, Deckkraft =
-    Einnahmen/Tag relativ zur eigenen Spitze, Tap-Detail) · **Menge über Zeit**
-    (pro Substanz in *deren* Einheit — Freitext-Mengen werden **nie über Substanzen
-    hinweg summiert**; Count-Fallback bei nicht durchgängig parsebaren Mengen) ·
-    **Top-Substanzen** (horizontale Rangbalken) · **Tageszeit-Muster**
-    (Morgens/Mittags/Abends/Nachts + 24-Stunden-Histogramm) · **Plan-Treue über Zeit**
-    (Anteil planmäßiger Einnahmen je Tag; reuse `isPlanIntake` + zeitpunktgenaue
-    Version-Recency-Indexierung aus `HistoryScreen`) · **Substanz × Wohlbefinden**
-    (Tages-Dosis vs. 11-Skalen-Dimension, Doppelachsen-Overlay + Pearson `r` mit
-    Klartext-Einordnung und explizitem Hinweis **„Korrelation ≠ Kausalität"**).
-  - **Lesbarkeit by design:** Substanzfarbe als durchgängige Identität, direkte
-    Beschriftung statt Achsen-Wüste, nach Relevanz sortiert (lange Listen einklappbar),
-    responsive `viewBox` (passt in die `max-w-app`-Spalte, kein Zoomen), 7/30/90/180-T-
-    Umschalter (wie „Werte").
-  - **Verifikation:** `typecheck:all` + `web build` grün; 39/39 Analytics-Smoke-
-    Assertions (parseAmount, Ranking, Dosis-/Count-Serie, Tageszeit, Pearson, Punchcard).
+- **2026-07-29 — AI "Compound Balance": total consumption of an active ingredient across all sources**:
+  - **Why:** Statistics could only show amounts per substance. A question like "how much
+    **caffeine** do I consume in total?" (from energy drink + cola + coffee + tablet)
+    could not be answered — that requires world knowledge about the active ingredient
+    content per source.
+  - **Architecture (smart + cheap):** The LLM provides **once per substance** a cached
+    "recipe" — how much of an active ingredient is in ONE typical serving + a serving
+    definition (unit, optional ml/g). The **extrapolation to the actually logged
+    free-text amount is done deterministically by the client** (reading dose AND note),
+    summed across sources per active ingredient. No model call per analysis; re-analysis
+    only on changed input (`input_hash` → "stale").
+  - **Server:** new table `substance_profiles` (cache, PK = nameKey) + helpers in `db.ts`;
+    `lib/ingredients.ts` (collect input per substance from DEFAULTS amount/note + observed
+    examples, prompt with canonical active ingredient keys + few-shot, zod-validated
+    JSON parsing tolerant of code fences/prose, chunking in batches of 25);
+    `routes/ingredients.ts`: `GET /api/ingredients` (open: profiles + missing/stale),
+    `POST /api/ingredients/analyze` (Cloudflare Access + 503 guard + in-process busy lock;
+    `scope` missing|all). **Runs by default via the MiniMax subscription** (`config.ingredients`:
+    `INGREDIENTS_API_KEY` > `CHAT_API_KEY` > `MINIMAX_API_KEY`; Anthropic-compatible
+    MiniMax endpoint `…/anthropic`, model `MiniMax-M3`) — same as the data console, so
+    **no Anthropic key needed**. For this, `generateText` (lib/anthropic.ts) now takes
+    an optional `client` param (`AnthropicClientConfig`), default still `config.anthropic`
+    (AI diary unchanged).
+  - **Client:** `analytics.ts` → `scaleServings` (unit conversion mg↔g, ml↔l,
+    serving `milliliters`/`grams`, countable unit → number of servings), `applyProfile`,
+    `compoundReports` (daily series + source breakdown + "unquantified" counter),
+    `equivalentFor` ("≈ N cups of coffee"). New statistics module **Compound Balance**:
+    AI analysis button (status/model), active ingredient chips, mg/g headline + comparison
+    value, daily bars, **source ranking** (which source contributes how much),
+    "How the AI calculates this" transparency per source, note "Estimate ≠ lab value".
+    Types/api/queries (`useIngredients`, `useAnalyzeIngredients`) added.
+  - **Invariant:** Active ingredient sums apply per canonical `compound` key; amounts
+    that cannot be resolved are NOT estimated, but reported as "N intakes not included"
+    (honest rather than invented).
+  - **Verification:** `typecheck:all` + `web build` green; 22 scaling/aggregation +
+    13 parse smoke assertions green; E2E against `/tmp` DB: `GET /api/ingredients` returns
+    state, `POST /analyze` without key → 503, table is created.
 
-- **2026-07-22 — „planmäßig" jetzt dosis-scharf (Verlauf + Tagesbild-Trigger)**:
-  - **Problem 1 (Verlauf):** Der „Plan"-Badge (History + QuickEntry „Heute
-    erfasst") erschien, sobald die **Substanz** im Plan stand — unabhängig von
-    der Dosis. Eine Abweichung (z. B. 300 mg statt 150 mg) war nicht erkennbar.
-  - **Problem 2 (Tagesbild):** Das 11-Skalen-Assessment wurde ausgelöst, sobald
-    `takenNightMeds.length >= planned.length` — ein **Zähl-Check**, den zwei
-    Einnahmen DERSELBEN Nacht-Med austricksen konnten, obwohl eine andere
-    Nacht-Med noch fehlte.
-  - **Jetzt:**
-    - **Dosis-Match:** Neuer, vergleichs-toleranter `doseKey()` (Umlaute,
-      Whitespace, Einheiten-Abstand, Komma/Punkt, `–—−`-Striche, `%`) — als
-      Server-Spiegel `server/src/lib/doses.ts` ↔ `web/src/lib/plan.ts`
-      (analog zum `nameKey()`-Mirror). `planDoseIndex()` sammelt je Substanz
-      die zulässigen Dosen (Slots + `strength`); `isPlanIntake(intake, index)`
-      verlangt Substanz **und** Dosis. Fehlt eine konkrete Plan-Dosis
-      (nur „✓"), genügt der Substanz-Match; reine Stückzahlen aus den Slots
-      (Formular-Modell, `plan-batch` protokolliert sie als `amount`) zählen
-      bewusst weiter als planmäßige Menge.
-    - **Zeitpunktgenau:** Der Verlauf misst jede Einnahme gegen die zu ihrem
-      `takenAt` **wirksame** Plan-Version (nicht den heutigen Plan) — sonst
-      verlöre eine damals korrekte Einnahme nach einer Dosisänderung den Badge.
-      Dafür liefert `GET /api/plan/versions?withItems=1` alle Versionen inkl.
-      Items; `usePlanVersionsWithItems()` + Auflösung `effective_from ≤ takenAt`
-      (mirror von `planVersionAt`, Tiebreak `id DESC`).
-    - **Nacht-Med-Vollständigkeit dosis-scharf:** `allNightMedsTaken()` prüft
-      jetzt, ob **jede einzelne** geplante Nacht-Med genommen wurde UND ihre
-      Menge der Plan-Dosis (Nacht-Slot bzw. `strength`) entspricht. Kein
-      Zähl-Check mehr, keine Duplikat-Vortäuschung; falsche Dosis ⇒ Tagesbild
-      bleibt aus, bis die Plan-Dosis erfasst ist.
-  - **Dateien:** `server/src/db.ts` (`allNightMedsTaken`), neu
+- **2026-07-29 — New "Statistics" section (graphical consumption analysis)**:
+  - **Why:** Intakes & daily assessments were previously only visible as lists
+    (history, values). A graphical analysis that shows patterns at a glance
+    ("when was how much of what consumed", time-of-day rhythm,
+    plan adherence, correlation with well-being) was missing.
+  - **New:** 6th bottom-nav tab **`/statistik`** (icon `BarChart3`). Charts
+    dependency-free as inline SVG (like `TrendChart`) — **no charting library**,
+    offline-APK-capable, warm night palette. Everything aggregated client-side
+    from existing endpoints — **no new server/DB code**.
+  - **Files:** `web/src/lib/analytics.ts` (pure aggregation/math layer:
+    `parseAmount` for free-text amounts including ranges/comma/plural, rankings,
+    daily dose series with dose/count fallback, time-of-day distribution, Pearson
+    correlation); `web/src/components/charts/` (VBars, HBars, Punchcard,
+    DaypartChart, DualAxis + barrel); `web/src/screens/StatistikScreen.tsx`.
+    Changed: `App.tsx` (route), `BottomNav.tsx` (tab).
+  - **7 modules:** KPI band · **Consumption calendar** (punchcard substance×day,
+    opacity = intakes/day relative to its own peak, tap detail) · **Amount over time**
+    (per substance in *its* unit — free-text amounts are **never summed across
+    substances**; count fallback for amounts that cannot be parsed consistently) ·
+    **Top substances** (horizontal ranking bars) · **Time-of-day pattern**
+    (Morgens/Mittags/Abends/Nachts + 24-hour histogram) · **Plan adherence over time**
+    (share of planned intakes per day; reuse `isPlanIntake` + time-accurate
+    version recency indexing from `HistoryScreen`) · **Substance × well-being**
+    (daily dose vs. 11-scale dimension, dual-axis overlay + Pearson `r` with
+    plain-text assessment and explicit note **"Correlation ≠ causation"**).
+  - **Readability by design:** Substance color as consistent identity, direct
+    labelling instead of axis jungle, sorted by relevance (long lists collapsible),
+    responsive `viewBox` (fits in the `max-w-app` column, no zoom), 7/30/90/180-day
+    toggle (like "Values").
+  - **Verification:** `typecheck:all` + `web build` green; 39/39 analytics smoke
+    assertions (parseAmount, ranking, dose/count series, time-of-day, Pearson, punchcard).
+
+- **2026-07-22 — "Planned" is now dose-accurate (history + daily assessment trigger)**:
+  - **Problem 1 (history):** The "Plan" badge (History + QuickEntry "Logged today")
+    appeared as soon as the **substance** was in the plan — regardless of
+    the dose. A deviation (e.g. 300 mg instead of 150 mg) was not detectable.
+  - **Problem 2 (daily assessment):** The 11-scale assessment was triggered as soon
+    as `takenNightMeds.length >= planned.length` — a **count check** that two
+    intakes of the SAME night medication could trick, even though another
+    night medication was still missing.
+  - **Now:**
+    - **Dose match:** New, comparison-tolerant `doseKey()` (umlauts,
+      whitespace, unit spacing, comma/dot, `–—−` dashes, `%`) — as
+      server mirror `server/src/lib/doses.ts` ↔ `web/src/lib/plan.ts`
+      (analogous to the `nameKey()` mirror). `planDoseIndex()` collects per substance
+      the allowed doses (slots + `strength`); `isPlanIntake(intake, index)`
+      requires substance **and** dose. If a concrete plan dose is missing
+      (only "✓"), the substance match is sufficient; pure piece counts from the slots
+      (form model, `plan-batch` logs them as `amount`) deliberately
+      still count as planned amounts.
+    - **Time-accurate:** History measures each intake against the plan version
+      **effective** at its `takenAt` (not today's plan) — otherwise a
+      intake that was correct at the time would lose the badge after a dose change.
+      For this, `GET /api/plan/versions?withItems=1` returns all versions including
+      items; `usePlanVersionsWithItems()` + resolution `effective_from ≤ takenAt`
+      (mirror of `planVersionAt`, tiebreak `id DESC`).
+    - **Night-med completeness dose-accurate:** `allNightMedsTaken()` now checks
+      whether **each** planned night medication was taken AND its
+      amount matches the plan dose (night slot or `strength`). No more
+      count check, no duplicate pretense; wrong dose ⇒ daily assessment
+      stays out until the plan dose is logged.
+  - **Files:** `server/src/db.ts` (`allNightMedsTaken`), new
     `server/src/lib/doses.ts`, `server/src/routes/plan.ts` (`?withItems=1`),
     `web/src/lib/plan.ts`, `web/src/lib/{api,queries,types}.ts`,
     `web/src/screens/{HistoryScreen,QuickEntryScreen}.tsx`.
-  - **Bewusst offen gelassen:** Die Traum-Kontext-Sektion „Außerplanmäßiger
-    Konsum" (`lib/dreams.ts`) klassifiziert weiter nur namensbasiert — eine
-    Dosis-Abweichung ist keine „außerplanmäßige" Substanz und bräuchte eine
-    eigene Kategorie im Prompt.
-  - **Verifiziert:** `typecheck:all` sauber; Smoke-Tests gegen `/tmp`
-    (Nacht-Med-Vollständigkeit: Duplikat ohne 2. Med → kein Trigger, falsche
-    Dosis → kein Trigger, Anzahl-Slot „1" & Groß/klein → Trigger; Dosis-Match:
-    exakt/ohne-Space/Case/Range → Badge, Abweichung/`null` → keiner;
-    zeitpunktgenaue Auflösung: alte 100-mg-Einnahme behält Badge trotz
-    heutigem 150-mg-Plan; `?withItems=1`-Endpoint liefert Items).
+  - **Deliberately left open:** The dream context section "Unplanned consumption"
+    (`lib/dreams.ts`) continues to classify only by name — a
+    dose deviation is not an "unplanned" substance and would need its own
+    category in the prompt.
+  - **Verified:** `typecheck:all` clean; smoke tests against `/tmp`
+    (night-med completeness: duplicate without 2nd med → no trigger, wrong
+    dose → no trigger, count slot "1" & upper/lower case → trigger; dose match:
+    exact/without-space/case/range → badge, deviation/`null` → none;
+    time-accurate resolution: old 100 mg intake keeps badge despite
+    today's 150 mg plan; `?withItems=1` endpoint returns items).
 
-- **2026-07-21 — Standarddosis: Single Source of Truth in DEFAULTS.md**:
-  - **Problem:** Die „Standarddosis" einer Substanz gab es doppelt — in der
-    DB-Spalte `substances.default_dose` (befüllt vom Substanz-Formular) UND
-    als `Menge:` in `DEFAULTS.md`. Beim Anlegen einer Substanz landete die
-    Dosis nur in der DB, nie in `DEFAULTS.md`. Sie funktionierte trotzdem
-    (Auflösungskette `explizit > default_dose > DEFAULTS`), aber die Datei
-    war nicht mehr die Wahrheit, und der Compliance-Check meldete solche
-    Substanzen fälschlich als „missing".
-  - **Jetzt:** `DEFAULTS.md` ist die **einzige** Quelle für Standard-Mengen.
-    - `POST/PATCH /api/substances` schreibt `defaultDose` über den neuen
-      Helper `upsertSectionAmount()` verlustfrei als `Menge:` nach
-      `DEFAULTS.md` (Notiz/`Mit:`/`preLines`/`postLines` bleiben unangetastet);
-      die DB-Spalte wird mit `NULL` befüllt. Bei Umbenennung entfernt
-      `clearSectionAmount()` die Menge unter dem alten Namen.
-    - `serializeSubstance` liest `defaultDose` via `defaultAmountFor(name)`
-      aus der Datei — dadurch bleiben beide Substanz-UIs (`SubstanceManager`,
-      `AddSubstanceSheet`) und QuickEntry funktional unverändert.
-    - Alle Auflösungsketten in `routes/intakes.ts` (POST `/`, `/text`,
-      `/batch`, `plan-batch` + deren `Mit:`-Companions) sind auf
-      `explizit > DEFAULTS.md` reduziert; die `chat_tools`-Fallbacks für
-      `backfill_intakes` lesen jetzt `defaultAmountFor()`.
-    - **Boot-Migration** `migrateDefaultDosesToDefaultsFile()` (in `index.ts`,
-      neben dem Substanz-Backfill): überführt bestehende `default_dose`-Werte
-      nach `DEFAULTS.md` (bestehende `Menge:` gewinnt bei Konflikt) und leert
-      die Spalte. Idempotent — zweiter Start tut nichts.
-  - **DB-Spalte:** `substances.default_dose` bleibt im Schema (kein
-    destruktives `DROP`), wird aber nie mehr als Autorität gelesen/geschrieben
-    — nur der Undo-Snapshot-Restore in `chat_tools` fasst sie noch an.
-  - **Dateien:** `lib/defaults.ts` (Helper + Migration), `lib/serialize.ts`,
+- **2026-07-21 — Default dose: single source of truth in DEFAULTS.md**:
+  - **Problem:** The "default dose" of a substance existed twice — in the
+    DB column `substances.default_dose` (populated by the substance form) AND
+    as `Menge:` in `DEFAULTS.md`. When creating a substance, the dose
+    only landed in the DB, never in `DEFAULTS.md`. It still worked
+    (resolution chain `explicit > default_dose > DEFAULTS`), but the file
+    was no longer the truth, and the compliance check falsely reported such
+    substances as "missing".
+  - **Now:** `DEFAULTS.md` is the **only** source for default amounts.
+    - `POST/PATCH /api/substances` writes `defaultDose` via the new
+      helper `upsertSectionAmount()` losslessly as `Menge:` to
+      `DEFAULTS.md` (note/`Mit:`/`preLines`/`postLines` remain untouched);
+      the DB column is filled with `NULL`. On rename,
+      `clearSectionAmount()` removes the amount under the old name.
+    - `serializeSubstance` reads `defaultDose` via `defaultAmountFor(name)`
+      from the file — so both substance UIs (`SubstanceManager`,
+      `AddSubstanceSheet`) and QuickEntry remain functionally unchanged.
+    - All resolution chains in `routes/intakes.ts` (POST `/`, `/text`,
+      `/batch`, `plan-batch` + their `Mit:` companions) are now reduced to
+      `explicit > DEFAULTS.md`; the `chat_tools` fallbacks for
+      `backfill_intakes` now read `defaultAmountFor()`.
+    - **Boot migration** `migrateDefaultDosesToDefaultsFile()` (in `index.ts`,
+      next to the substance backfill): transfers existing `default_dose` values
+      to `DEFAULTS.md` (existing `Menge:` wins on conflict) and empties
+      the column. Idempotent — a second start does nothing.
+  - **DB column:** `substances.default_dose` remains in the schema (no
+      destructive `DROP`), but is never read/written as authority again
+      — only the undo snapshot restore in `chat_tools` still touches it.
+  - **Files:** `lib/defaults.ts` (helper + migration), `lib/serialize.ts`,
     `routes/substances.ts`, `routes/intakes.ts`, `lib/chat_tools.ts`,
-    `index.ts`. Kein Frontend-Umbau nötig.
-  - **Verifiziert:** `typecheck:all` sauber; Smoke-Tests gegen `/tmp`
-    (Anlegen + PATCH → `DEFAULTS.md` mit erhaltener Notiz/`Mit:`, DB-Spalte
-    NULL; Migration inkl. Konflikt-Vorrang + Idempotenz; Einnahme ohne Menge
-    zieht Dosis korrekt aus `DEFAULTS.md`).
+    `index.ts`. No frontend rebuild needed.
+  - **Verified:** `typecheck:all` clean; smoke tests against `/tmp`
+    (create + PATCH → `DEFAULTS.md` with preserved note/`Mit:`, DB column
+    NULL; migration including conflict priority + idempotency; intake without amount
+    correctly pulls dose from `DEFAULTS.md`).
 
-- **2026-07-21 — Strukturierter DEFAULTS.md-Editor**:
-  - **Was:** Die einzige Bearbeitungsfläche für `DEFAULTS.md` war bisher
-    ein roher `<TextArea>` in `SettingsScreen` — fehleranfällig für jeden,
-    der nicht regelmäßig mit der Markdown-Struktur arbeitet.
-  - **Jetzt:** Eigener Bildschirm `/standardnotizen` mit zwei Tabs:
-    *Strukturiert* (pro Substanz ein Formular für `Menge`, `Notiz`,
-    `Mit:`-Begleitstoffe + `[NACH/DAVOR …]`-Vorbehalte, die als
-    `preLines`/`postLines` verlustfrei mitgeschleift werden) und *Erweitert
-    (Markdown)* (der bisherige Rohtext-Editor als Power-User-Escape-Hatch).
-    `SettingsScreen` behält die Compliance-Karte mit dem neuen „Eintrag"-
-    Button — dieser navigiert jetzt direkt zur neuen Sektion mit
-    vorausgewähltem Substanznamen.
-  - **Backend:** Neuer Endpunkt `PUT /api/defaults/sections`
-    (zod-validiert, **Cloudflare Access**, fail-closed). Eingabe:
+- **2026-07-21 — Structured DEFAULTS.md editor**:
+  - **What:** The only editing surface for `DEFAULTS.md` was previously
+    a raw `<TextArea>` in `SettingsScreen` — error-prone for anyone
+    who doesn't regularly work with the Markdown structure.
+  - **Now:** Dedicated screen `/standardnotizen` with two tabs:
+    *Structured* (per substance a form for `Menge`, `Notiz`,
+    `Mit:` companions + `[NACH/DAVOR …]` caveats that are carried along
+    losslessly as `preLines`/`postLines`) and *Advanced (Markdown)*
+    (the previous raw text editor as a power-user escape hatch).
+    `SettingsScreen` keeps the compliance card with the new "Edit"
+    button — this now navigates directly to the new section with
+    the substance name pre-selected.
+  - **Backend:** New endpoint `PUT /api/defaults/sections`
+    (zod-validated, **Cloudflare Access**, fail-closed). Input:
     `{ sections: [{ name, amount?, note?, companions: [{name, amount?, note?}], preLines: string[], postLines: string[] }] }`.
-    Server ist der einzige Serializer — verhindert Drift zwischen zwei
-    Schreibpfaden. Existierender raw-`PUT /api/defaults` bleibt als
-    Power-User-Fallback offen.
-  - **Validierung:** Doppelte Namen (case-insensitive via `nameKey()`),
-    fehlende/leere Namen, zu lange Felder (`Menge` ≤ 80, `Notiz` ≤ 1000
-    Zeichen), Selbst-Referenz als Begleitstoff → 400.
-  - **Round-Trip:** `parseSections()` / `buildMarkdownFromParsed()`
-    erhalten Preamble (Titel + Erklärung) und nicht-strukturierte Zeilen
-    (`NACH …:`-Vorbehalte) verlustfrei. Smoke-Tests gegen `/tmp` zeigen:
-    Komplettes Erstellen + Edit + Speichern, parallel laufende
-    `POST /api/intakes` greifen die neuen Defaults sofort ab
-    (Datei-read-frisch, kein Cache).
-  - **Dateien:**
+    Server is the only serializer — prevents drift between two
+    write paths. Existing raw `PUT /api/defaults` remains as
+    power-user fallback.
+  - **Validation:** Duplicate names (case-insensitive via `nameKey()`),
+    missing/empty names, too-long fields (`Menge` ≤ 80, `Notiz` ≤ 1000
+    characters), self-reference as companion → 400.
+  - **Round-trip:** `parseSections()` / `buildMarkdownFromParsed()`
+    preserve preamble (title + explanation) and unstructured lines
+    (`NACH …:` caveats) losslessly. Smoke tests against `/tmp` show:
+    complete create + edit + save, concurrent running
+    `POST /api/intakes` immediately pick up the new defaults
+    (file read fresh, no cache).
+  - **Files:**
     - Server: `server/src/lib/defaults.ts` (`parseSections`,
-      `buildMarkdownFromParsed`, `validateSections`), neue
-      `SectionInput`/`ParsedSections`-Typen,
+      `buildMarkdownFromParsed`, `validateSections`), new
+      `SectionInput`/`ParsedSections` types,
       `server/src/routes/defaults.ts` (`PUT /sections`).
     - Web: `web/src/components/DefaultsEditor/{index, StructuredView,
       SubstanceSection, CompanionRow, ErweitertView, AddSubstanceSheet,
       SaveBar, state}.tsx`,
-      `web/src/screens/DefaultsEditorScreen.tsx`, Routen-Eintrag
+      `web/src/screens/DefaultsEditorScreen.tsx`, route entry
       `/standardnotizen` in `web/src/App.tsx`,
-      `web/src/lib/names.ts` (Client-Spiegel von `nameKey()`),
+      `web/src/lib/names.ts` (client mirror of `nameKey()`),
       `api.defaults.saveSections` + `useSaveDefaultsSections`.
-  - **Kein neuer npm-Dependency.** Reine React/JS-Lösung, spiegelt den
-    dependency-armen Stil der App (`CLAUDE.md`).
+  - **No new npm dependency.** Pure React/JS solution, mirrors the
+    dependency-light style of the app (`CLAUDE.md`).
 
-- **2026-07-12 — WhatsApp-Delivery + ElevenLabs-Voice**:
-  - **Was:** Der nächtliche „Traum" wurde bisher in der App als Popup + Traum-Tab
-    angezeigt. Lese-Fläche war die Web-UI.
-  - **Jetzt:** Jeder generierte Traum wird **per WhatsApp** zugestellt — als
-    formatierte Textnachricht (WhatsApp-Markdown) UND als native
-    **Sprachnachricht** (Opus/OGG, im WhatsApp-Voice-Note-Player). WhatsApp ist
-    jetzt die primäre Lese-Fläche; die App zeigt nur noch ein
-    „Gesendete Träume"-Log mit Status (sent / failed / abandoned / pending).
-  - **Architektur:**
-    - **Server:** `server/src/lib/whatsapp.ts` (Baileys-Singleton, QR-Pairing,
-      persistente Auth in `WHATSAPP_SESSION_PATH`), `server/src/lib/elevenlabs.ts`
-      (TTS-Client, ElevenLabs `eleven_multilingual_v2`), `server/src/lib/ffmpeg.ts`
-      (MP3 → Opus/OGG Transcoder), `server/src/lib/dream_delivery.ts`
-      (Orchestrator + Markdown→WhatsApp-Formatter), `server/src/routes/whatsapp.ts`
-      + `server/src/routes/deliveries.ts` (Admin-API), neue Tabellen
+- **2026-07-12 — WhatsApp delivery + ElevenLabs voice**:
+  - **What:** The nightly "dream" was previously shown in the app as a popup + dream tab.
+    The reading surface was the web UI.
+  - **Now:** Every generated dream is delivered **via WhatsApp** — as
+    formatted text message (WhatsApp Markdown) AND as native
+    **voice note** (Opus/OGG, in the WhatsApp voice note player). WhatsApp is
+    now the primary reading surface; the app only shows a
+    "Sent dreams" log with status (sent / failed / abandoned / pending).
+  - **Architecture:**
+    - **Server:** `server/src/lib/whatsapp.ts` (Baileys singleton, QR pairing,
+      persistent auth in `WHATSAPP_SESSION_PATH`), `server/src/lib/elevenlabs.ts`
+      (TTS client, ElevenLabs `eleven_multilingual_v2`), `server/src/lib/ffmpeg.ts`
+      (MP3 → Opus/OGG transcoder), `server/src/lib/dream_delivery.ts`
+      (orchestrator + Markdown→WhatsApp formatter), `server/src/routes/whatsapp.ts`
+      + `server/src/routes/deliveries.ts` (admin API), new tables
       `delivery_targets` + `dream_deliveries`.
     - **Pipeline:** `04:20 cron → generateDream() → upsertDream() →
       enqueueDelivery() → formatDreamForWhatsApp() → whatsapp.sendText() +
       ElevenLabs.synthesize() → ffmpeg MP3→Opus → whatsapp.sendVoiceNote({ptt:true})
       → dream_deliveries.status='sent'`.
-    - **Web:** `web/src/components/SentDreamsLog.tsx` (ersetzt `DreamHistory`
-      im Tagebuch-Tab), `web/src/components/SentDreamDrawer.tsx`
-      (Slide-in mit „Erneut senden"),
-      `web/src/components/AdminWhatsappPanel.tsx` (QR-Pairing, Testnachricht,
-      Empfänger-Verwaltung — sichtbar nur wenn `ADMIN_UI_ENABLED=true`). Der
-      `DreamStartupDialog` ist gelöscht.
-    - **Failure-Isolation:** Text und Sprachnachricht werden unabhängig getrackt.
-      Wenn die Sprach-Synthese fehlt, gilt die Nachricht trotzdem als zugestellt
-      (UI zeigt „Sprachnachricht fehlgeschlagen"). Wenn die Text-Zustellung
-      fehlt, geht der Traum nicht verloren — er ist bereits in der `dreams`-
-      Tabelle gespeichert, und `retryFailedDeliveries()` (Boot-Sweep) versucht es
-      bis zu 3× erneut. Nach 3 Fehlversuchen: `abandoned`.
-  - **Neue Env-Variablen:** `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` (Default
+    - **Web:** `web/src/components/SentDreamsLog.tsx` (replaces `DreamHistory`
+      in the diary tab), `web/src/components/SentDreamDrawer.tsx`
+      (slide-in with "Resend"),
+      `web/src/components/AdminWhatsappPanel.tsx` (QR pairing, test message,
+      recipient management — visible only when `ADMIN_UI_ENABLED=true`). The
+      `DreamStartupDialog` is deleted.
+    - **Failure isolation:** Text and voice note are tracked independently.
+      If voice synthesis fails, the message still counts as delivered
+      (UI shows "Voice note failed"). If text delivery
+      fails, the dream is not lost — it's already stored in the `dreams`
+      table, and `retryFailedDeliveries()` (boot sweep) tries again
+      up to 3×. After 3 failures: `abandoned`.
+  - **New env variables:** `ELEVENLABS_API_KEY`, `ELEVENLABS_VOICE_ID` (default
     `OO0WT3lY2gVNwzZMAjAI`), `ELEVENLABS_MODEL`, `ELEVENLABS_BASE_URL`,
     `ELEVENLABS_OUTPUT_FORMAT`, `ELEVENLABS_HTTP_TIMEOUT_MS`, `WHATSAPP_DISABLED`,
     `WHATSAPP_SESSION_PATH` (Docker: `/data/whatsapp-session`),
     `DREAM_DELIVERY_DISABLED`, `DREAM_DELIVERY_MAX_ATTEMPTS`,
     `DREAM_DELIVERY_RETRY_DAYS`, `DREAM_VOICE_TIMEOUT_MS`, `DREAM_VOICE_MAX_CHARS`,
     `ADMIN_UI_ENABLED`.
-  - **Neue Abhängigkeiten (server):** `@whiskeysockets/baileys@^7.0.0-rc.13`,
-    `pino@^9.5.0`, `qrcode@^1.5.4`, `@hapi/boom@^10.0.1`. Docker: `ffmpeg` zum
-    Runtime-Image hinzugefügt.
-  - **ToS-Warnung:** Baileys ist inoffiziell. WhatsApp kann die Nummer sperren.
-    Für Produktion eine dedizierte zweite SIM empfohlen.
-  - **Dateien (komplett):** Siehe git diff. Alle Tests grün:
+  - **New dependencies (server):** `@whiskeysockets/baileys@^7.0.0-rc.13`,
+    `pino@^9.5.0`, `qrcode@^1.5.4`, `@hapi/boom@^10.0.1`. Docker: `ffmpeg` added to
+    runtime image.
+  - **ToS warning:** Baileys is unofficial. WhatsApp may block the number.
+    A dedicated second SIM is recommended for production.
+  - **Files (complete):** See git diff. All tests green:
     `npm run typecheck:all` exit 0.
 
-- **2026-07-09 — Android-Home-Screen-Widget „meDiary-Sample" (1×1)**:
-  - **Feature:** 1×1-Widget, das per Tap eine vorkonfigurierte Einnahme
-    an `POST /api/intakes` schickt und einen Toast einblendet
-    (`Erfasst: Quetiapin 50 mg`). Mehrere Instanzen, jede mit eigener
-    Bindung (Substanz + Menge + Tageszeit). Konfiguration über die
-    Android-Standard-Widget-Config-Activity (System-Flow „Widget
-    hinzufügen" oder Long-Press → Konfigurieren).
-  - **Endpoint-Wahl:** `POST /api/intakes` (single, **nicht** hinter
-    `requireCloudflareAccess`) statt `POST /api/intakes/text` — pro
-    Widget wird genau eine Substanz gebunden, das
-    Freitext-Parsing-Multiline-Handling ist unnötig, und der Endpoint
-    ist im LAN-Deployment mit `CF_ACCESS_DISABLED=true` direkt
-    erreichbar. Server-seitig greifen `Mit:`-Begleitsubstanzen und
-    DEFAULTS-Standarddosis wie beim in-app `submitInstant`-Button.
-  - **Authentifizierung:** `ApiClient.attachCookie()` reicht den
-    `CF_Authorization`-Cookie aus dem WebView-CookieManager sowohl als
-    `Cookie`-Header als auch kanonisch als
-    `Cf-Access-Jwt-Assertion`-Header durch. Bei HTTP 401 öffnet das
-    Widget die App (`MainActivity`), damit der WebView sich neu
-    einloggt; danach funktioniert das Widget wieder.
-  - **API-Base-Spiegelung:** Neues Capacitor-Plugin
-    `app.mediary.bridge.WidgetBridgePlugin` mit Methode `setApiBase()`,
-    das die URL in `SharedPreferences("mediary_widgets")` schreibt. Das
-    Web ruft das Plugin nach jedem `getApiBase()`/`setApiBase()` auf
-    (`web/src/lib/widgetBridge.ts` + Patch in `web/src/lib/api.ts`),
-    damit die Widgets die URL kennen, **bevor** der Nutzer die App je
-    geöffnet hat. Im Browser-Betrieb no-op.
-  - **Native Quellen:** Liegen in `web/android-native-src/` (NICHT
-    Teil des Capacitor-Scaffolds) — fünf Kotlin-Klassen plus ein
-    Bridge-Plugin, XML-Layouts, Drawables, Provider-Metadaten,
-    Strings/Colors und ein `install.sh`, das die Quellen idempotent
-    nach `cap add android` in `web/android/app/src/main/` mergt
-    (Kotlin → `java/`, XML → `res/`, Manifest-Fragment
-    `Config-Activity` + `Provider-Receiver` wird vor `</application>`
-    eingefügt, `androidx.appcompat:appcompat:1.7.0` +
-    `com.squareup.okhttp3:okhttp:4.12.0` werden in `app/build.gradle`
-    ergänzt, falls noch nicht vorhanden).
-  - **Dateien:**
+- **2026-07-09 — Android home screen widget "meDiary-Sample" (1×1)**:
+  - **Feature:** 1×1 widget that sends a pre-configured intake via tap to
+    `POST /api/intakes` and shows a toast
+    (`Erfasst: Quetiapin 50 mg`). Multiple instances, each with its own
+    binding (substance + amount + time of day). Configuration via the
+    Android standard widget config activity (system flow "Add widget"
+    or long-press → Configure).
+  - **Endpoint choice:** `POST /api/intakes` (single, **not** behind
+    `requireCloudflareAccess`) instead of `POST /api/intakes/text` — per
+    widget exactly one substance is bound, the
+    free-text parsing multiline handling is unnecessary, and the endpoint
+    is directly reachable in the LAN deployment with `CF_ACCESS_DISABLED=true`.
+    On the server side, `Mit:` companions and DEFAULTS default dose
+    apply as with the in-app `submitInstant` button.
+  - **Authentication:** `ApiClient.attachCookie()` forwards the
+    `CF_Authorization` cookie from the WebView cookie manager both as
+    `Cookie` header and canonically as
+    `Cf-Access-Jwt-Assertion` header. On HTTP 401, the widget
+    opens the app (`MainActivity`) so the WebView can log in again;
+    afterwards the widget works again.
+  - **API base mirroring:** New Capacitor plugin
+    `app.mediary.bridge.WidgetBridgePlugin` with method `setApiBase()`,
+    which writes the URL to `SharedPreferences("mediary_widgets")`. The
+    web calls the plugin after every `getApiBase()`/`setApiBase()`
+    (`web/src/lib/widgetBridge.ts` + patch in `web/src/lib/api.ts`), so
+    that the widgets know the URL **before** the user has ever opened
+    the app. No-op in browser mode.
+  - **Native sources:** Located in `web/android-native-src/` (NOT
+    part of the Capacitor scaffold) — five Kotlin classes plus a
+    bridge plugin, XML layouts, drawables, provider metadata,
+    strings/colors, and an `install.sh` that merges the sources idempotently
+    into `web/android/app/src/main/` after `cap add android`
+    (Kotlin → `java/`, XML → `res/`, manifest fragment
+    `Config-Activity` + `Provider-Receiver` is inserted before `</application>`,
+    `androidx.appcompat:appcompat:1.7.0` +
+    `com.squareup.okhttp3:okhttp:4.12.0` are added to `app/build.gradle`
+    if not already present).
+  - **Files:**
     `web/android-native-src/{README.md,install.sh,manifest-fragment.xml}`,
     `web/android-native-src/app/src/main/java/app/mediary/widget/{SampleWidgetProvider,SampleWidgetConfigActivity,SampleSendReceiver,ApiClient,SampleWidgetPrefs}.kt`,
     `web/android-native-src/app/src/main/java/app/mediary/bridge/WidgetBridgePlugin.kt`,
     `web/android-native-src/app/src/main/res/{xml/sample_widget_info,layout/widget_sample,layout/activity_widget_config,drawable/widget_background,drawable/widget_preview}.xml`,
     `web/android-native-src/app/src/main/res/values/{strings,colors}.xml`,
     `web/src/lib/widgetBridge.ts`,
-    `web/src/lib/api.ts` (2 Stellen).
-    Doku: `docs/deployment.md` (neuer Abschnitt „Android-Widget"),
-    `docs/architecture.md` (Verzeichnisbaum erweitert),
-    `docs/pitfalls.md` (kurzer Eintrag zu Deep-Doze und fehlendem
-    Preview des letzten Eintrags).
-  - **Verifikation:** Da das Sandbox-Environment kein JDK und kein
-    Android-SDK hat, wurde der `gradlew assembleDebug`-Build nicht
-    hier ausgeführt. Die Install-Prozedur ist in
-    `web/android-native-src/README.md` Schritt für Schritt
-    dokumentiert; wer ein Android-Gerät + SDK hat, kann mit
+    `web/src/lib/api.ts` (2 places).
+    Docs: `docs/deployment.md` (new section "Android widget"),
+    `docs/architecture.md` (directory tree extended),
+    `docs/pitfalls.md` (short entry on deep doze and missing
+    preview of the last entry).
+  - **Verification:** Since the sandbox environment has no JDK and no
+    Android SDK, the `gradlew assembleDebug` build was not
+    executed here. The install procedure is documented in
+    `web/android-native-src/README.md` step by step;
+    anyone with an Android device + SDK can use
     `./android-native-src/install.sh && npm run build && npm run cap:sync
-    && cd android && ./gradlew assembleDebug` die APK bauen und
-    installieren.
+    && cd android && ./gradlew assembleDebug` to build and
+    install the APK.
 
 - **2026-07-04 — Tagesbericht des Hermes-Agents → Traum-Kontext
   (Auftrag `/add-report-api-route`)**:

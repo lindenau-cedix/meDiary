@@ -12,17 +12,17 @@ import { requireCloudflareAccess } from '../lib/cloudflare_access.js';
 export const dreamsRouter = Router();
 
 /**
- * „Träume" = die täglichen KI-Auswertungen (system_prompt.md → MiniMax M3).
- * Lese-Endpunkte sind offen (privates Deployment, wie der Rest der API); der
- * Generieren-Trigger ist geschützt: primär per `X-Dream-Token` (konstantzeit
- * verglichen), Loopback nur als bewusster Opt-in (DREAM_TRUST_LOOPBACK) für
- * Nur-lokal-Deployments — siehe Hinweise an `isLoopback`/`config.dream`.
+ * "Dreams" = the daily AI evaluations (system_prompt.md → MiniMax M3).
+ * Read endpoints are open (private deployment, like the rest of the API); the
+ * generate trigger is protected: primarily via `X-Dream-Token` (compared in
+ * constant time), loopback only as an explicit opt-in (DREAM_TRUST_LOOPBACK)
+ * for local-only deployments — see the notes at `isLoopback`/`config.dream`.
  */
 
-/** Zeitpunkt der letzten Generierung über den HTTP-Trigger (einfacher Rate-Limit). */
+/** Timestamp of the last generation triggered via HTTP (simple rate limit). */
 let lastGenerateAt = 0;
 
-/** Liste der Träume (neueste zuerst). `?from=&to=&limit=`. */
+/** List of dreams (newest first). `?from=&to=&limit=`. */
 dreamsRouter.get('/', (req, res) => {
   const from = typeof req.query.from === 'string' ? req.query.from : undefined;
   const to = typeof req.query.to === 'string' ? req.query.to : undefined;
@@ -35,7 +35,7 @@ dreamsRouter.get('/', (req, res) => {
   });
 });
 
-/** Jüngster Traum (für den Startup-Dialog). 200 mit exists=false, wenn keiner. */
+/** Most recent dream (for the startup dialog). 200 with exists=false if none. */
 dreamsRouter.get('/latest', (_req, res) => {
   const row = latestDream();
   if (!row) return res.json({ exists: false, available: dreamAvailable() });
@@ -45,12 +45,12 @@ dreamsRouter.get('/latest', (_req, res) => {
 const generateSchema = z.object({
   date: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'date muss YYYY-MM-DD sein')
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
     .optional(),
   force: z.boolean().optional(),
 });
 
-/** Konstantzeit-Vergleich (längen-sicher) für das Trigger-Token (CWE-208). */
+/** Constant-time comparison (length-safe) for the trigger token (CWE-208). */
 function tokenMatches(provided: string | undefined, expected: string): boolean {
   if (!provided) return false;
   const a = Buffer.from(provided);
@@ -60,14 +60,14 @@ function tokenMatches(provided: string | undefined, expected: string): boolean {
 }
 
 /**
- * Echtes localhost? Liest BEWUSST `req.socket.remoteAddress` statt `req.ip` —
- * immun gegen ein späteres `app.set('trust proxy', …)`, das `req.ip` aus dem
- * angreifer-kontrollierbaren `X-Forwarded-For` ableiten würde.
+ * True localhost? Deliberately reads `req.socket.remoteAddress` instead of
+ * `req.ip` — immune to a later `app.set('trust proxy', …)` that would derive
+ * `req.ip` from the attacker-controlled `X-Forwarded-For`.
  *
- * ACHTUNG: Hinter einem Same-Host-Reverse-Proxy / cloudflared-Tunnel kommt
- * JEDE externe Anfrage über 127.0.0.1 herein — dort ist Loopback KEINE Auth.
- * Darum greift dieser Pfad nur, wenn `DREAM_TRUST_LOOPBACK=true` explizit
- * gesetzt ist (Default: aus → Token ist Pflicht). 'trust proxy' muss aus bleiben.
+ * WARNING: behind a same-host reverse proxy / cloudflared tunnel, EVERY
+ * external request arrives via 127.0.0.1 — there, loopback is NOT auth.
+ * That is why this path only triggers when `DREAM_TRUST_LOOPBACK=true` is
+ * explicitly set (default: off → token is required). 'trust proxy' must stay off.
  */
 function isLoopback(req: Request): boolean {
   const ip = req.socket.remoteAddress || '';
@@ -75,10 +75,10 @@ function isLoopback(req: Request): boolean {
 }
 
 /**
- * Manueller Trigger (für Tests / Cron). Body `{ date?, force? }`.
- * Schutz (fail-closed): gültiger `X-Dream-Token`-Header (Pflicht, sofern kein
- * vertrauenswürdiges Loopback). Loopback zählt nur mit `DREAM_TRUST_LOOPBACK=
- * true` (reine Nur-lokal-Deployments ohne Proxy/Tunnel davor). Ohne beides → 403.
+ * Manual trigger (for tests / cron). Body `{ date?, force? }`.
+ * Protection (fail-closed): valid `X-Dream-Token` header (required unless a
+ * trusted loopback). Loopback only counts with `DREAM_TRUST_LOOPBACK=true`
+ * (purely local deployments without a proxy/tunnel in front). Without either → 403.
  */
 dreamsRouter.post('/generate', async (req, res) => {
   const token = config.dream.triggerToken;
@@ -87,27 +87,27 @@ dreamsRouter.post('/generate', async (req, res) => {
   if (!tokenOk && !loopbackOk) {
     return res.status(403).json({
       error: token
-        ? 'Nicht autorisiert: gültigen X-Dream-Token-Header senden.'
-        : 'Nicht autorisiert: DREAM_TRIGGER_TOKEN setzen (oder DREAM_TRUST_LOOPBACK=true für reine Nur-lokal-Deployments ohne Proxy/Tunnel).',
+        ? 'Not authorized: send a valid X-Dream-Token header.'
+        : 'Not authorized: set DREAM_TRIGGER_TOKEN (or DREAM_TRUST_LOOPBACK=true for purely local deployments without a proxy/tunnel).',
     });
   }
 
   if (!dreamAvailable()) {
     return res.status(503).json({
-      error: 'Nächtliches Träumen ist nicht konfiguriert. Setze MINIMAX_API_KEY in der .env.',
+      error: 'Nightly dreaming is not configured. Set MINIMAX_API_KEY in the .env.',
     });
   }
 
   const parsed = generateSchema.safeParse(req.body ?? {});
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-  // Einfacher Rate-Limit gegen Token-Kosten-Missbrauch (generate→DELETE→generate).
+  // Simple rate limit against token-cost abuse (generate→DELETE→generate).
   const minInterval = config.dream.minIntervalMs;
   if (minInterval > 0) {
     const since = Date.now() - lastGenerateAt;
     if (since < minInterval) {
       return res.status(429).json({
-        error: `Zu viele Anfragen — mindestens ${Math.ceil(minInterval / 1000)}s Abstand zwischen Generierungen.`,
+        error: `Too many requests — at least ${Math.ceil(minInterval / 1000)}s between generations.`,
         retryAfterMs: minInterval - since,
       });
     }
@@ -130,7 +130,7 @@ dreamsRouter.post('/generate', async (req, res) => {
   }
 });
 
-/** Einzelner Traum. 200 mit exists=false, wenn keiner. */
+/** Single dream. 200 with exists=false if none. */
 dreamsRouter.get('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
   const row = dreamFor(date);
@@ -138,26 +138,26 @@ dreamsRouter.get('/:date', (req, res) => {
   res.json({ ...serializeDream(row), exists: true });
 });
 
-/** Traum löschen (z. B. um neu generieren zu lassen). 204 / 404. */
+/** Delete a dream (e.g. to trigger regeneration). 204 / 404. */
 dreamsRouter.delete('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
-  if (!deleteDream(date)) return res.status(404).json({ error: 'Kein Traum für diesen Tag' });
+  if (!deleteDream(date)) return res.status(404).json({ error: 'No dream for this day' });
   res.status(204).end();
 });
 
 /**
- * Vorhandenen Traum erneut zustellen (admin). Body: `{}` (kein Body nötig).
- * Idempotent: bereits `status='sent'`-Zeilen werden NICHT erneut gesendet
- * (siehe `deliverDream` in `lib/dream_delivery.ts`).
+ * Re-deliver an existing dream (admin). Body: `{}` (no body required).
+ * Idempotent: rows already in `status='sent'` are NOT re-sent
+ * (see `deliverDream` in `lib/dream_delivery.ts`).
  */
 dreamsRouter.post('/:date/redeliver', requireCloudflareAccess, async (req, res) => {
   const dream = dreamFor(req.params.date);
   if (!dream) {
-    res.status(404).json({ error: 'dream nicht gefunden' });
+    res.status(404).json({ error: 'dream not found' });
     return;
   }
-  // Lazy-Import, damit der Modul-Init unabhängig von der Delivery-Pipeline
-  // bleibt (kein zirkulärer Load, kein WhatsApp-Side-Effect beim Import).
+  // Lazy import so module init stays independent of the delivery pipeline
+  // (no circular load, no WhatsApp side effect on import).
   const { enqueueDelivery } = await import('../lib/dream_delivery.js');
   const result = await enqueueDelivery(dream);
   res.json({ ...result, date: dream.date });

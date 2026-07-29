@@ -1,37 +1,37 @@
 import { registerPlugin } from '@capacitor/core';
 
 /**
- * Bridge zum nativen Android-Plugin `app.mediary.bridge.WidgetBridgePlugin`.
+ * Bridge to the native Android plugin `app.mediary.bridge.WidgetBridgePlugin`.
  *
- * Wird vom WebView nach jedem `getApiBase()`/`setApiBase()`-Aufruf
- * angefunkt, damit die Homescreen-Widgets (SampleWidgetProvider) die
- * aktuelle API-URL in den SharedPreferences vorfinden — sonst könnten
- * sie erst nach einem App-Start senden.
+ * Called by the WebView after every `getApiBase()`/`setApiBase()` call so
+ * the home-screen widgets (SampleWidgetProvider) find the current API URL
+ * in SharedPreferences — otherwise they could only send after the app has
+ * been started at least once.
  *
- * Im Browser (kein Capacitor) ist `Capacitor.Plugins.WidgetBridge`
- * nicht definiert; die Methoden no-op'en still, sodass `npm run dev`
- * ohne Android-Emulator funktioniert.
+ * In the browser (no Capacitor) `Capacitor.Plugins.WidgetBridge` is not
+ * defined; the methods silently no-op so `npm run dev` works without an
+ * Android emulator.
  */
 export interface WidgetBridgePlugin {
   setApiBase(options: { url: string }): Promise<void>;
 }
 
 const native = registerPlugin<WidgetBridgePlugin>('WidgetBridge', {
-  // Kein Web-Fallback nötig — die Aufrufe sind fire-and-forget.
+  // No web fallback needed — the calls are fire-and-forget.
 });
 
 /**
- * Spiegelt die API-URL in den nativen Speicher. Idempotent; im
- * Browser-Betrieb ein No-Op (Fehler werden verschluckt, damit
- * unkritische `console.warn` nicht den UI-Flow stören).
+ * Mirror the API URL into native storage. Idempotent; in the browser this
+ * is a no-op (errors are swallowed so uncritical `console.warn` does not
+ * disturb the UI flow).
  */
 export async function mirrorApiBaseToWidgets(url: string): Promise<void> {
   if (!url) return;
   try {
-    // Capacitor-Plugins sind auf nativen Plattformen verfügbar;
-    // im Web-Fall wirft `native.setApiBase` — wir fangen das.
+    // Capacitor plugins are available on native platforms; in the web
+    // case `native.setApiBase` throws — we catch that.
     await native?.setApiBase({ url });
   } catch {
-    // Web/no-Capacitor: still ignorieren. Der Aufruf ist best-effort.
+    // Web/no-Capacitor: silently ignore. The call is best-effort.
   }
 }

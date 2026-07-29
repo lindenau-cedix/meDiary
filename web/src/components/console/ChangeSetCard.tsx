@@ -1,18 +1,19 @@
 import { useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
-import { Check, X, Undo2, AlertTriangle, CircleSlash, ShieldCheck } from 'lucide-react';
+import { Check, X, Undo2, AlertTriangle, CircleSlash, ShieldCheck } from 'lucide-react'
+import { useT } from '../../lib/i18n';
 import type { ChangeSet } from '../../lib/types';
 import { cx } from '../../lib/cx';
 import { DiffTable } from './DiffTable';
 
-/** Ab dieser Zeilenzahl gilt ein Change-Set als „groß" → zweite Bestätigung. */
+/** Above this row count a change-set is "large" → second confirmation. */
 const LARGE_THRESHOLD = 100;
 
-const STATUS: Record<ChangeSet['status'], { label: string; cls: string }> = {
-  proposed: { label: 'Vorschlag', cls: 'bg-accent-soft text-accent' },
-  applied: { label: 'Angewandt', cls: 'bg-good/15 text-good' },
-  undone: { label: 'Rückgängig', cls: 'bg-surface2 text-ink-muted' },
-  discarded: { label: 'Verworfen', cls: 'bg-surface2 text-ink-faint' },
+const STATUS_KEYS: Record<ChangeSet['status'], { cls: string }> = {
+  proposed: { cls: 'bg-accent-soft text-accent' },
+  applied: { cls: 'bg-good/15 text-good' },
+  undone: { cls: 'bg-surface2 text-ink-muted' },
+  discarded: { cls: 'bg-surface2 text-ink-faint' },
 };
 
 interface Props {
@@ -26,11 +27,12 @@ interface Props {
 
 export function ChangeSetCard({ changeSet: cs, canUndo, busy, onApply, onUndo, onDiscard }: Props) {
   const reduce = useReducedMotion();
+  const t = useT();
   const [confirmLarge, setConfirmLarge] = useState(false);
   const preview = cs.preview;
   const total = preview?.totalAffected ?? cs.affected;
   const isLarge = total >= LARGE_THRESHOLD;
-  const status = STATUS[cs.status];
+  const statusKey = `console.changeSet.status.${cs.status}` as const;
 
   const handleApply = () => {
     if (isLarge && !confirmLarge) {
@@ -47,7 +49,7 @@ export function ChangeSetCard({ changeSet: cs, canUndo, busy, onApply, onUndo, o
       transition={{ duration: reduce ? 0 : 0.22, ease: [0.22, 1, 0.36, 1] }}
       className="rounded-2xl ring-1 ring-line bg-surface shadow-soft overflow-hidden"
     >
-      {/* Kopf */}
+      {/* Header */}
       <div className="px-3.5 pt-3 pb-2.5 border-b border-hairline">
         <div className="flex items-start gap-2.5">
           <span className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-lg bg-surface2 text-ink-muted">
@@ -56,19 +58,20 @@ export function ChangeSetCard({ changeSet: cs, canUndo, busy, onApply, onUndo, o
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
               <h4 className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{cs.title}</h4>
-              <span className={cx('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium', status.cls)}>
-                {status.label}
+              <span className={cx('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium', STATUS_KEYS[cs.status].cls)}>
+                {t(statusKey)}
               </span>
             </div>
             {cs.summary && <p className="mt-0.5 text-[13px] leading-snug text-ink-muted">{cs.summary}</p>}
             <p className="mt-1 font-mono text-[11px] text-ink-faint">
-              <span className="tabular text-ink-muted">{total}</span> Zeile{total === 1 ? '' : 'n'} betroffen
-              {preview && preview.operations.length > 1 && <> · {preview.operations.length} Operationen</>}
+              <span className="tabular text-ink-muted">{total}</span>{' '}
+              {total === 1 ? t('console.changeSet.affected.one', { count: total }) : t('console.changeSet.affected.many', { count: total })}
+              {preview && preview.operations.length > 1 && <> · {t('console.changeSet.operations', { count: preview.operations.length })}</>}
             </p>
           </div>
         </div>
 
-        {/* Operations-Chips */}
+        {/* Operation chips */}
         {preview && preview.operations.length > 0 && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             {preview.operations.map((op, i) => (
@@ -96,7 +99,7 @@ export function ChangeSetCard({ changeSet: cs, canUndo, busy, onApply, onUndo, o
         </div>
       )}
 
-      {/* Aktionen */}
+      {/* Actions */}
       <div className="px-3.5 py-2.5 border-t border-hairline bg-surface2/30">
         {cs.status === 'proposed' && (
           <div className="flex items-center gap-2">
@@ -112,11 +115,11 @@ export function ChangeSetCard({ changeSet: cs, canUndo, busy, onApply, onUndo, o
             >
               {confirmLarge ? (
                 <>
-                  <AlertTriangle size={15} /> Wirklich {total} Zeilen ändern?
+                  <AlertTriangle size={15} /> {t('console.changeSet.confirmLarge', { count: total })}
                 </>
               ) : (
                 <>
-                  <Check size={16} /> Bestätigen
+                  <Check size={16} /> {t('action.confirm')}
                 </>
               )}
             </button>
@@ -125,7 +128,7 @@ export function ChangeSetCard({ changeSet: cs, canUndo, busy, onApply, onUndo, o
               disabled={busy}
               className="press inline-flex h-9 items-center justify-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-ink-muted hover:bg-surface2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
             >
-              <X size={15} /> Verwerfen
+              <X size={15} /> {t('action.delete')}
             </button>
           </div>
         )}
@@ -133,7 +136,7 @@ export function ChangeSetCard({ changeSet: cs, canUndo, busy, onApply, onUndo, o
         {cs.status === 'applied' && (
           <div className="flex items-center justify-between gap-2">
             <span className="inline-flex items-center gap-1.5 text-[13px] text-good">
-              <Check size={15} /> Angewandt
+              <Check size={15} /> {t('console.changeSet.applied')}
               {cs.appliedAt && <span className="font-mono text-[11px] text-ink-faint">{cs.appliedAt.slice(11, 16)}</span>}
             </span>
             {canUndo ? (
@@ -142,22 +145,22 @@ export function ChangeSetCard({ changeSet: cs, canUndo, busy, onApply, onUndo, o
                 disabled={busy}
                 className="press inline-flex h-9 items-center justify-center gap-1.5 rounded-xl px-3 text-[13px] font-medium text-ink ring-1 ring-line hover:bg-surface2 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
               >
-                <Undo2 size={15} /> Rückgängig
+                <Undo2 size={15} /> {t('action.undo')}
               </button>
             ) : (
-              <span className="font-mono text-[11px] text-ink-faint">nur jüngste Änderung umkehrbar</span>
+              <span className="font-mono text-[11px] text-ink-faint">{t('console.changeSet.undoOnlyLatest')}</span>
             )}
           </div>
         )}
 
         {cs.status === 'undone' && (
           <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-muted">
-            <Undo2 size={15} /> Rückgängig gemacht
+            <Undo2 size={15} /> {t('console.toast.undone')}
           </span>
         )}
         {cs.status === 'discarded' && (
           <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-faint">
-            <CircleSlash size={15} /> Verworfen
+            <CircleSlash size={15} /> {t('console.changeSet.status.discarded')}
           </span>
         )}
       </div>

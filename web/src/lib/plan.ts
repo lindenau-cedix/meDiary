@@ -1,4 +1,5 @@
 import type { PlanItem } from './types';
+import { translate, type MessageKey } from './i18n';
 
 /**
  * Umlaut-bewusste Substanz-Normalisierung: gleicher Key für "Quetiapin" und
@@ -87,28 +88,48 @@ export function isPlanIntake(
   return entry.doses.has(doseKey(intake.amount));
 }
 
-export const DAYPARTS = [
-  { key: 'morning', label: 'Morgens', short: 'M' },
-  { key: 'noon', label: 'Mittags', short: 'Mi' },
-  { key: 'evening', label: 'Abends', short: 'A' },
-  { key: 'night', label: 'Nachts', short: 'N' },
-] as const;
+/**
+ * The four plan slots in canonical order.
+ *
+ * Kept as a `const` tuple of bare keys so the literal types survive and
+ * `item[key]` still type-checks against `PlanItem`. Labels are *not* stored
+ * here — they depend on the active locale (see `daypartList()`).
+ */
+export const DAYPART_KEYS = ['morning', 'noon', 'evening', 'night'] as const;
 
-export const FIELD_LABELS: Record<string, string> = {
-  strength: 'Stärke',
-  morning: 'Morgens',
-  noon: 'Mittags',
-  evening: 'Abends',
-  night: 'Nachts',
-  unit: 'Einheit',
-  reason: 'Grund',
-  notes: 'Hinweis',
-};
+export type DaypartKey = (typeof DAYPART_KEYS)[number];
+
+/**
+ * Dayparts with labels in the active locale. A function, not a constant, so a
+ * language switch produces fresh strings on the next render.
+ */
+export function daypartList(): { key: DaypartKey; label: string; short: string }[] {
+  return DAYPART_KEYS.map((key) => ({
+    key,
+    label: translate(`daypart.${key}` as MessageKey),
+    short: translate(`daypart.${key}.short` as MessageKey),
+  }));
+}
+
+/**
+ * Label for a plan *diff* field: the four slots plus the metadata fields.
+ * Unknown fields fall back to the raw name, matching the previous
+ * `FIELD_LABELS[f] ?? f` behaviour at the call site.
+ */
+export function planFieldLabel(field: string): string {
+  if ((DAYPART_KEYS as readonly string[]).includes(field)) {
+    return translate(`daypart.${field}` as MessageKey);
+  }
+  if (field === 'strength' || field === 'unit' || field === 'reason' || field === 'notes') {
+    return translate(`planField.${field}` as MessageKey);
+  }
+  return field;
+}
 
 export function dosingSummary(item: PlanItem): string {
-  return DAYPARTS.map((d) => (item[d.key] ? item[d.key] : '0')).join(' – ');
+  return DAYPART_KEYS.map((key) => item[key] || '0').join(' – ');
 }
 
 export function hasAnyDosing(item: PlanItem): boolean {
-  return DAYPARTS.some((d) => !!item[d.key]);
+  return DAYPART_KEYS.some((key) => !!item[key]);
 }

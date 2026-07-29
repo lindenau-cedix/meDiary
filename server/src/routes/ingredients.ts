@@ -6,14 +6,14 @@ import { analyzeSubstances, ingredientsState, ingredientsAvailable } from '../li
 export const ingredientsRouter = Router();
 
 /**
- * Wirkstoff-Profile (KI) für die Statistik „Wirkstoff-Bilanz".
+ * Ingredient profiles (AI) for the "Active-ingredient balance" statistics view.
  *
- * GET  /api/ingredients          — offener Read: gecachte Profile + was fehlt/veraltet ist.
- * POST /api/ingredients/analyze  — geschützt (Cloudflare Access) + LLM-Kosten:
- *                                  analysiert fehlende (oder alle) Substanzen und cached sie.
+ * GET  /api/ingredients          — open read: cached profiles + what's missing/stale.
+ * POST /api/ingredients/analyze  — protected (Cloudflare Access) + LLM cost:
+ *                                  analyses missing (or all) substances and caches them.
  */
 
-/** Aktueller Zustand: Profile, fehlende/veraltete Substanzen, Key vorhanden? */
+/** Current state: profiles, missing/stale substances, key present? */
 ingredientsRouter.get('/', (_req, res) => {
   res.json(ingredientsState());
 });
@@ -22,26 +22,26 @@ const analyzeSchema = z.object({
   scope: z.enum(['missing', 'all']).optional(),
 });
 
-// Einfacher In-Process-Lock: verhindert parallele (teure) Analyse-Läufe.
+// Simple in-process lock: prevents parallel (costly) analysis runs.
 let analyzing = false;
 
 /**
- * Analysiert Substanzen via KI und cached die Wirkstoff-Profile. 503 ohne
- * ANTHROPIC_API_KEY, 409 wenn bereits ein Lauf aktiv ist. `scope` (Default
- * 'missing') = nur Substanzen ohne frisches Profil; 'all' = alle neu.
+ * Analyses substances via AI and caches the ingredient profiles. 503 without
+ * ANTHROPIC_API_KEY, 409 if a run is already active. `scope` (default
+ * 'missing') = only substances without a fresh profile; 'all' = all again.
  */
 ingredientsRouter.post('/analyze', requireCloudflareAccess, async (req, res) => {
   if (!ingredientsAvailable()) {
     return res.status(503).json({
       error:
-        'KI-Wirkstoff-Analyse ist nicht konfiguriert. Setze MINIMAX_API_KEY (nutzt das MiniMax-Abo wie die Daten-Konsole) — oder INGREDIENTS_API_KEY/INGREDIENTS_MODEL für eine eigene Konfiguration.',
+        'AI ingredient analysis is not configured. Set MINIMAX_API_KEY (uses the MiniMax subscription like the data console) — or INGREDIENTS_API_KEY/INGREDIENTS_MODEL for a custom configuration.',
     });
   }
   const parsed = analyzeSchema.safeParse(req.body ?? {});
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
   if (analyzing) {
-    return res.status(409).json({ error: 'Eine Analyse läuft bereits. Bitte warten.' });
+    return res.status(409).json({ error: 'An analysis is already running. Please wait.' });
   }
   analyzing = true;
   try {

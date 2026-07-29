@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import { scoreColor } from '../lib/colors';
+import { useT } from '../lib/i18n';
 import type { MetricPolarity } from '../lib/types';
 
 interface Props {
@@ -15,7 +16,13 @@ const W = 320;
 const PAD_X = 6;
 const PAD_Y = 10;
 
+/**
+ * Compact sparkline-style chart for a 1–10 metric series. Polarity drives
+ * the colour gradient (green = good, rust = bad); gaps render as missing
+ * segments. Renders an empty-state placeholder when there is no data.
+ */
 export function TrendChart({ values, polarity, height = 56, showArea = true, showDots = false, className }: Props) {
+  const t = useT();
   const id = useId().replace(/:/g, '');
   const H = height;
   const n = values.length;
@@ -33,7 +40,7 @@ export function TrendChart({ values, polarity, height = 56, showArea = true, sho
   if (points.length === 0) {
     return (
       <div className={className} style={{ height }}>
-        <div className="h-full grid place-items-center text-xs text-ink-faint">keine Daten</div>
+        <div className="h-full grid place-items-center text-xs text-ink-faint">{t('components.trendChart.empty')}</div>
       </div>
     );
   }
@@ -55,8 +62,8 @@ export function TrendChart({ values, polarity, height = 56, showArea = true, sho
     >
       <defs>
         <linearGradient id={`grad-${id}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity="0.22" />
-          <stop offset="100%" stopColor={color} stopOpacity="0" />
+          <stop offset="0%" stopColor={color} stopOpacity={0.22} />
+          <stop offset="100%" stopColor={color} stopOpacity={0} />
         </linearGradient>
       </defs>
 

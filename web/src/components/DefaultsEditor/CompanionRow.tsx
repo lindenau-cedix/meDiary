@@ -4,6 +4,7 @@ import { Field, TextInput } from '../ui/inputs';
 import { Button } from '../ui/Button';
 import { cx } from '../../lib/cx';
 import { useSubstances } from '../../lib/queries';
+import { useT } from '../../lib/i18n';
 import type { DefaultsSectionCompanion } from '../../lib/types';
 
 interface CompanionRowProps {
@@ -13,19 +14,22 @@ interface CompanionRowProps {
 }
 
 /**
- * Eine `Mit:`-Zeile als kleines Formular: Name (mit Autocomplete aus
- * `substances`), Menge, Notiz, Lösch-Button. Freie Eingaben bleiben erlaubt
- * — passende Substanzen werden auf Tab/Enter / Auswahl komfortabel
- * eingefügt, aber unbekannte Namen werden 1:1 übernommen und können beim
- * Eintragen via `findOrCreateSubstance()` automatisch als Kachel
- * nachgepflegt werden.
+ * A `Mit:` companion row as a small form: name (with autocomplete from
+ * `substances`), amount, note, delete button. Free-form input is allowed —
+ * matching substances are inserted comfortably on Tab/Enter / pick, but
+ * unknown names are kept verbatim and can later be auto-created as a tile
+ * via `findOrCreateSubstance()`.
  */
 export function CompanionRow({ value, onChange, onRemove }: CompanionRowProps) {
+  const t = useT();
   const { data: subs = [] } = useSubstances(true);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState(value.name);
 
   const suggestions = useMemo(() => {
+    // The `'de'` locale tag below is a DATA INVARIANT — it gives umlaut-aware
+    // `nameKey` semantics used for matching substances across the app. Do
+    // not change.
     const q = name.trim().toLocaleLowerCase('de');
     if (!q) return subs.filter((s) => !s.archived).slice(0, 8);
     return subs
@@ -44,7 +48,7 @@ export function CompanionRow({ value, onChange, onRemove }: CompanionRowProps) {
     <div className="rounded-2xl bg-surface2/60 ring-1 ring-line p-3 space-y-2">
       <div className="flex items-start gap-2">
         <div className="flex-1 relative">
-          <Field label="Mit-Name">
+          <Field label={t('defaults.companions.fieldName')}>
             <TextInput
               value={name}
               onChange={(e) => {
@@ -54,7 +58,7 @@ export function CompanionRow({ value, onChange, onRemove }: CompanionRowProps) {
               }}
               onFocus={() => setOpen(true)}
               onBlur={() => setTimeout(() => setOpen(false), 150)}
-              placeholder="Begleitstoff, z. B. Lemon Balm"
+              placeholder={t('defaults.companions.fieldNamePlaceholder')}
               autoComplete="off"
               spellCheck={false}
             />
@@ -75,7 +79,7 @@ export function CompanionRow({ value, onChange, onRemove }: CompanionRowProps) {
                   />
                   <span className="flex-1 truncate">{s.name}</span>
                   {s.isNightMed ? (
-                    <span className="text-[10px] uppercase tracking-wide text-ink-faint">Nacht</span>
+                    <span className="text-[10px] uppercase tracking-wide text-ink-faint">{t('defaults.companions.nightBadge')}</span>
                   ) : null}
                 </button>
               ))}
@@ -86,27 +90,27 @@ export function CompanionRow({ value, onChange, onRemove }: CompanionRowProps) {
           type="button"
           onClick={() => setOpen((v) => !v)}
           className="press grid size-12 place-items-center rounded-2xl bg-surface2 text-ink-muted hover:text-ink ring-1 ring-line shrink-0 mt-7"
-          aria-label="Vorschläge anzeigen"
-          title="Vorschläge"
+          aria-label={t('defaults.companions.suggestionsAria')}
+          title={t('defaults.companions.suggestionsTitle')}
         >
           <ChevronDown size={16} className={cx('transition-transform', open && 'rotate-180')} />
         </button>
       </div>
 
       <div className="flex items-end gap-2">
-        <Field label="Menge" className="flex-1">
+        <Field label={t('defaults.field.amount')} className="flex-1">
           <TextInput
             value={value.amount ?? ''}
             onChange={(e) => onChange({ ...value, amount: e.target.value || null })}
-            placeholder="z. B. 100 mg"
+            placeholder={t('defaults.field.amountPlaceholder')}
             spellCheck={false}
           />
         </Field>
-        <Field label="Notiz" className="flex-1">
+        <Field label={t('defaults.field.note')} className="flex-1">
           <TextInput
             value={value.note ?? ''}
             onChange={(e) => onChange({ ...value, note: e.target.value || null })}
-            placeholder="optional"
+            placeholder={t('state.optional')}
             spellCheck={false}
           />
         </Field>
@@ -116,19 +120,20 @@ export function CompanionRow({ value, onChange, onRemove }: CompanionRowProps) {
           size="md"
           icon={<Trash2 size={16} />}
           onClick={onRemove}
-          aria-label="Mit-Zeile entfernen"
-          title="Mit-Zeile entfernen"
+          aria-label={t('defaults.companions.removeAria')}
+          title={t('defaults.companions.removeTitle')}
         />
       </div>
     </div>
   );
 }
 
-/** Plus-Button zum Hinzufügen einer leeren `Mit:`-Zeile. */
+/** Plus button to add a new empty `Mit:` companion row. */
 export function CompanionAddButton({ onClick }: { onClick: () => void }) {
+  const t = useT();
   return (
     <Button type="button" variant="soft" size="sm" icon={<Plus size={15} />} onClick={onClick}>
-      Mit-Zeile hinzufügen
+      {t('defaults.companions.addRow')}
     </Button>
   );
 }

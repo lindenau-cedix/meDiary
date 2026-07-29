@@ -4,6 +4,7 @@ import { cx } from '../../lib/cx';
 import { haptics } from '../../lib/haptics';
 import { useDefaults, useSaveDefaults, useSaveDefaultsSections } from '../../lib/queries';
 import { useToast } from '../Toaster';
+import { useT, type MessageKey } from '../../lib/i18n';
 import type { DefaultsSection } from '../../lib/types';
 import { StructuredView } from './StructuredView';
 import { ErweitertView } from './ErweitertView';
@@ -12,53 +13,52 @@ import { SaveBar } from './SaveBar';
 import { sectionsFromRaw, sectionsEqual } from './state';
 
 export interface DefaultsEditorHandle {
-  /** Setzt einen Stub-Section-Namen aus dem Compliance-Bereich der
-   *  Settings-Seite. Der Editor legt die Sektion nicht sofort an, sondern
-   *  zeigt einen sichtbaren "Anlegen"-Chip, damit der Nutzer bestätigen
-   *  kann, welcher Name verwendet werden soll. */
+  /** Sets a stub section name from the compliance area of the Settings page.
+   *  The editor does not create the section right away — it shows a visible
+   *  "Create" chip so the user can confirm which name should be used. */
   prefillStubFromCompliance: (name: string) => void;
 }
 
 type Tab = 'structured' | 'raw';
 
 interface DefaultsEditorProps {
-  /** Optional: beim ersten Mount einen Stub-Namen aus dem Compliance-Log anbieten. */
+  /** Optional: pre-fill a stub name from the compliance log on first mount. */
   initialPrefillName?: string | null;
 }
 
 /**
- * Top-Level-Container des DEFAULTS.md-Editors. Hält den Draft-Zustand,
- * die Tab-Umschaltung „Strukturiert" ↔ „Erweitert (Markdown)" und die
- * Speicher-/Verwerfen-Logik.
+ * Top-level container for the DEFAULTS.md editor. Holds the draft state,
+ * the tab switcher ("Structured" ↔ "Advanced (Markdown)") and the
+ * save/discard logic.
  *
- * Zwei Modi:
- *  - Strukturiert: pro Substanz ein Formular (Menge/Notiz/Mit:/NACH-).
- *    Speichern über `useSaveDefaultsSections` (PUT /api/defaults/sections).
- *  - Erweitert: direkte Markdown-Bearbeitung. Speichern über
- *    `useSaveDefaults` (PUT /api/defaults mit rohem Text).
+ * Two modes:
+ *  - Structured: per-substance form (amount/note/companions/AFTER blocks).
+ *    Save via `useSaveDefaultsSections` (PUT /api/defaults/sections).
+ *  - Advanced: direct Markdown editing. Save via `useSaveDefaults`
+ *    (PUT /api/defaults with raw text).
  *
- * Beim Wechsel von Strukturiert → Erweitert wird der Raw-Inhalt frisch
- * aus dem aktuellen Draft serialisiert (lokale Vorschau). Beim Wechsel
- * zurück wird der Raw-Inhalt auf den Snapshot zurückgesetzt; wurde
- * unterwegs editiert, fragt der Editor nach Bestätigung.
+ * When switching from Structured → Advanced, the raw buffer is regenerated
+ * from the current draft (local preview). When switching back, the raw
+ * buffer is reset to the snapshot; if it was edited meanwhile the editor
+ * asks for confirmation.
  *
- * Server validiert Strukturen (Doppelnamen, Selbst-Referenz, Längen).
- * Bei 400 zeigt der Editor einen Toast und behält den Draft.
+ * Server validates structures (duplicate names, self-reference, lengths).
+ * On 400 the editor shows a toast and keeps the draft.
  */
 export const DefaultsEditor = forwardRef<DefaultsEditorHandle, DefaultsEditorProps>(function DefaultsEditor(
   { initialPrefillName = null },
   ref,
 ) {
   const toast = useToast();
+  const t = useT();
   const { data: defaults, isLoading } = useDefaults();
   const saveStructured = useSaveDefaultsSections();
   const saveRaw = useSaveDefaults();
   const [tab, setTab] = useState<Tab>('structured');
 
-  // Aus dem aktuell geladenen `raw` einmalig den strukturierten Draft
-  // ableiten. Sobald die Datei serverseitig neu geladen wird (nach
-  // Speichern), ersetzen wir den Draft durch das Resultat von
-  // `sectionsFromRaw`, damit der Nutzer keinen Konflikt-Banner sieht.
+  // Derive the structured draft from the currently loaded `raw` exactly once.
+  // When the server reloads the file (after a save), we replace the draft
+  // with `sectionsFromRaw` so the user never sees a conflict banner.
   const initialStructured = useMemo(
     () => (defaults?.raw ? sectionsFromRaw(defaults.raw) : []),
     [defaults?.raw],
@@ -68,14 +68,13 @@ export const DefaultsEditor = forwardRef<DefaultsEditorHandle, DefaultsEditorPro
   const [rawSnapshot, setRawSnapshot] = useState<string>(() => defaults?.raw ?? '');
   const prefilledNameRef = useRef<string | null>(initialPrefillName);
 
-  // Sobald die Server-Daten aktualisiert werden (z. B. nach Save):
-  // nur dann den Draft zurücksetzen, wenn die letzte Server-Antwort
-  // mit unserem aktuellen Stand übereinstimmt — sonst hat der User
-  // gerade editiert und wir wollen nicht trampeln.
+  // Whenever the server data changes (e.g. after a save), only reset the
+  // draft if the last server response still matches what we currently have —
+  // otherwise the user just edited something and we must not trample it.
   const lastSavedRef = useRef<DefaultsSection[] | null>(null);
 
   useEffect(() => {
-    // Beim ersten erfolgreichen Laden den Draft setzen.
+    // Set the draft on the first successful load.
     if (defaults?.raw != null) {
       const fresh = sectionsFromRaw(defaults.raw);
       lastSavedRef.current = fresh;
@@ -86,25 +85,25 @@ export const DefaultsEditor = forwardRef<DefaultsEditorHandle, DefaultsEditorPro
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
-  // Imperative API: Compliance-Button auf der Settings-Seite kann einen
-  // Stub-Namen vorlegen.
+  // Imperative API: the compliance button on the Settings page can hand us a
+  // stub name.
   useImperativeHandle(ref, () => ({
     prefillStubFromCompliance(name) {
       prefilledNameRef.current = name;
       setTab('structured');
-      // Auf strukturiert umgeschaltet, Anwender klickt im Editor selbst auf "Anlegen".
+      // We switched to structured; the user clicks "Create" inside the editor.
     },
   }));
 
-  // Dirty-Berechnung für den Footer (Save-Button).
+  // Dirty computation for the footer Save button.
   const structuredDirty = !sectionsEqual(sections, lastSavedRef.current ?? []);
   const rawDirty = rawBuffer !== rawSnapshot;
   const dirty = tab === 'structured' ? structuredDirty : rawDirty;
 
-  // Beim Tab-Wechsel auf "raw": Raw aus dem aktuellen strukturierten Draft
-  // erzeugen (lokale Vorschau-Serialisierung; Server ist die Wahrheit, aber
-  // wir wollen, dass die Vorschau halbwegs passt, damit der Wechsel
-  // nahtlos wirkt).
+  // When switching to the "raw" tab: regenerate the raw buffer from the
+  // current structured draft (local preview serialization; the server is the
+  // truth, but we want the preview to roughly match so the switch feels
+  // seamless).
   const switchToRaw = () => {
     haptics.light();
     const serialized = approximateSerialize(sections);
@@ -116,9 +115,7 @@ export const DefaultsEditor = forwardRef<DefaultsEditorHandle, DefaultsEditorPro
   const switchToStructured = () => {
     haptics.light();
     if (rawDirty && rawBuffer !== approximateSerialize(lastSavedRef.current ?? [])) {
-      const ok = window.confirm(
-        'Im Raw-Editor wurden Änderungen gemacht. Beim Zurückwechseln gehen diese Änderungen verloren. Fortfahren?',
-      );
+      const ok = window.confirm(t('defaults.confirm.discardRawChanges'));
       if (!ok) return;
     }
     if (rawBuffer.trim()) {
@@ -130,19 +127,19 @@ export const DefaultsEditor = forwardRef<DefaultsEditorHandle, DefaultsEditorPro
   const save = async () => {
     try {
       if (tab === 'structured') {
-        // Leere Sections (keinerlei Felder gesetzt) werden ohnehin
-        // serverseitig verworfen — wir lassen sie aber drin, damit der
-        // Client sie rendert und der Server sie „leise" entfernt.
+        // Empty sections (no fields set) are dropped server-side anyway —
+        // we keep them here so the client can render them and the server can
+        // silently remove them.
         const sectionsToSave = sections
           .map((s) => ({ ...s, name: s.name.trim() }))
-          .filter((s) => s.name.length > 0); // Drop namenlose Stubs
+          .filter((s) => s.name.length > 0); // Drop nameless stubs
         await saveStructured.mutateAsync(sectionsToSave);
       } else {
         await saveRaw.mutateAsync(rawBuffer);
       }
       haptics.success();
-      toast.show({ message: 'Standard-Notizen gespeichert' });
-      // Nach Speichern den Draft mit Server-Antwort synchronisieren.
+      toast.show({ message: t('defaults.toast.saved') });
+      // After saving, sync the draft with the server's view of the buffer.
       const fresh = sectionsFromRaw(rawBuffer);
       lastSavedRef.current = fresh;
       setSections(fresh);
@@ -151,7 +148,7 @@ export const DefaultsEditor = forwardRef<DefaultsEditorHandle, DefaultsEditorPro
       prefilledNameRef.current = null;
     } catch (e) {
       haptics.warning();
-      toast.show({ tone: 'warning', message: 'Speichern fehlgeschlagen', detail: (e as Error).message });
+      toast.show({ tone: 'warning', message: t('defaults.toast.saveFailed'), detail: (e as Error).message });
     }
   };
 
@@ -173,26 +170,26 @@ export const DefaultsEditor = forwardRef<DefaultsEditorHandle, DefaultsEditorPro
 
   const [addOpen, setAddOpen] = useState(false);
 
-  const sectionTabs: { id: Tab; label: string; Icon: typeof LayoutGrid }[] = [
-    { id: 'structured', label: 'Strukturiert', Icon: LayoutGrid },
-    { id: 'raw', label: 'Erweitert (Markdown)', Icon: FileText },
+  const sectionTabs: { id: Tab; labelKey: MessageKey; Icon: typeof LayoutGrid }[] = [
+    { id: 'structured', labelKey: 'defaults.tab.structured', Icon: LayoutGrid },
+    { id: 'raw', labelKey: 'defaults.tab.raw', Icon: FileText },
   ];
 
   return (
     <div className="flex flex-col gap-3">
       <div className="inline-flex rounded-2xl bg-surface2 p-1 self-start">
-        {sectionTabs.map((t) => (
+        {sectionTabs.map((tabDef) => (
           <button
-            key={t.id}
+            key={tabDef.id}
             type="button"
-            onClick={() => (t.id === 'raw' ? switchToRaw() : switchToStructured())}
+            onClick={() => (tabDef.id === 'raw' ? switchToRaw() : switchToStructured())}
             className={cx(
               'press inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-medium transition-colors',
-              tab === t.id ? 'bg-surface text-ink shadow-soft' : 'text-ink-muted hover:text-ink',
+              tab === tabDef.id ? 'bg-surface text-ink shadow-soft' : 'text-ink-muted hover:text-ink',
             )}
           >
-            <t.Icon size={15} />
-            {t.label}
+            <tabDef.Icon size={15} />
+            {t(tabDef.labelKey)}
           </button>
         ))}
       </div>
@@ -224,10 +221,9 @@ export const DefaultsEditor = forwardRef<DefaultsEditorHandle, DefaultsEditorPro
 });
 
 /**
- * Sehr grobe Local-View-Serialisierung für die Raw-Tab-Vorschau. Der
- * Server ist die Wahrheit; dies hier dient nur dazu, dass der Wechsel
- * zur Raw-Ansicht halbwegs Sinn ergibt, ohne dass der Anwender
- * *zweimal* serialisiert.
+ * Coarse local-view serialization for the raw-tab preview. The server is
+ * the truth; this just exists so the switch to raw mode looks sensible
+ * without the user having to serialize twice.
  */
 function approximateSerialize(sections: DefaultsSection[]): string {
   const out: string[] = [];
@@ -256,6 +252,7 @@ function approximateSerialize(sections: DefaultsSection[]): string {
       const parts = [c.name.trim()];
       if (c.amount) parts.push(c.amount);
       if (c.note) parts.push(c.note);
+      // NOTE: `Mit:` stays a parser token — translate UI, not the Markdown.
       lines.push(`Mit: ${parts.join(' | ')}`);
     }
     if (s.postLines.length > 0) {

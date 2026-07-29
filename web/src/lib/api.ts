@@ -34,17 +34,17 @@ import type {
   IngredientsAnalyzeResult,
 } from './types';
 import { mirrorApiBaseToWidgets } from './widgetBridge';
+import { translate } from './i18n';
 
 const API_BASE_KEY = 'mediary.apiBase';
 
 /**
- * Basis-URL der API. In der APK zur Laufzeit konfigurierbar (Einstellungen).
+ * API base URL. Configurable at runtime in the APK (Settings).
  *
- * Spiegelung: Auf Capacitor-Plattformen wird der Wert zusätzlich an den
- * nativen `WidgetBridgePlugin` weitergereicht, damit die
- * Android-Homescreen-Widgets (Sample-Widget) die URL kennen, ohne dass
- * der Nutzer die App jemals geöffnet haben muss. Im Browser ist das ein
- * No-Op (siehe `widgetBridge.ts`).
+ * Mirroring: on Capacitor platforms the value is also handed to the native
+ * `WidgetBridgePlugin` so the Android home-screen widgets (sample widget)
+ * know the URL even if the user has never opened the app. In the browser
+ * this is a no-op (see `widgetBridge.ts`).
  */
 export function getApiBase(): string {
   const stored = typeof localStorage !== 'undefined' ? localStorage.getItem(API_BASE_KEY) : null;
@@ -93,7 +93,7 @@ function errorMessage(data: unknown, status: number): string {
       if (typeof details.message === 'string') return details.message;
     }
   }
-  return `Fehler ${status}`;
+  return translate('error.generic', { status });
 }
 
 async function parseResponseText(res: Response): Promise<unknown> {
@@ -114,7 +114,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       headers: { 'Content-Type': 'application/json', ...(options.headers ?? {}) },
     });
   } catch (e) {
-    throw new ApiError(0, 'Server nicht erreichbar. Verbindung & Server-Adresse prüfen.', e);
+    throw new ApiError(0, translate('error.unreachable'), e);
   }
   if (res.status === 204) return undefined as T;
   const data = await parseResponseText(res);
@@ -129,7 +129,7 @@ async function requestBlob(path: string): Promise<Blob> {
   try {
     res = await fetch(apiUrl(path));
   } catch (e) {
-    throw new ApiError(0, 'Server nicht erreichbar. Verbindung & Server-Adresse prüfen.', e);
+    throw new ApiError(0, translate('error.unreachable'), e);
   }
   if (!res.ok) {
     const data = await parseResponseText(res);
@@ -150,7 +150,7 @@ async function uploadFile<T>(path: string, file: File): Promise<T> {
       body: file,
     });
   } catch (e) {
-    throw new ApiError(0, 'Server nicht erreichbar. Verbindung & Server-Adresse prüfen.', e);
+    throw new ApiError(0, translate('error.unreachable'), e);
   }
   const data = await parseResponseText(res);
   if (!res.ok) throw new ApiError(res.status, errorMessage(data, res.status), data);
@@ -252,9 +252,9 @@ export const api = {
   },
 
   /**
-   * Träume — die nächtlichen KI-Auswertungen. Lesen ist offen; das Generieren
-   * läuft serverseitig (Scheduler) bzw. über den geschützten Trigger und ist
-   * hier bewusst NICHT exponiert (die UI zeigt nur die Historie).
+   * Dreams — the nightly AI summaries. Reading is open; generation runs
+   * server-side (scheduler) or via the protected trigger and is intentionally
+   * NOT exposed here (the UI only shows the history).
    */
   dreams: {
     list: (params?: { from?: string; to?: string; limit?: number }) =>
@@ -269,8 +269,8 @@ export const api = {
   },
 
   /**
-   * Zustell-Log der Träume (WhatsApp). Offen lesbar; zeigt pro Traum-Tag den
-   * Zustellversuch (Status, Sprachnachricht, Fehler, Zeitstempel).
+   * Delivery log of the dreams (WhatsApp). Open and read-only; shows per
+   * dream date the delivery attempt (status, voice note, error, timestamp).
    */
   deliveries: {
     list: (params?: { dreamDate?: string; limit?: number }) => {
@@ -281,11 +281,11 @@ export const api = {
   },
 
   /**
-   * WhatsApp-Verbindung (Admin). `status()` ist offen lesbar (u. a. für das
-   * „Erneut senden"-Gate im Traum-Log); QR/Reconnect/Test/Targets sind
-   * Admin-Aktionen. Die Ziel-Tabellen-Antwort kommt als snake_case-Rohrow
-   * vom Server (kein Serializer vorgeschaltet), darum ist die Liste in
-   * `WhatsappTarget` ebenfalls snake_case.
+   * WhatsApp connection (admin). `status()` is open-read (used, among
+   * others, for the "Resend" gate in the Dreams log); QR/Reconnect/Test/Targets
+   * are admin actions. The targets response comes from the server as a raw
+   * snake_case row (no serializer in front), so the list in `WhatsappTarget`
+   * is also snake_case.
    */
   whatsapp: {
     status: () => request<WhatsappStatus>('/api/whatsapp/status'),
@@ -303,10 +303,10 @@ export const api = {
   },
 
   /**
-   * KI-Wirkstoff-Profile für die Statistik „Wirkstoff-Bilanz". `get()` ist offen
-   * lesbar (gecachte Profile + was fehlt/veraltet ist); `analyze()` ist eine
-   * geschützte (Cloudflare Access) + kostenverursachende LLM-Aktion, die die
-   * fehlenden (oder alle) Substanzen analysiert und cached.
+   * AI ingredient profiles for the "Compound balance" stats screen. `get()`
+   * is open-read (cached profiles + what's missing/stale); `analyze()` is a
+   * protected (Cloudflare Access) and cost-incurring LLM action that
+   * analyses the missing (or all) substances and caches them.
    */
   ingredients: {
     get: () => request<IngredientsState>('/api/ingredients'),
@@ -318,10 +318,10 @@ export const api = {
   },
 
   /**
-   * Habit-Daten (z. B. PC-Nutzungszeiten, gemeldet per POST /api/habit/uptime).
-   * `uptime()` ist der primäre Endpunkt für den lokalen Client-Cron; die
-   * Read-Methoden helfen beim Smoke-Test und sind hier nur der Vollständigkeit
-   * halber exponiert.
+   * Habit data (e.g. PC uptime, reported via POST /api/habit/uptime).
+   * `uptime()` is the primary endpoint for the local client cron; the
+   * read methods help in smoke tests and are only exposed here for
+   * completeness.
    */
   habit: {
     uptime: (body: { last_user_interaction_unix: number; first_user_interaction_24h_unix: number }) =>
@@ -333,8 +333,9 @@ export const api = {
   },
 
   /**
-   * Daten-Konsole („Chat with your data"). `message()` streamt per SSE (eigene
-   * Funktion `streamChatMessage`); die Change-Set-Aktionen laufen über `request`.
+   * Data console ("Chat with your data"). `message()` streams via SSE (its
+   * own function `streamChatMessage`); the change-set actions go through
+   * `request`.
    */
   chat: {
     status: () => request<ChatStatus>('/api/chat/status'),
@@ -365,9 +366,10 @@ export interface ChatStreamHandlers {
 }
 
 /**
- * Sendet eine Konsolen-Nachricht und konsumiert die SSE-Antwort des Servers
- * (`event:`/`data:`-Paare). Der gemeinsame `request`-Helfer taugt dafür nicht
- * (JSON-only), daher eigener Reader. `signal` bricht den Stream ab.
+ * Sends a console message and consumes the server's SSE response
+ * (`event:`/`data:` pairs). The shared `request` helper is not suitable
+ * here (JSON-only), so this uses its own reader. `signal` aborts the
+ * stream.
  */
 export async function streamChatMessage(
   body: { message: string; history?: { role: 'user' | 'assistant'; text: string }[] },
@@ -382,9 +384,8 @@ export async function streamChatMessage(
       body: JSON.stringify(body),
       signal,
     });
-  } catch (e) {
-    handlers.onError?.('Server nicht erreichbar. Verbindung & Server-Adresse prüfen.');
-    void e;
+  } catch {
+    handlers.onError?.(translate('error.unreachable'));
     return;
   }
 
@@ -422,7 +423,7 @@ export async function streamChatMessage(
         handlers.onDone?.({ finalText: String(data.finalText ?? ''), proposals: Number(data.proposals ?? 0) });
         break;
       case 'error':
-        handlers.onError?.(String(data.error ?? 'Unbekannter Fehler'));
+        handlers.onError?.(String(data.error ?? translate('error.generic', { status: '??' })));
         break;
     }
   };
@@ -441,7 +442,7 @@ export async function streamChatMessage(
         for (const line of rawEvent.split('\n')) {
           const l = line.replace(/\r$/, '');
           if (l.startsWith('event:')) event = l.slice(6).trim();
-          // Mehrere data:-Zeilen werden gemäß SSE-Spec mit \n verbunden.
+          // Multiple data: lines are joined with \n per the SSE spec.
           else if (l.startsWith('data:')) dataLines.push(l.slice(5).replace(/^ /, ''));
         }
         dispatch(event, dataLines.join('\n'));

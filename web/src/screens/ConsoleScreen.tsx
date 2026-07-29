@@ -23,9 +23,10 @@ import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { streamChatMessage, ApiError } from '../lib/api';
 import { useChatStatus, useChangeSets, useChangeSetActions } from '../lib/queries';
+import { useT } from '../lib/i18n';
 import type { ChangeSet, ChangeSetStatus } from '../lib/types';
 
-// ───────────────────────── Transkript-Modell ─────────────────────────
+// ───────────────────────── Transcript model ─────────────────────────
 
 interface ToolLine {
   name: string;
@@ -53,10 +54,13 @@ type Entry = UserEntry | AssistantEntry;
 let seq = 0;
 const nextId = () => `e${++seq}`;
 
-const TOOL_META: Record<string, { Icon: typeof Database; verb: string }> = {
-  inspect_schema: { Icon: Database, verb: 'Schema' },
-  run_read_query: { Icon: Search, verb: 'Abfrage' },
-  propose_change_set: { Icon: ShieldCheck, verb: 'Vorschlag' },
+// Per-tool verb labels — kept in a constant so the streaming assistant loop
+// can render them as the tool runs. We resolve the user-facing label inside
+// the component (with `useT`) for a real locale switch.
+const TOOL_KEYS: Record<string, { Icon: typeof Database; verbKey: 'console.tool.schema' | 'console.tool.query' | 'console.tool.proposal' }> = {
+  inspect_schema: { Icon: Database, verbKey: 'console.tool.schema' },
+  run_read_query: { Icon: Search, verbKey: 'console.tool.query' },
+  propose_change_set: { Icon: ShieldCheck, verbKey: 'console.tool.proposal' },
 };
 
 // ───────────────────────── Screen ─────────────────────────
@@ -64,6 +68,7 @@ const TOOL_META: Record<string, { Icon: typeof Database; verb: string }> = {
 export function ConsoleScreen() {
   const toast = useToast();
   const reduce = useReducedMotion();
+  const t = useT();
   const status = useChatStatus();
   const changeSetsQuery = useChangeSets();
   const actions = useChangeSetActions();
@@ -80,7 +85,7 @@ export function ConsoleScreen() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Initiale Change-Set-Historie übernehmen (für Audit-Log + Undo-Status).
+  // Hydrate the change-set history once (for the audit log + undo state).
   useEffect(() => {
     const data = changeSetsQuery.data;
     if (!data) return;
@@ -92,7 +97,7 @@ export function ConsoleScreen() {
     setLatestAppliedId((prev) => prev ?? data.latestAppliedId);
   }, [changeSetsQuery.data]);
 
-  // Auto-Scroll ans Ende bei neuen Inhalten.
+  // Auto-scroll to the bottom on new content.
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'end' });
   }, [entries, reduce]);
@@ -104,7 +109,7 @@ export function ConsoleScreen() {
     const text = raw.trim();
     if (!text || streaming) return;
 
-    // Verlauf: abgeschlossene Text-Turns (ohne den neuen).
+    // History: completed text turns only (excluding the new prompt).
     const history = entries
       .filter((e) => e.kind === 'user' || (e.kind === 'assistant' && !!e.text && !e.error))
       .map((e) => ({ role: e.kind, text: e.text }))
@@ -126,7 +131,7 @@ export function ConsoleScreen() {
     streamChatMessage(
       { message: text, history },
       {
-        onToken: (t) => patchAssistant(assistantId, (a) => ({ ...a, text: a.text + t, thinking: false })),
+        onToken: (tk) => patchAssistant(assistantId, (a) => ({ ...a, text: a.text + tk, thinking: false })),
         onThinking: () => patchAssistant(assistantId, (a) => ({ ...a, thinking: a.text === '' })),
         onTool: (e) =>
           patchAssistant(assistantId, (a) => {
@@ -170,7 +175,7 @@ export function ConsoleScreen() {
     setStreaming(false);
   };
 
-  // ── Change-Set-Aktionen ──
+  // ── Change-set actions ──
   const applyChangeSet = async (id: number) => {
     setBusyId(id);
     try {
@@ -178,10 +183,16 @@ export function ConsoleScreen() {
       setChangeSets((p) => ({ ...p, [id]: res.changeSet }));
       setLatestAppliedId(res.latestAppliedId);
       haptics.success();
-      toast.show({ message: 'Änderung angewandt', detail: `${res.affected} Zeile${res.affected === 1 ? '' : 'n'} geändert` });
+      toast.show({
+        message: t('console.toast.applied'),
+        detail:
+          res.affected === 1
+            ? t('console.toast.appliedDetail.one', { count: res.affected })
+            : t('console.toast.appliedDetail.many', { count: res.affected }),
+      });
     } catch (e) {
       haptics.warning();
-      toast.show({ tone: 'warning', message: 'Anwenden fehlgeschlagen', detail: (e as Error).message });
+      toast.show({ tone: 'warning', message: t('console.toast.applyFailed'), detail: (e as Error).message });
     } finally {
       setBusyId(null);
     }
@@ -193,10 +204,10 @@ export function ConsoleScreen() {
       setChangeSets((p) => ({ ...p, [id]: res.changeSet }));
       setLatestAppliedId(res.latestAppliedId);
       haptics.success();
-      toast.show({ message: 'Rückgängig gemacht' });
+      toast.show({ message: t('console.toast.undone') });
     } catch (e) {
       haptics.warning();
-      toast.show({ tone: 'warning', message: 'Undo fehlgeschlagen', detail: (e as Error).message });
+      toast.show({ tone: 'warning', message: t('console.toast.undoFailed'), detail: (e as Error).message });
     } finally {
       setBusyId(null);
     }
@@ -207,7 +218,7 @@ export function ConsoleScreen() {
       const res = await actions.discard.mutateAsync(id);
       setChangeSets((p) => ({ ...p, [id]: res.changeSet }));
     } catch (e) {
-      toast.show({ tone: 'warning', message: 'Verwerfen fehlgeschlagen', detail: (e as Error).message });
+      toast.show({ tone: 'warning', message: t('console.toast.discardFailed'), detail: (e as Error).message });
     } finally {
       setBusyId(null);
     }
@@ -249,19 +260,19 @@ export function ConsoleScreen() {
         eyebrow={
           <span className="inline-flex items-center gap-1.5 font-mono text-[12px]">
             <Terminal size={13} className="text-primary" />
-            Daten-Konsole{status.data?.model ? ` · ${status.data.model}` : ''}
+            {t('console.eyebrow')}{status.data?.model ? ` · ${status.data.model}` : ''}
           </span>
         }
-        title="Konsole"
+        title={t('console.title')}
         action={
           <div className="flex items-center gap-1">
             {auditList.length > 0 && (
-              <IconButton label="Verlauf der Änderungen" onClick={() => setAuditOpen(true)}>
+              <IconButton label={t('console.historyAria')} onClick={() => setAuditOpen(true)}>
                 <HistoryIcon size={20} />
               </IconButton>
             )}
             <Link to="/einstellungen">
-              <IconButton label="Einstellungen">
+              <IconButton label={t('console.settingsAria')}>
                 <Settings2 size={20} />
               </IconButton>
             </Link>
@@ -270,21 +281,19 @@ export function ConsoleScreen() {
       />
 
       {offline ? (
-        <NoticeCard icon={<WifiOff size={20} />} title="Server nicht erreichbar" tone="accent">
-          Adresse in den Einstellungen prüfen.
+        <NoticeCard icon={<WifiOff size={20} />} title={t('console.offline.title')} tone="accent">
+          {t('console.offline.detail')}
         </NoticeCard>
       ) : !available ? (
-        <NoticeCard icon={<KeyRound size={20} />} title="Konsole nicht konfiguriert" tone="warn">
-          Setze <code className="font-mono text-[12px]">CHAT_API_KEY</code> (oder{' '}
-          <code className="font-mono text-[12px]">MINIMAX_API_KEY</code>) in der <code className="font-mono text-[12px]">.env</code>,
-          um die Daten-Konsole zu aktivieren. Lesen &amp; Anzeigen funktionieren auch ohne Schlüssel.
+        <NoticeCard icon={<KeyRound size={20} />} title={t('console.unconfigured.title')} tone="warn">
+          {t('console.unconfigured.detail')}
         </NoticeCard>
       ) : null}
 
-      {/* Transkript */}
+      {/* Transcript */}
       <div className="min-h-[40vh] space-y-5 pb-2">
         {entries.length === 0 ? (
-          available && !offline && <ConsoleEmptyState onPick={(t) => { setInput(t); textareaRef.current?.focus(); }} />
+          available && !offline && <ConsoleEmptyState onPick={(tk) => { setInput(tk); textareaRef.current?.focus(); }} />
         ) : (
           entries.map((e) =>
             e.kind === 'user' ? (
@@ -297,7 +306,7 @@ export function ConsoleScreen() {
         <div ref={bottomRef} />
       </div>
 
-      {/* Composer — schwebt über der Tab-Leiste */}
+      {/* Composer — floats above the tab bar */}
       {available && !offline && (
         <div
           className="sticky z-30 -mx-4 px-4 pb-1 pt-2"
@@ -310,7 +319,7 @@ export function ConsoleScreen() {
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={onKeyDown}
               rows={1}
-              placeholder="Frage stellen oder Korrektur beschreiben …"
+              placeholder={t('console.placeholder')}
               spellCheck={false}
               className="max-h-40 min-h-[2.5rem] flex-1 resize-none bg-transparent px-2.5 py-2 font-mono text-[13px] leading-relaxed text-ink placeholder:text-ink-faint focus:outline-none no-scrollbar"
               style={{ height: 'auto' }}
@@ -323,7 +332,7 @@ export function ConsoleScreen() {
             {streaming ? (
               <button
                 onClick={stop}
-                aria-label="Stoppen"
+                aria-label={t('console.stopAria')}
                 className="press grid size-10 shrink-0 place-items-center rounded-xl bg-surface2 text-ink-muted hover:text-ink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
               >
                 <Square size={16} className="fill-current" />
@@ -332,7 +341,7 @@ export function ConsoleScreen() {
               <button
                 onClick={() => send(input)}
                 disabled={!input.trim()}
-                aria-label="Senden"
+                aria-label={t('console.sendAria')}
                 className="press grid size-10 shrink-0 place-items-center rounded-xl bg-primary text-primary-fg transition-opacity disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-offset-2 focus-visible:ring-offset-bg"
               >
                 <ArrowUp size={18} strokeWidth={2.4} />
@@ -340,16 +349,16 @@ export function ConsoleScreen() {
             )}
           </div>
           <p className="px-1 pt-1 text-center font-mono text-[10.5px] text-ink-faint">
-            ⏎ senden · ⇧⏎ neue Zeile · Vorschau vor jeder Änderung
+            {t('console.composerHint')}
           </p>
         </div>
       )}
 
-      {/* Audit-Log */}
-      <Sheet open={auditOpen} onClose={() => setAuditOpen(false)} title="Änderungs-Verlauf" subtitle="Audit-Log der Konsole" size="lg">
+      {/* Audit log */}
+      <Sheet open={auditOpen} onClose={() => setAuditOpen(false)} title={t('console.audit.title')} subtitle={t('console.audit.subtitle')} size="lg">
         <div className="space-y-2 pb-2">
           {auditList.length === 0 ? (
-            <p className="py-6 text-center text-sm text-ink-faint">Noch keine Änderungen.</p>
+            <p className="py-6 text-center text-sm text-ink-faint">{t('console.audit.empty')}</p>
           ) : (
             auditList.map((cs) => <AuditRow key={cs.id} cs={cs} latestAppliedId={latestAppliedId} />)
           )}
@@ -359,7 +368,7 @@ export function ConsoleScreen() {
   );
 }
 
-// ───────────────────────── Teil-Komponenten ─────────────────────────
+// ───────────────────────── Sub-components ─────────────────────────
 
 function UserTurn({ text }: { text: string }) {
   return (
@@ -379,33 +388,35 @@ function AssistantTurn({
   entry: AssistantEntry;
   renderCard: (id: number) => ReactNode;
 }) {
+  const t = useT();
   return (
     <div className="space-y-2.5 border-l-2 border-hairline pl-3.5">
-      {/* Werkzeug-Log */}
+      {/* Tool log */}
       {entry.tools.length > 0 && (
         <div className="space-y-1">
-          {entry.tools.map((t, i) => {
-            const meta = TOOL_META[t.name] ?? { Icon: Database, verb: t.name };
-            const Icon = meta.Icon;
+          {entry.tools.map((tool, i) => {
+            const meta = TOOL_KEYS[tool.name];
+            const Icon = meta?.Icon ?? Database;
+            const verb = meta ? t(meta.verbKey) : tool.name;
             return (
               <div key={i} className="flex items-center gap-2 font-mono text-[11.5px] text-ink-faint">
-                <Icon size={12} className={cx(t.done ? 'text-ink-faint' : 'text-primary')} />
-                <span className="text-ink-muted">{meta.verb}</span>
-                {t.info && t.name === 'run_read_query' && (
-                  <span className="truncate opacity-70">{t.info.replace(/\s+/g, ' ').slice(0, 60)}</span>
+                <Icon size={12} className={cx(tool.done ? 'text-ink-faint' : 'text-primary')} />
+                <span className="text-ink-muted">{verb}</span>
+                {tool.info && tool.name === 'run_read_query' && (
+                  <span className="truncate opacity-70">{tool.info.replace(/\s+/g, ' ').slice(0, 60)}</span>
                 )}
-                {t.summary && <span className="text-ink-faint">· {t.summary}</span>}
-                {!t.done && <span className="size-1.5 animate-pulse rounded-full bg-primary" />}
+                {tool.summary && <span className="text-ink-faint">· {tool.summary}</span>}
+                {!tool.done && <span className="size-1.5 animate-pulse rounded-full bg-primary" />}
               </div>
             );
           })}
         </div>
       )}
 
-      {/* Denken-Indikator */}
+      {/* Thinking indicator */}
       {entry.thinking && entry.text === '' && (
         <p className="flex items-center gap-1.5 text-[13px] text-ink-faint">
-          <span className="size-1.5 animate-pulse rounded-full bg-ink-faint" /> überlegt …
+          <span className="size-1.5 animate-pulse rounded-full bg-ink-faint" /> {t('console.thinking')}
         </p>
       )}
 
@@ -417,12 +428,12 @@ function AssistantTurn({
         </p>
       )}
 
-      {/* Change-Sets */}
+      {/* Change sets */}
       {entry.changeSetIds.length > 0 && (
         <div className="space-y-2.5 pt-0.5">{entry.changeSetIds.map((id) => renderCard(id))}</div>
       )}
 
-      {/* Fehler */}
+      {/* Error */}
       {entry.error && (
         <p className="rounded-lg bg-bad/10 px-2.5 py-1.5 font-mono text-[12px] text-bad">{entry.error}</p>
       )}
@@ -438,6 +449,7 @@ const AUDIT_STATUS: Record<ChangeSetStatus, string> = {
 };
 
 function AuditRow({ cs, latestAppliedId }: { cs: ChangeSet; latestAppliedId: number | null }) {
+  const t = useT();
   return (
     <div className="rounded-xl bg-surface2/50 px-3 py-2.5 ring-1 ring-hairline">
       <div className="flex items-center gap-2">
@@ -446,8 +458,11 @@ function AuditRow({ cs, latestAppliedId }: { cs: ChangeSet; latestAppliedId: num
         <span className={cx('font-mono text-[11px]', AUDIT_STATUS[cs.status])}>{cs.status}</span>
       </div>
       <p className="mt-0.5 truncate font-mono text-[11px] text-ink-faint">
-        {cs.createdAt.slice(0, 16).replace('T', ' ')} · {cs.affected} Zeilen
-        {cs.status === 'applied' && latestAppliedId === cs.id && ' · umkehrbar'}
+        {cs.createdAt.slice(0, 16).replace('T', ' ')} ·{' '}
+        {cs.affected === 1
+          ? t('console.audit.rows.one', { count: cs.affected })
+          : t('console.audit.rows.many', { count: cs.affected })}
+        {cs.status === 'applied' && latestAppliedId === cs.id && ` · ${t('console.audit.reversible')}`}
       </p>
     </div>
   );

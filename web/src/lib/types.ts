@@ -22,7 +22,7 @@ export interface Intake {
   createdAt: string;
 }
 
-/** Automatisch miterfasste Begleit-Einnahme (DEFAULTS.md `Mit:`). */
+/** Auto-recorded companion intake (DEFAULTS.md `Mit:`). */
 export interface IntakeCompanion {
   intake: Intake;
   createdSubstance: boolean;
@@ -43,16 +43,16 @@ export interface IntakeImportResult {
   createdSubstances: number;
 }
 
-/** Tages-Slot des Medikationsplans (Morgens/Mittags/Abends/Nachts). */
+/** Day slot of the medication plan (Morning/Midday/Evening/Night). */
 export type PlanSlot = 'morning' | 'noon' | 'evening' | 'night';
 
-/** Eine vom Sammel-Eintrag ("Morgendmedis"/"Nachtmedis") erzeugte Einnahme. */
+/** One intake produced by a collective entry ("Morning meds"/"Night meds"). */
 export interface PlanBatchEntry {
   intake: Intake;
   createdSubstance: boolean;
 }
 
-/** Antwort von POST /api/intakes/plan-batch — alle Einnahmen eines Slots. */
+/** Response of POST /api/intakes/plan-batch — all intakes of one slot. */
 export interface PlanBatchResult {
   slot: PlanSlot;
   count: number;
@@ -62,7 +62,7 @@ export interface PlanBatchResult {
   assessmentExists: boolean;
 }
 
-/** Ein Eintrag im Sammel-Request POST /api/intakes/batch. */
+/** One entry in the batch request POST /api/intakes/batch. */
 export interface IntakeBatchEntryInput {
   substanceId?: number | null;
   substanceName?: string;
@@ -70,14 +70,14 @@ export interface IntakeBatchEntryInput {
   notes?: string | null;
 }
 
-/** Eine erzeugte Einnahme (samt Begleitsubstanzen) aus POST /api/intakes/batch. */
+/** One produced intake (plus companions) from POST /api/intakes/batch. */
 export interface IntakeBatchEntry {
   intake: Intake;
   createdSubstance: boolean;
   companions: IntakeCompanion[];
 }
 
-/** Antwort von POST /api/intakes/batch — mehrere Substanzen zum selben Zeitpunkt. */
+/** Response of POST /api/intakes/batch — multiple substances at the same timestamp. */
 export interface IntakeBatchResult {
   count: number;
   entries: IntakeBatchEntry[];
@@ -111,11 +111,11 @@ export interface UpcomingPlanVersion {
 export interface Plan {
   versionId: number | null;
   createdAt: string | null;
-  /** Wirkungszeitpunkt ("gültig ab", YYYY-MM-DD oder YYYY-MM-DDTHH:mm) der Version. */
+  /** Effective-from date ("valid from", YYYY-MM-DD or YYYY-MM-DDTHH:mm) of the version. */
   effectiveFrom: string | null;
   note: string | null;
   items: PlanItem[];
-  /** Nur bei GET /api/plan: Versionen mit Wirkungsdatum in der Zukunft. */
+  /** Only on GET /api/plan: versions with an effective-from date in the future. */
   upcoming?: UpcomingPlanVersion[];
 }
 
@@ -123,15 +123,15 @@ export interface PlanVersionSummary {
   versionId: number;
   createdAt: string;
   effectiveFrom: string;
-  /** = effectiveFrom (Wirkungsdatum, für Anzeige/Snapshots). */
+  /** = effectiveFrom (effective date, for display/snapshots). */
   date: string;
   note: string | null;
   itemCount: number;
   active: boolean;
   upcoming: boolean;
-  /** Nur bei GET /api/plan/versions?withItems=1 — die Items dieser Version.
-   *  Der Verlauf misst damit jede Einnahme gegen die zu ihrem Zeitpunkt
-   *  wirksame Plan-Version. */
+  /** Only on GET /api/plan/versions?withItems=1 — the items of this version.
+   *  The history uses this to match each intake against the plan version
+   *  that was effective at the time. */
   items?: PlanItem[];
 }
 
@@ -165,7 +165,7 @@ export interface Metric {
   highLabel: string;
 }
 
-/** Begleitsubstanz aus einer `Mit:`-Zeile in DEFAULTS.md. */
+/** Companion substance from a `Mit:` line in DEFAULTS.md. */
 export interface CompanionDefault {
   name: string;
   amount: string | null;
@@ -199,18 +199,18 @@ export interface ComplianceReport {
   missing: SubstanceCompliance[];
 }
 
-// ---------- Strukturierte DEFAULTS-Sections (PUT /api/defaults/sections) ----------
+// ---------- Structured DEFAULTS sections (PUT /api/defaults/sections) ----------
 
-/** Wire-Shape eines Begleitstoffs in einer Section. */
+/** Wire shape of a companion in a section. */
 export interface DefaultsSectionCompanion {
   name: string;
   amount: string | null;
   note: string | null;
 }
 
-/** Wire-Shape einer Substanz-Section.
- *  `preLines` / `postLines` tragen nicht-strukturierte Zeilen (z.B. `NACH
- *  2026-08-01 12:00 CEST: …` Kommentarblöcke) verlustfrei durch. */
+/** Wire shape of a substance section.
+ *  `preLines` / `postLines` carry unstructured lines (e.g. `NACH
+ *  2026-08-01 12:00 CEST: …` comment blocks) through losslessly. */
 export interface DefaultsSection {
   name: string;
   amount: string | null;
@@ -220,14 +220,14 @@ export interface DefaultsSection {
   postLines: string[];
 }
 
-/** Payload für `PUT /api/defaults/sections`. */
+/** Payload for `PUT /api/defaults/sections`. */
 export interface DefaultsSectionsPayload {
   sections: DefaultsSection[];
 }
 
-// ───────────────────────── Tagebuch ─────────────────────────
+// ───────────────────────── Diary ─────────────────────────
 
-/** Eine Notiz-tragende Einnahme in der Kurzversion des Tagebuchs. */
+/** A note-bearing intake in the short diary version. */
 export interface DiaryIntakeNote {
   id: number;
   takenAt: string;
@@ -242,30 +242,30 @@ export interface DiaryDayAssessment {
   note: string | null;
 }
 
-/** Tägliche Wachzeit (vom Client per POST /api/habit/uptime gemeldet).
- *  Siehe `server/src/routes/habit.ts` für den Algorithmus. */
+/** Daily wake-time (reported by the client via POST /api/habit/uptime).
+ *  See `server/src/routes/habit.ts` for the algorithm. */
 export interface DiaryDayHabit {
-  /** Erster Wach-Moment des Tages (Unix-Sek). */
+  /** First wake moment of the day (Unix seconds). */
   wakeFirstUnix: number | null;
-  /** Letzter Wach-Moment des Tages (Unix-Sek). */
+  /** Last wake moment of the day (Unix seconds). */
   wakeLastUnix: number | null;
 }
 
 /**
- * Tagesbericht des Hermes-Agents (eingeliefert vom 03:30-Berlin-Cron per
- * POST /api/report/new). Wird im Info-Subtab als eigener Abschnitt angezeigt
- * UND in den Traum-Kontext gespeist — siehe gatherDreamContext.
+ * Daily report of the Hermes agent (delivered by the 03:30 Berlin cron via
+ * POST /api/report/new). Rendered in the Info subtab as a separate section
+ * AND fed into the dream context — see gatherDreamContext.
  */
 export interface DiaryDayReport {
-  /** Vollständiger Berichtstext (Markdown oder Plain). */
+  /** Full report text (Markdown or plain). */
   report: string;
-  /** Optionaler Marker (z. B. "hermes-cron-0330"). */
+  /** Optional source marker (e.g. "hermes-cron-0330"). */
   source: string | null;
 }
 
-// ───────────────────────── Habit (Wachzeit & Co.) ─────────────────────────
+// ───────────────────────── Habit (wake time & co.) ─────────────────────────
 
-/** Tages-Habit-Eintrag (z. B. Wachzeit, gemeldet per /api/habit/uptime). */
+/** Daily habit entry (e.g. wake time, reported via /api/habit/uptime). */
 export interface Habit {
   date: string;
   wakeFirstUnix: number | null;
@@ -275,7 +275,7 @@ export interface Habit {
   exists?: boolean;
 }
 
-/** Ein Konsum-Tag in der Kurzversion (Liste der Notizen). */
+/** One consumption day in the short version (list of notes). */
 export interface DiaryNoteDay {
   date: string;
   weekday: string;
@@ -290,25 +290,25 @@ export interface DiaryNotesResponse {
   days: DiaryNoteDay[];
 }
 
-/** Ein generierter Volltext-Eintrag eines Tages. */
+/** One generated full-text entry for a day. */
 export interface DiaryEntry {
   date: string;
   heading: string;
   body: string;
 }
 
-/** Zustand des KI-Voll-Tagebuchs. */
+/** State of the AI full-text diary. */
 export interface DiaryState {
-  /** ANTHROPIC_API_KEY hinterlegt? (sonst kann nicht generiert werden) */
+  /** Is ANTHROPIC_API_KEY configured? (otherwise generation is unavailable) */
   available: boolean;
   model: string;
   raw: string;
   entries: DiaryEntry[];
-  /** Alle Tage mit Notizen/Tagesbild (Grundmenge für die Generierung). */
+  /** All days with notes/assessment (base set for generation). */
   noteworthyDays: string[];
-  /** Tage, für die bereits ein Voll-Eintrag existiert. */
+  /** Days that already have a full entry. */
   generatedDays: string[];
-  /** Tage mit Inhalt, aber noch ohne Voll-Eintrag. */
+  /** Days with content but without a full entry yet. */
   pendingDays: string[];
   lastGeneratedAt: string | null;
 }
@@ -319,9 +319,9 @@ export interface DiaryGenerateResult extends DiaryState {
   errors: { date: string; error: string }[];
 }
 
-// ───────────────────────── Träume (nächtliche Auswertung) ─────────────────────────
+// ───────────────────────── Dreams (nightly summary) ─────────────────────────
 
-/** Ein „Traum" = die tägliche KI-Auswertung (system_prompt.md → MiniMax M3). */
+/** A "dream" = the daily AI summary (system_prompt.md → MiniMax M3). */
 export interface Dream {
   date: string;
   content: string;
@@ -333,23 +333,23 @@ export interface Dream {
 
 export interface DreamListResponse {
   dreams: Dream[];
-  /** MINIMAX_API_KEY hinterlegt? (sonst träumt der Server nicht) */
+  /** Is MINIMAX_API_KEY configured? (otherwise the server does not dream) */
   available: boolean;
-  /** Läuft gerade eine Generierung? */
+  /** Is a generation currently running? */
   busy: boolean;
 }
 
-/** Antwort von GET /api/dreams/latest (Startup-Dialog). */
+/** Response of GET /api/dreams/latest (startup dialog). */
 export interface DreamLatest extends Partial<Dream> {
   exists: boolean;
   available: boolean;
 }
 
-// ───────────────────────── Daten-Konsole (Chat with your data) ─────────────────────────
+// ───────────────────────── Data console (Chat with your data) ─────────────────────────
 
 export type ChangeSetStatus = 'proposed' | 'applied' | 'undone' | 'discarded';
 
-/** Eine before→after-Zeile der Change-Set-Vorschau. */
+/** One before→after row of the change-set preview. */
 export interface DiffRow {
   table: 'intakes' | 'substances';
   id: number | null;
@@ -374,7 +374,7 @@ export interface ChangeSetPreview {
   sampleTruncated: boolean;
 }
 
-/** Ein vorgeschlagenes/angewandtes Change-Set der Daten-Konsole. */
+/** A proposed/applied change set from the data console. */
 export interface ChangeSet {
   id: number;
   createdAt: string;
@@ -400,7 +400,7 @@ export interface ChangeSetsResponse {
   available: boolean;
 }
 
-/** Ein Eintrag im (client-seitigen) Konsolen-Transkript. */
+/** One entry in the (client-side) console transcript. */
 export type TranscriptRole = 'user' | 'assistant';
 
 export interface ToolEvent {
@@ -410,14 +410,14 @@ export interface ToolEvent {
   summary?: string;
 }
 
-// ───────────────────────── Traum-Zustellung (WhatsApp-Delivery-Log) ─────────────────────────
+// ───────────────────────── Dream delivery (WhatsApp delivery log) ─────────────────────────
 
-/** Zustellstatus eines Traums an den Empfänger (WhatsApp). */
+/** Delivery status of a dream to the recipient (WhatsApp). */
 export type DeliveryStatus = 'pending' | 'sent' | 'failed' | 'abandoned';
-/** Status der optionalen Sprachnachricht (ElevenLabs → WhatsApp). */
+/** Status of the optional voice note (ElevenLabs → WhatsApp). */
 export type VoiceStatus = 'none' | 'sent' | 'failed';
 
-/** Ein Zustell-Datensatz: der Versuch, einen Traum eines Tages zuzustellen. */
+/** A delivery record: the attempt to deliver a dream for a given day. */
 export interface DreamDelivery {
   id: number;
   dreamDate: string;
@@ -436,7 +436,7 @@ export interface DeliveriesResponse {
   deliveries: DreamDelivery[];
 }
 
-// ───────────────────────── WhatsApp-Verbindung (Admin) ─────────────────────────
+// ───────────────────────── WhatsApp connection (admin) ─────────────────────────
 
 export type WhatsappConnectionState = 'disconnected' | 'connecting' | 'qr' | 'connected';
 
@@ -454,44 +454,44 @@ export interface WhatsappStatus {
 export interface WhatsappQrResponse { qr: string; }   // base64 PNG, no data: prefix
 
 /**
- * Konfigurierter WhatsApp-Empfänger (Spiegel der SQLite-Rohzeile aus
- * `delivery_targets`). Wird vom Server unverändert (snake_case) zurückgegeben,
- * weil der `/api/whatsapp/targets`-Endpunkt bewusst keinen Serializer
- * vorschaltet — siehe `server/src/routes/whatsapp.ts`.
+ * Configured WhatsApp recipient (mirror of the raw SQLite row from
+ * `delivery_targets`). The server returns it unchanged (snake_case)
+ * because the `/api/whatsapp/targets` endpoint deliberately does not
+ * have a serializer in front — see `server/src/routes/whatsapp.ts`.
  */
 export interface WhatsappTarget {
   id: number;
   channel: string;
   phone: string;
   display_name: string | null;
-  enabled: number;       // 0 oder 1 (SQLite-Boolean)
+  enabled: number;       // 0 or 1 (SQLite boolean)
   created_at: string;
 }
 
-// ───────────────────────── Wirkstoff-Profile (KI, Statistik „Wirkstoff-Bilanz") ─────────────────────────
+// ───────────────────────── Ingredient profiles (AI, "Compound balance" stats) ─────────────────────────
 
-/** Typische Portion einer Substanz, wie der Nutzer sie protokolliert. */
+/** Typical serving of a substance, as logged by the user. */
 export interface SubstanceServing {
   label: string;
   value: number;
   unit: string;
-  /** Volumen EINER Portion in ml (Getränke) — erlaubt ml-Umrechnung. */
+  /** Volume of ONE serving in ml (drinks) — allows ml conversion. */
   milliliters?: number | null;
-  /** Masse EINER Portion in g (Feststoffe) — erlaubt g/mg-Umrechnung. */
+  /** Mass of ONE serving in g (solids) — allows g/mg conversion. */
   grams?: number | null;
 }
 
-/** Ein Wirkstoff/Inhaltsstoff in einer Portion (mg). */
+/** One active ingredient in a serving (mg). */
 export interface IngredientEntry {
-  /** Kanonischer, quellenübergreifend gleicher Schlüssel ("caffeine"). */
+  /** Canonical source-spanning key (e.g. "caffeine"). */
   compound: string;
-  /** Deutscher Anzeigename ("Koffein"). */
+  /** Display name (e.g. "Caffeine"). */
   label: string;
   category: string;
   mgPerServing: number;
 }
 
-/** KI-Profil einer Substanz (serving + ingredients). */
+/** AI profile of a substance (serving + ingredients). */
 export interface SubstanceProfile {
   serving: SubstanceServing;
   ingredients: IngredientEntry[];
@@ -499,31 +499,31 @@ export interface SubstanceProfile {
   confidence: 'low' | 'medium' | 'high';
 }
 
-/** Ein gecachtes Profil samt Metadaten (per nameKey adressiert). */
+/** A cached profile plus metadata (addressed by nameKey). */
 export interface SubstanceProfileDTO {
   name: string;
   profile: SubstanceProfile;
   model: string;
   updatedAt: string;
-  /** True, wenn die Eingabe seit der Analyse verändert wurde. */
+  /** True if the input has been modified since the analysis. */
   stale: boolean;
 }
 
-/** Zustand der KI-Wirkstoff-Analyse (GET /api/ingredients). */
+/** State of the AI ingredient analysis (GET /api/ingredients). */
 export interface IngredientsState {
   available: boolean;
   model: string;
-  /** Profile per nameKey. */
+  /** Profiles by nameKey. */
   profiles: Record<string, SubstanceProfileDTO>;
-  /** Substanzen (mit Einnahmen) ohne Profil. */
+  /** Substances (with intakes) lacking a profile. */
   missing: string[];
-  /** Substanzen mit veraltetem Profil. */
+  /** Substances with a stale profile. */
   stale: string[];
-  /** Substanzen gesamt (mit ≥ 1 Einnahme). */
+  /** Total substances (with ≥ 1 intake). */
   total: number;
 }
 
-/** Ergebnis von POST /api/ingredients/analyze. */
+/** Result of POST /api/ingredients/analyze. */
 export interface IngredientsAnalyzeResult {
   analyzed: number;
   skipped: number;

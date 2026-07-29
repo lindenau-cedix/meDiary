@@ -2,10 +2,10 @@ import { scoreColor } from '../../lib/colors';
 import type { MetricPolarity } from '../../lib/types';
 
 /**
- * Doppelachsen-Overlay für „Substanz × Wohlbefinden": Tages-Dosis als Balken
- * (Substanzfarbe, implizite linke Achse) plus die gewählte 1–10-Skala als
- * Linie mit farbcodierten Punkten (`scoreColor`, rechte Achse 1–10). Tage ohne
- * Skalenwert unterbrechen die Linie (keine erfundene Interpolation über Lücken).
+ * Dual-axis overlay for substance × wellbeing: daily dose as bars (substance
+ * colour, implicit left axis) plus the selected 1–10 scale as a line with
+ * colour-coded points (`scoreColor`, right axis 1–10). Days without a scale
+ * value break the line (no invented interpolation across gaps).
  */
 interface Props {
   dose: number[];
@@ -31,7 +31,7 @@ export function DualAxis({ dose, metric, doseColor, polarity, height = 120 }: Pr
   const yDose = (v: number) => H - PAD_BOTTOM - (v / doseMax) * innerH;
   const yMetric = (v: number) => H - PAD_BOTTOM - ((Math.min(10, Math.max(1, v)) - 1) / 9) * innerH;
 
-  // Linie in zusammenhängende Segmente zerlegen (Lücken an null-Werten).
+  // Split the line into contiguous segments (gaps at null values).
   const segments: { i: number; v: number }[][] = [];
   let cur: { i: number; v: number }[] = [];
   metric.forEach((v, i) => {
@@ -48,7 +48,7 @@ export function DualAxis({ dose, metric, doseColor, polarity, height = 120 }: Pr
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img">
       <line x1={0} y1={H - PAD_BOTTOM} x2={W} y2={H - PAD_BOTTOM} stroke="rgb(var(--hairline))" strokeWidth={1} vectorEffect="non-scaling-stroke" />
 
-      {/* Dosis-Balken */}
+      {/* Dose bars */}
       {dose.map((v, i) =>
         v > 0 ? (
           <rect
@@ -65,7 +65,7 @@ export function DualAxis({ dose, metric, doseColor, polarity, height = 120 }: Pr
         ) : null,
       )}
 
-      {/* Skalen-Linie */}
+      {/* Scale line */}
       {segments.map((seg, si) => (
         <path
           key={si}

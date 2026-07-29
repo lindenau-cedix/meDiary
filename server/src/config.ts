@@ -139,8 +139,31 @@ function parseMinimaxThinking(raw: string | undefined): { type: 'adaptive' | 'di
   return { type: 'adaptive' };
 }
 
+/**
+ * Ausgabesprache für die drei Langtext-KI-Features (nächtliches „Träumen",
+ * KI-Tagebuch-Volltexte, KI-Wirkstoff-Profile). Default `de` = bisheriges
+ * Verhalten. `en` setzt dem Modell eine klare Sprach-Direktive vor und
+ * übersetzt die wenigen deutschsprachigen Prompt-Scaffolding-Zeilen
+ * (Section-Header wie „## Einnahmen"), damit das Modell nicht durch
+ * gemischtsprachigen Input aus dem Tritt kommt. Andere Strings (Substanz-
+ * Namen, Einnahme-Notizen, METRIC-Labels, Hermes-Berichte …) bleiben
+ * unverändert — das sind Nutzer-/Domain-Daten, keine Output-Sprache.
+ *
+ * `AI_LANGUAGE=de` (Default) | `en`. Unbekannte Werte → `de`.
+ */
+function parseAiLanguage(raw: string | undefined): 'de' | 'en' {
+  const v = (raw ?? '').trim().toLowerCase();
+  if (v === 'en' || v === 'english') return 'en';
+  return 'de';
+}
+
 export const config = {
   port: Number(process.env.PORT ?? 4000),
+  /**
+   * Ausgabesprache der KI-Langtext-Generatoren (AI_LANGUAGE). Default `de`.
+   * Siehe `parseAiLanguage` oben — unbekannte Werte fallen auf `de` zurück.
+   */
+  aiLanguage: parseAiLanguage(process.env.AI_LANGUAGE),
   /**
    * Database path. Default: ~/.local/share/mediary/data/mediary.db
    * When WEB_DIST is set, the DB dir is auto-created if it doesn't exist.

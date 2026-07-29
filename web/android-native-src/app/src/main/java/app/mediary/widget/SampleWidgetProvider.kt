@@ -10,14 +10,14 @@ import android.widget.RemoteViews
 import app.mediary.R
 
 /**
- * Provider für die 1×1-Home-Screen-Widgets „meDiary-Sample".
+ * Provider for the 1×1 “meDiary Sample” home-screen widgets.
  *
- * Pro Instanz wird in `SampleWidgetPrefs` eine `Binding` gehalten. Tippt
- * der Nutzer, geht ein `ACTION_SEND_SAMPLE`-Broadcast an
- * [SampleSendReceiver], der den eigentlichen POST macht.
+ * Each instance has a `Binding` stored in `SampleWidgetPrefs`. When the user
+ * taps it, an `ACTION_SEND_SAMPLE` broadcast is sent to [SampleSendReceiver],
+ * which performs the actual POST.
  *
- * Der `updatePeriodMillis` ist 0 (siehe `sample_widget_info.xml`) — das
- * Widget rendert nur bei Bedarf (Konfig-Änderung, onUpdate nach Re-Add).
+ * `updatePeriodMillis` is 0 (see `sample_widget_info.xml`), so the widget
+ * renders only when needed (configuration changes or onUpdate after re-adding).
  */
 class SampleWidgetProvider : AppWidgetProvider() {
 
@@ -35,10 +35,10 @@ class SampleWidgetProvider : AppWidgetProvider() {
 
     companion object {
         /**
-         * Setzt das RemoteViews für eine Widget-Instanz. Wenn keine
-         * Bindung existiert (z. B. weil der User den Add-Wizard mit
-         * Back abgebrochen hat), wird eine leere Kachel gerendert, deren
-         * Tap die Config-Activity erneut öffnet.
+         * Sets the RemoteViews for one widget instance. If no binding exists
+         * (for example, because the user canceled the add wizard with Back),
+         * an empty tile is rendered and tapping it reopens the configuration
+         * activity.
          */
         fun updateAppWidget(
             context: Context,
@@ -83,14 +83,14 @@ class SampleWidgetProvider : AppWidgetProvider() {
             mgr.updateAppWidget(widgetId, views)
         }
 
-        /** Alle Instanzen neu zeichnen — z. B. nach API-Base-Update. */
+        /** Redraws all instances, for example after an API base update. */
         fun refreshAll(context: Context) {
             val mgr = AppWidgetManager.getInstance(context)
             val ids = mgr.getAppWidgetIds(ComponentName(context, SampleWidgetProvider::class.java))
             ids.forEach { updateAppWidget(context, mgr, it) }
         }
 
-        /** Slot-Farbe aus `colors.xml` (Fallback, wenn Substanz-Farbe fehlt). */
+        /** Slot color from `colors.xml`, used when the substance has no color. */
         fun slotColor(ctx: Context, slot: String): Int {
             val resId = when (slot) {
                 "morning" -> R.color.widget_slot_morning

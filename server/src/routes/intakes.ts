@@ -11,25 +11,25 @@ import { requireCloudflareAccess } from '../lib/cloudflare_access.js';
 
 export const intakesRouter = Router();
 
-/** Fügt zwischen Zahl und Buchstabe ein Leerzeichen ein: "100ml" → "100 ml" */
+/** Inserts a space between digit and letter: "100ml" → "100 ml" */
 function normalizeAmount(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  // Zwischen Ziffer und Buchstabe (Einheiten wie ml, mg, µg etc.)
+  // Between digit and letter (units like ml, mg, µg etc.)
   return trimmed.replace(/(\d)([a-zA-ZäöüÄÖÜßµ])/g, '$1 $2');
 }
 
-/** True, wenn eine Substanz mit diesem nameKey (aktiv oder archiviert) existiert. */
+/** True if a substance with this nameKey exists (active or archived). */
 function substanceExists(key: string): boolean {
   return (db.prepare(`SELECT name FROM substances`).all() as { name: string }[]).some((s) => nameKey(s.name) === key);
 }
 
 /**
- * Read-only-Vorschau der "Mit:"-Begleitsubstanzen einer Substanz (für den
- * dryRun von POST /text): gleiche Mengen-/Notiz-Auflösung wie beim Schreiben
- * (Mit:-Wert > Substanz-Standarddosis > DEFAULTS der Begleitsubstanz), aber
- * OHNE Substanz-Anlage. Eine Ebene tief, Selbstbezug übersprungen.
+ * Read-only preview of the "Mit:" companions of a substance (for the
+ * dryRun of POST /text): same amount/note resolution as when writing
+ * (Mit: value > substance default dose > DEFAULTS of the companion), but
+ * WITHOUT creating new substances. One level deep, self-reference skipped.
  */
 function previewCompanions(
   substanceName: string,
@@ -60,12 +60,11 @@ interface CompanionCreated {
 }
 
 /**
- * Erfasst die "Mit:"-Begleitsubstanzen aus DEFAULTS.md des Haupteintrags als
- * eigene Einnahmen zum selben Zeitpunkt — eine Ebene tief, Selbstbezug
- * übersprungen, `source_event_id = companion:<haupt-id>`. MUSS innerhalb der
- * umgebenden Transaktion aufgerufen werden. Geteilt von POST `/` und
- * POST `/batch`, damit beide identisch auflösen (Mit:-Wert > Standarddosis der
- * Begleitsubstanz > deren DEFAULTS).
+ * Records the "Mit:" companions from DEFAULTS.md of the main entry as their
+ * own intakes at the same time — one level deep, self-reference skipped,
+ * `source_event_id = companion:<main-id>`. MUST be called inside the
+ * surrounding transaction. Shared by POST `/` and POST `/batch`, so both
+ * resolve identically (Mit: value > companion default dose > its DEFAULTS).
  */
 function insertCompanions(mainSubstanceName: string, mainId: number, takenAt: string): CompanionCreated[] {
   const insertIntake = db.prepare(
@@ -78,7 +77,7 @@ function insertCompanions(mainSubstanceName: string, mainId: number, takenAt: st
   const seen = new Set([nameKey(mainSubstanceName)]);
   for (const comp of def.companions) {
     const key = nameKey(comp.name);
-    if (seen.has(key)) continue; // Selbstbezug/Doppelnennung überspringen
+    if (seen.has(key)) continue; // skip self-reference / duplicates
     seen.add(key);
     const existedBefore = (db.prepare(`SELECT name FROM substances`).all() as { name: string }[]).some(
       (s) => nameKey(s.name) === key,
@@ -105,10 +104,10 @@ function insertCompanions(mainSubstanceName: string, mainId: number, takenAt: st
 const createSchema = z.object({
   substanceId: z.number().int().nullish(),
   substanceName: z.string().trim().min(1).optional(),
-  takenAt: z.string().optional(), // default: jetzt
+  takenAt: z.string().optional(), // default: now
   amount: z.string().trim().nullish(),
   notes: z.string().nullish(),
-  companions: z.boolean().optional(), // false = "Mit:"-Begleitsubstanzen nicht miterfassen (z. B. Backfill-Skripte)
+  companions: z.boolean().optional(), // false = do not record "Mit:" companions (e.g. backfill scripts)
 });
 
 intakesRouter.get('/', (req, res) => {
@@ -209,14 +208,14 @@ intakesRouter.post('/', (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const d = parsed.data;
 
-  // Substanz auflösen: per ID, sonst per Name. Wird der Name nicht gefunden,
-  // wird er als QuickPick (= Substanz-Kachel) automatisch angelegt, damit
-  // jeder jemals eingetragene Stoff beim nächsten Mal tippbar ist.
+  // Resolve the substance: by ID, otherwise by name. If the name is not
+  // found it is auto-created as a QuickPick (= substance tile), so every
+  // ever-logged substance is typeable on the next call.
   let substance: SubstanceRow | undefined;
   let createdSubstance = false;
   if (d.substanceId != null) {
     substance = db.prepare(`SELECT * FROM substances WHERE id = ?`).get(d.substanceId) as SubstanceRow | undefined;
-    if (!substance) return res.status(400).json({ error: 'Substanz nicht gefunden' });
+    if (!substance) return res.status(400).json({ error: 'Substance not found' });
   } else if (d.substanceName) {
     const before = db
       .prepare(`SELECT id, name FROM substances`)
@@ -228,12 +227,12 @@ intakesRouter.post('/', (req, res) => {
   }
 
   const substanceName = substance?.name ?? d.substanceName;
-  if (!substanceName) return res.status(400).json({ error: 'substanceId oder substanceName erforderlich' });
+  if (!substanceName) return res.status(400).json({ error: 'substanceId or substanceName required' });
 
   const takenAt = d.takenAt ? normalizeDateTime(d.takenAt) : nowLocalISO();
 
-  // DEFAULTS.md wird bei jedem Schreibvorgang frisch gelesen (Notiz + Menge).
-  // Vorrang: explizite Angabe > DEFAULTS.md (Single Source of Truth).
+  // DEFAULTS.md is re-read on every write (note + amount). Priority:
+  // explicit value > DEFAULTS.md (single source of truth).
   const def = defaultsFor(substanceName);
   const amount = normalizeAmount(d.amount) || def.amount || null;
   const notes = d.notes?.trim() || def.note || null;
@@ -244,9 +243,9 @@ intakesRouter.post('/', (req, res) => {
   );
   const selectIntake = db.prepare(`SELECT * FROM intakes WHERE id = ?`);
 
-  // Begleitsubstanzen aus DEFAULTS "Mit:" im selben Schritt miterfassen —
-  // bewusst nur eine Ebene tief ("Mit:" der Begleitsubstanz wird nicht
-  // verfolgt, keine Ketten/Zyklen). `companions: false` schaltet das ab.
+  // Record companions from DEFAULTS "Mit:" in the same step — deliberately
+  // one level deep only (the companion's own "Mit:" is not followed, no
+  // chains/cycles). `companions: false` disables this.
   const createIntakes = db.transaction((): { row: IntakeRow; companions: CompanionCreated[] } => {
     const info = insertIntake.run(
       substance?.id ?? null, substanceName, takenAt, amount, notes, nowLocalISO(), null,
@@ -257,8 +256,8 @@ intakesRouter.post('/', (req, res) => {
   });
   const { row, companions } = createIntakes();
 
-  // Erst wenn ALLE Nacht-Medis des aktuellen Plans für den Konsumtag
-  // eingenommen wurden, wird das Tages-Assessment angeboten.
+  // Only once ALL night meds of the active plan for the consumption day
+  // have been taken is the daily assessment offered.
   const assessmentDate = allNightMedsTaken(consumptionDay(takenAt));
   const assessmentExists = assessmentDate
     ? !!db.prepare(`SELECT 1 FROM daily_assessments WHERE date = ?`).get(assessmentDate)
@@ -282,22 +281,22 @@ type PlanSlot = (typeof PLAN_SLOTS)[number];
 
 const planBatchSchema = z.object({
   slot: z.enum(PLAN_SLOTS),
-  takenAt: z.string().optional(), // default: jetzt
+  takenAt: z.string().optional(), // default: now
 });
 
 /**
- * Trägt alle Substanzen des wirksamen Plans für einen Tages-Slot
- * (`morning`/`noon`/`evening`/`night`) als Einnahmen zum selben Zeitpunkt ein —
- * d. h. "Morgendmedis" bzw. "Nachtmedis" als ein einziger Tipp. Pro Substanz
- * gilt dieselbe Mengen-/Notiz-Auflösung wie bei einer normalen Erfassung
- * (Standarddosis > DEFAULTS > Plan-Stärke). Maßgeblich ist der zum `takenAt`
- * wirksame Plan.
+ * Records every substance of the active plan for a daily slot
+ * (`morning`/`noon`/`evening`/`night`) as intakes at the same time —
+ * i.e. "morning meds" / "night meds" as a single tap. Each substance uses
+ * the same amount/note resolution as a normal entry
+ * (default dose > DEFAULTS > plan strength). The plan effective at
+ * `takenAt` is authoritative.
  *
- * Begleitsubstanzen (DEFAULTS "Mit:") werden hier bewusst NICHT miterfasst —
- * der Plan ist die maßgebliche Liste, sonst entstünden Doppelungen, wenn eine
- * Begleitsubstanz ohnehin im Plan steht. Wie bei `POST /` wird nach dem
- * Eintragen geprüft, ob alle Nacht-Medis des Konsumtags erfasst sind, um das
- * Tagesbild anzubieten (`nightMed`/`assessmentDate`).
+ * Companions (DEFAULTS "Mit:") are deliberately NOT recorded here — the
+ * plan is the authoritative list, otherwise duplicates would appear when a
+ * companion is already in the plan. Like `POST /`, after recording we
+ * check whether all night meds for the consumption day are recorded to
+ * offer the daily assessment (`nightMed`/`assessmentDate`).
  */
 intakesRouter.post('/plan-batch', (req, res) => {
   const parsed = planBatchSchema.safeParse(req.body);
@@ -306,7 +305,7 @@ intakesRouter.post('/plan-batch', (req, res) => {
 
   const takenAt = parsed.data.takenAt ? normalizeDateTime(parsed.data.takenAt) : nowLocalISO();
 
-  // Den zum Zeitpunkt wirksamen Plan heranziehen und auf den Slot filtern.
+  // Pull the plan effective at that time and filter by slot.
   const version = planVersionAt(takenAt);
   const items = version
     ? planItemsFor(version.id).filter((it) => {
@@ -330,11 +329,11 @@ intakesRouter.post('/plan-batch', (req, res) => {
     const seen = new Set<string>();
     for (const item of items) {
       const key = nameKey(item.substance_name);
-      if (seen.has(key)) continue; // Doppelnennungen im Plan überspringen
+      if (seen.has(key)) continue; // skip duplicate plan entries
       seen.add(key);
 
-      // Substanz auflösen: bevorzugt über die im Plan hinterlegte ID, sonst
-      // per Name (legt sie bei Bedarf als QuickPick an).
+      // Resolve the substance: prefer the ID stored in the plan, otherwise
+      // by name (creates it as a QuickPick if needed).
       let sub: SubstanceRow | undefined;
       let createdSubstance = false;
       if (item.substance_id != null) {
@@ -350,12 +349,12 @@ intakesRouter.post('/plan-batch', (req, res) => {
 
       const name = sub?.name ?? item.substance_name;
       const def = defaultsFor(name);
-      // Priorität: die im Plan für DIESEN Slot hinterlegte Dosis (z. B. die
-      // morgens/nachts-Dosis aus der Markdown-Planverlauf-Datei) >
-      // DEFAULTS.md > generische Plan-Stärke. Ohne den
-      // Slot-First würde der Markdown-Importer (der Dosen in morning/noon/
-      // evening/night, NICHT in strength schreibt) für betroffene Substanzen
-      // leere Einträge erzeugen.
+      // Priority: dose stored in the plan for THIS slot (e.g. the
+      // morning/night dose from the Markdown plan-history file) >
+      // DEFAULTS.md > generic plan strength. Without slot-first, the
+      // Markdown importer (which writes doses in morning/noon/evening/
+      // night, NOT in strength) would produce empty entries for the
+      // affected substances.
       const slotDose = normalizeAmount(item[slot]);
       const amount =
         slotDose
@@ -371,8 +370,8 @@ intakesRouter.post('/plan-batch', (req, res) => {
   });
   const created = createBatch();
 
-  // Erst wenn ALLE Nacht-Medis des aktuellen Plans für den Konsumtag
-  // eingenommen wurden, wird das Tages-Assessment angeboten.
+  // Only once ALL night meds of the active plan for the consumption day
+  // have been taken is the daily assessment offered.
   const assessmentDate = allNightMedsTaken(consumptionDay(takenAt));
   const assessmentExists = assessmentDate
     ? !!db.prepare(`SELECT 1 FROM daily_assessments WHERE date = ?`).get(assessmentDate)
@@ -399,24 +398,24 @@ const batchEntrySchema = z
     notes: z.string().nullish(),
   })
   .refine((e) => e.substanceId != null || !!e.substanceName, {
-    message: 'substanceId oder substanceName erforderlich',
+    message: 'substanceId or substanceName required',
   });
 
 const batchSchema = z.object({
-  takenAt: z.string().optional(), // default: jetzt — gilt für ALLE Einträge
-  companions: z.boolean().optional(), // false = "Mit:"-Begleitsubstanzen nicht miterfassen
-  entries: z.array(batchEntrySchema).min(1, 'mindestens ein Eintrag erforderlich'),
+  takenAt: z.string().optional(), // default: now — applies to ALL entries
+  companions: z.boolean().optional(), // false = do not record "Mit:" companions
+  entries: z.array(batchEntrySchema).min(1, 'at least one entry required'),
 });
 
 /**
- * Mehrere Substanzen in einem Rutsch erfassen — gleicher Zeitpunkt für alle,
- * pro Eintrag eigene Menge/Notiz. Eine Transaktion, gleiche Auflösung wie
- * `POST /` (Menge: Text > Standarddosis > DEFAULTS; Notiz: Text > DEFAULTS;
- * Autovivifikation; `Mit:`-Begleitsubstanzen je Eintrag, `companions: false`
- * schaltet sie ab). Wie bei `POST /` wird danach geprüft, ob alle Nacht-Medis
- * des Konsumtags erfasst sind (`nightMed`/`assessmentDate`).
+ * Record several substances in one go — same timestamp for all, individual
+ * amount/note per entry. One transaction, same resolution as `POST /`
+ * (amount: text > default dose > DEFAULTS; note: text > DEFAULTS;
+ * auto-vivification; `Mit:` companions per entry, `companions: false`
+ * disables them). Like `POST /`, after recording we check whether all
+ * night meds for the consumption day are recorded (`nightMed`/`assessmentDate`).
  *
- * Antwort: `{ count, entries: { intake, createdSubstance, companions[] }[],
+ * Response: `{ count, entries: { intake, createdSubstance, companions[] }[],
  * nightMed, assessmentDate, assessmentExists }`.
  */
 intakesRouter.post('/batch', (req, res) => {
@@ -426,8 +425,8 @@ intakesRouter.post('/batch', (req, res) => {
   const withCompanions = d.companions !== false;
   const takenAt = d.takenAt ? normalizeDateTime(d.takenAt) : nowLocalISO();
 
-  // Substanzen vorab auflösen (legt neue Namen als QuickPick an, wie POST /);
-  // eine fehlende substanceId ist ein 400, bevor irgendetwas geschrieben wird.
+  // Resolve substances up front (creates new names as QuickPicks, like POST /);
+  // a missing substanceId is a 400 before anything is written.
   interface Resolved {
     substance?: SubstanceRow;
     substanceName: string;
@@ -435,15 +434,15 @@ intakesRouter.post('/batch', (req, res) => {
     notes: string | null;
     createdSubstance: boolean;
   }
-  // Erst ALLE per ID referenzierten Substanzen prüfen, BEVOR per Name neue
-  // angelegt werden: so kann ein 400 wegen einer ungültigen ID weiter hinten
-  // keine bereits (per Name) angelegte Substanz als Leiche zurücklassen.
+  // First check ALL substances referenced by ID, BEFORE creating any by
+  // name: this way, a 400 for an invalid ID further down cannot leave a
+  // (by-name) created substance as an orphan.
   const idRows = new Map<number, SubstanceRow>();
   for (let i = 0; i < d.entries.length; i++) {
     const e = d.entries[i];
     if (e.substanceId == null) continue;
     const row = db.prepare(`SELECT * FROM substances WHERE id = ?`).get(e.substanceId) as SubstanceRow | undefined;
-    if (!row) return res.status(400).json({ error: `Substanz nicht gefunden (Eintrag ${i + 1})` });
+    if (!row) return res.status(400).json({ error: `Substance not found (entry ${i + 1})` });
     idRows.set(i, row);
   }
 
@@ -516,50 +515,49 @@ intakesRouter.post('/batch', (req, res) => {
 });
 
 const textSchema = z.object({
-  text: z.string().min(1, 'text darf nicht leer sein'),
-  dryRun: z.boolean().optional(), // true = nur parsen, nichts schreiben
-  companions: z.boolean().optional(), // false = "Mit:"-Begleitsubstanzen nicht miterfassen
+  text: z.string().min(1, 'text must not be empty'),
+  dryRun: z.boolean().optional(), // true = parse only, do not write
+  companions: z.boolean().optional(), // false = do not record "Mit:" companions
 });
 
 const textPlain = express.text({ type: ['text/plain', 'text/*'], limit: '1mb' });
 
 /**
- * Freitext → Einnahmen: nimmt einen mehrzeiligen Text entgegen (Format siehe
- * SAMPLES.md im Projekt-Root) und legt daraus Einträge an. Jede Zeile wird
- * einzeln verarbeitet (Datum/Zeit-Präfix, `jetzt:` oder aktuelle Zeit;
- * Aufzählung mit Kommas/„und"; `Substanz Menge (Notiz)` je Eintrag). Eine
- * Zeile ist atomar: ein unparsbarer Eintrag macht die ganze Zeile zum
- * `lineErrors`-Eintrag, die übrigen Zeilen werden trotzdem angelegt.
+ * Free text → intakes: takes a multi-line text payload (format see
+ * SAMPLES.md at the project root) and creates entries from it. Each line
+ * is processed individually (date/time prefix, `jetzt:` or current time;
+ * comma/"und" enumeration; `Substance amount (note)` per entry). A line
+ * is atomic: one unparsable entry makes the whole line a `lineErrors`
+ * entry, the other lines are still recorded.
  *
- * Auflösung pro Eintrag wie bei `POST /`: Menge aus dem Text > Standarddosis >
- * DEFAULTS; Notiz aus dem Text > DEFAULTS. Menge und/oder Notiz dürfen im Text
- * weggelassen werden — dann greifen die DEFAULTS.md-Werte der Substanz.
- * Autovivifikation inklusive.
+ * Per-entry resolution like `POST /`: amount from text > default dose >
+ * DEFAULTS; note from text > DEFAULTS. Amount and/or note may be omitted
+ * in the text — DEFAULTS.md values then apply. Auto-vivification included.
  *
- * `Mit:`-Begleitsubstanzen aus DEFAULTS.md werden — wie bei `POST /` — pro
- * Eintrag automatisch als eigene Einnahme zum selben Zeitpunkt miterfasst
- * (z. B. Theanin → Lemon Balm). Eine Ebene tief, Selbstbezug übersprungen,
- * `source_event_id = companion:<haupt-id>`. `companions: false` im JSON-Body
- * schaltet das pro Aufruf ab.
+ * `Mit:` companions from DEFAULTS.md are — like in `POST /` — recorded
+ * per entry automatically as their own intake at the same time (e.g.
+ * theanine → lemon balm). One level deep, self-reference skipped,
+ * `source_event_id = companion:<main-id>`. `companions: false` in the
+ * JSON body disables this per call.
  *
- * Geschützt via Cloudflare Access (Service-Token/Login am Edge, JWT-Prüfung
- * hier am Origin). Body: JSON `{ text, dryRun?, companions? }` oder direkt
- * `text/plain`.
+ * Protected via Cloudflare Access (service token / login at the edge,
+ * JWT check here at the origin). Body: JSON `{ text, dryRun?, companions? }`
+ * or raw `text/plain`.
  *
- * Nach dem Schreiben liest der Endpunkt die Einträge FRISCH aus der DB und
- * meldet zurück, welche wirklich angekommen sind (`entries[].verified` samt
- * `entries[].companions[].verified`, Gesamt-Flag `verified`).
+ * After writing, the endpoint re-reads the entries FRESHLY from the DB and
+ * reports back which ones actually arrived (`entries[].verified` plus
+ * `entries[].companions[].verified`, overall flag `verified`).
  */
 intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
   const body = typeof req.body === 'string' ? { text: req.body } : req.body;
   const parsedBody = textSchema.safeParse(body);
   if (!parsedBody.success) return res.status(400).json({ error: parsedBody.error.flatten() });
   const { text, dryRun } = parsedBody.data;
-  const withCompanions = parsedBody.data.companions !== false; // Default: an
+  const withCompanions = parsedBody.data.companions !== false; // Default: on
 
-  // Bekannte Substanznamen (aktiv + archiviert) als Trennung zwischen Menge und
-  // Notiz — so wird z. B. "100mg Pregabalin" als Menge "100 mg" + Substanz
-  // "Pregabalin" gelesen, nicht als ein einziger Name.
+  // Known substance names (active + archived) as the boundary between
+  // amount and note — so "100mg Pregabalin" is read as amount "100 mg" +
+  // substance "Pregabalin", not as one single name.
   const knownKeys = new Set(
     (db.prepare(`SELECT name FROM substances`).all() as { name: string }[]).map((s) => nameKey(s.name)),
   );
@@ -572,8 +570,8 @@ intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
       requested: parsed.entries.length,
       entries: parsed.entries.map((e) => ({
         ...e,
-        // Vorschau der "Mit:"-Begleitsubstanzen (read-only aus DEFAULTS.md,
-        // keine Substanz-Anlage); identische Auflösung wie beim Schreiben.
+        // Preview of "Mit:" companions (read-only from DEFAULTS.md, no
+        // substance creation); same resolution as on write.
         companions: withCompanions ? previewCompanions(e.substanceName, e.takenAt) : [],
       })),
       lineErrors: parsed.errors,
@@ -582,14 +580,14 @@ intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
 
   if (parsed.entries.length === 0) {
     return res.status(400).json({
-      error: 'Keine gültigen Einträge im Text gefunden',
+      error: 'No valid entries found in the text',
       lineCount: parsed.lineCount,
       lineErrors: parsed.errors,
     });
   }
 
-  // Gemeinsame Batch-Markierung, damit ein Text-Import in der DB als Gruppe
-  // auffindbar bleibt (source_event_id ist nicht unique).
+  // Shared batch marker so a text import remains findable as a group in
+  // the DB (source_event_id is not unique).
   const batchId = `text:${nowLocalISO()}`;
 
   const insertIntake = db.prepare(
@@ -620,9 +618,9 @@ intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
       const info = insertIntake.run(sub.id, sub.name, entry.takenAt, amount, notes, nowLocalISO(), batchId);
       const mainId = Number(info.lastInsertRowid);
 
-      // Begleitsubstanzen (DEFAULTS "Mit:") des Eintrags zum selben Zeitpunkt
-      // miterfassen — eine Ebene tief, Selbstbezug übersprungen, wie bei
-      // `POST /`. `companions: false` schaltet das ab.
+      // Record companions (DEFAULTS "Mit:") of the entry at the same time
+      // — one level deep, self-reference skipped, like in `POST /`.
+      // `companions: false` disables this.
       const companions: TextCompanionCreated[] = [];
       if (withCompanions) {
         const seen = new Set([key]);
@@ -651,8 +649,8 @@ intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
   });
   const created = createAll();
 
-  // Verifikation: ALLE IDs (Haupt- + Begleit-Einträge) frisch aus der DB lesen
-  // — stehen die Einträge wirklich drin?
+  // Verification: read ALL ids (main + companion entries) freshly from
+  // the DB — are the entries really there?
   const allIds = created.flatMap((c) => [c.id, ...c.companions.map((x) => x.id)]);
   const rows = db
     .prepare(`SELECT * FROM intakes WHERE id IN (${allIds.map(() => '?').join(',')}) ORDER BY id`)
@@ -675,7 +673,7 @@ intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
       }),
     };
   });
-  const verifiedCount = rows.length; // gefundene = verifizierte (alle IDs sind eindeutig)
+  const verifiedCount = rows.length; // found = verified (all ids are unique)
 
   res.status(201).json({
     batchId,
@@ -691,7 +689,7 @@ intakesRouter.post('/text', requireCloudflareAccess, textPlain, (req, res) => {
 intakesRouter.patch('/:id', (req, res) => {
   const id = Number(req.params.id);
   const existing = db.prepare(`SELECT * FROM intakes WHERE id = ?`).get(id) as IntakeRow | undefined;
-  if (!existing) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+  if (!existing) return res.status(404).json({ error: 'Entry not found' });
 
   const parsed = z
     .object({
@@ -725,6 +723,6 @@ intakesRouter.patch('/:id', (req, res) => {
 intakesRouter.delete('/:id', (req, res) => {
   const id = Number(req.params.id);
   const info = db.prepare(`DELETE FROM intakes WHERE id = ?`).run(id);
-  if (info.changes === 0) return res.status(404).json({ error: 'Eintrag nicht gefunden' });
+  if (info.changes === 0) return res.status(404).json({ error: 'Entry not found' });
   res.status(204).end();
 });

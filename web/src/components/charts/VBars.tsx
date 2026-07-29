@@ -1,17 +1,17 @@
 import { useId } from 'react';
 
 /**
- * Vertikale Tagesbalken (Dosis oder Anzahl über die Zeit). Dependency-frei,
- * responsiv per `viewBox`. Optional: gestrichelte Ø-Linie und Tap-Auswahl
- * eines einzelnen Tages (voller-Höhe-Trefferfeld je Balken).
+ * Vertical daily bars (dose or count over time). Dependency-free and
+ * responsive through `viewBox`. Optional dashed average line and tap selection
+ * for an individual day (full-height hit target per bar).
  */
 interface Props {
   values: number[];
   color: string;
   height?: number;
-  /** Ø-Linie (in derselben Einheit wie `values`); null/omitted = keine. */
+  /** Average line (in the same unit as `values`); null/omitted = none. */
   avg?: number | null;
-  /** y-Maximum überschreiben (sonst aus den Werten). */
+  /** Override the y maximum (otherwise derived from the values). */
   max?: number;
   selectedIndex?: number | null;
   onSelect?: (i: number) => void;
@@ -63,7 +63,7 @@ export function VBars({ values, color, height = 96, avg = null, max, selectedInd
         const isSel = selectedIndex === i;
         return (
           <g key={i}>
-            {/* voller-Höhe-Trefferfeld (auch für 0-Tage tappbar) */}
+            {/* Full-height hit target (zero-value days are tappable too). */}
             {onSelect && (
               <rect
                 x={PAD_X + slotW * i}

@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Vorschaubild für den Widget-Picker. Statt einer PNG einfach ein
-  Vektor-Drawable — passt zu jeder DPI und braucht keinen Asset-Import.
-  Inhalte sind generisch: Substanzname „Sample" auf Slot-Farbe, gleiche
-  Form wie die echte Kachel.
+  Preview image for the widget picker. A vector drawable replaces a PNG, so
+  it works at every density without importing an asset. The content is
+  generic: a “Sample” substance on a slot color, using the same shape as the
+  real tile.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="96dp"
