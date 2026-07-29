@@ -176,6 +176,23 @@ CREATE TABLE IF NOT EXISTS dream_deliveries (
 CREATE INDEX IF NOT EXISTS idx_deliveries_dream ON dream_deliveries(dream_date);
 CREATE INDEX IF NOT EXISTS idx_deliveries_status ON dream_deliveries(status);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_deliveries_dream_target ON dream_deliveries(dream_date, target_id);
+
+-- KI-Wirkstoff-Profile: gecachte LLM-Analyse pro Substanz. Damit die Statistik
+-- „Wirkstoff-Bilanz" (z. B. Gesamt-Koffein aus Energy-Drink + Cola + Kaffee)
+-- ohne jedes Mal einen Modell-Call auskommt. Pro Substanz genau EINE Zeile
+-- (substance_key = nameKey = PK -> idempotenter UPSERT). `input_hash` bindet die
+-- Analyse an ihre Eingabe (Name + DEFAULTS-Menge/-Notiz + beobachtete Beispiele);
+-- ändert sich die Eingabe, gilt das Profil als „stale" und wird bei der nächsten
+-- Analyse neu berechnet. `profile` ist das validierte JSON (serving + ingredients).
+CREATE TABLE IF NOT EXISTS substance_profiles (
+  substance_key  TEXT PRIMARY KEY,
+  substance_name TEXT NOT NULL,
+  input_hash     TEXT NOT NULL,
+  profile        TEXT NOT NULL,
+  model          TEXT NOT NULL,
+  created_at     TEXT NOT NULL,
+  updated_at     TEXT NOT NULL
+);
 `);
 
 // Migration: Schemaumbenennung der Habit-Spalten von "PC-Nutzung" auf
