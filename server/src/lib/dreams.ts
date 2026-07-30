@@ -356,7 +356,7 @@ export function gatherDreamContext(date: string, lang: 'de' | 'en' = 'de'): Drea
       const strength = it.strength ? ` ${it.strength}` : '';
       const reason = it.reason ? ` · Grund: ${it.reason}` : '';
       const notes = it.notes ? ` · ${it.notes}` : '';
-      // Slot description is also rendered in the target language.
+// Slot description is also rendered in the target language.
       const slotsText = planSlotsLang(it, lang);
       const reasonEn = it.reason ? ` · Reason: ${it.reason}` : '';
       const reasonLocalized = lang === 'en' ? reasonEn : reason;
@@ -436,7 +436,7 @@ export function gatherDreamContext(date: string, lang: 'de' | 'en' = 'de'): Drea
   else for (const n of noteLines) lines.push(`- ${n}`);
   lines.push('');
 
-  // ── 11 daily scales ──
+// ── 11 daily scales ──
   // Scale labels (m.label) stay German domain identifiers — the app owner
   // named them so and the statistics tab uses them identically; rerouting
   // would decouple the dream context from the well-being tab. Instead, the
@@ -463,7 +463,7 @@ export function gatherDreamContext(date: string, lang: 'de' | 'en' = 'de'): Drea
   }
   lines.push('');
 
-  // ── Hermes agent's daily report (POST /api/report/new, 03:30 cron) ──
+// ── Hermes agent's daily report (POST /api/report/new, 03:30 cron) ──
   // Delivered by the Hermes agent shortly after midnight and describes what
   // the agent did on this consumption day (coding sessions, cron runs,
   // deploys, errors …). Supplies additional context: which software/server
@@ -564,7 +564,7 @@ export async function generateDream(opts?: {
   retries?: number;
   signal?: AbortSignal;
   now?: string;
-  /** Output language (default: config.aiLanguage). */
+/** Output language (default: config.aiLanguage). */
   language?: 'de' | 'en';
 }): Promise<GenerateDreamResult> {
   const now = opts?.now ?? nowLocalISO();
@@ -583,7 +583,7 @@ export async function generateDream(opts?: {
     return { date, status: 'empty', dream: existing, attempts: 0 };
   }
 
-  // system_prompt.md stays the read-only persona source; the language
+// system_prompt.md stays the read-only persona source; the language
   // directive is appended so the switch lives centrally in the code.
   const system = readSystemPrompt() + '\n' + languageDirective(language);
 

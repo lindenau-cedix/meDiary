@@ -2,6 +2,7 @@ import { scoreColor } from '../../lib/colors';
 import type { MetricPolarity } from '../../lib/types';
 
 /**
+/**
  * Dual-axis overlay for "substance × wellbeing": the daily dose as bars
  * (substance colour, implicit left axis) plus the selected 1–10 scale as a line
  * with colour-coded points (`scoreColor`, right axis 1–10). Days without a
@@ -31,7 +32,7 @@ export function DualAxis({ dose, metric, doseColor, polarity, height = 120 }: Pr
   const yDose = (v: number) => H - PAD_BOTTOM - (v / doseMax) * innerH;
   const yMetric = (v: number) => H - PAD_BOTTOM - ((Math.min(10, Math.max(1, v)) - 1) / 9) * innerH;
 
-  // Split the line into contiguous segments (gaps wherever a value is null).
+// Split the line into contiguous segments (gaps wherever a value is null).
   const segments: { i: number; v: number }[][] = [];
   let cur: { i: number; v: number }[] = [];
   metric.forEach((v, i) => {
@@ -48,7 +49,7 @@ export function DualAxis({ dose, metric, doseColor, polarity, height = 120 }: Pr
     <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none" role="img">
       <line x1={0} y1={H - PAD_BOTTOM} x2={W} y2={H - PAD_BOTTOM} stroke="rgb(var(--hairline))" strokeWidth={1} vectorEffect="non-scaling-stroke" />
 
-      {/* Dosis-Balken */}
+      {/* Dose bars */}
       {dose.map((v, i) =>
         v > 0 ? (
           <rect
@@ -65,7 +66,7 @@ export function DualAxis({ dose, metric, doseColor, polarity, height = 120 }: Pr
         ) : null,
       )}
 
-      {/* Skalen-Linie */}
+      {/* Scale line */}
       {segments.map((seg, si) => (
         <path
           key={si}

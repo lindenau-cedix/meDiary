@@ -4,10 +4,10 @@ import { cx } from '../../lib/cx';
 import type { PunchRow } from '../../lib/analytics';
 
 /**
- * Konsum-Kalender: Substanzen (Zeilen) × Tage (Spalten). Zellfarbe =
- * Substanzfarbe, Deckkraft = Einnahmen/Tag relativ zur eigenen Spitze — so
- * bleibt auch ein selten genutzter Stoff als Muster erkennbar. Der farbige
- * Streifen ist ein responsives, non-scaling SVG; getippte Zelle → `onSelect`.
+ * Consumption calendar: substances (rows) × days (columns). Cell colour =
+ * substance colour; opacity = intakes/day relative to that substance’s own peak,
+ * so even a rarely used substance remains visible as a pattern. The coloured
+ * strip is a responsive, non-scaling SVG; tapping a cell calls `onSelect`.
  */
 export interface PunchSelection {
   key: string;
@@ -81,7 +81,7 @@ export function Punchcard({ rows, days, selected, onSelect, intakeAria }: Props)
         );
       })}
 
-      {/* Datums-Achse: Start · Mitte · Ende, ausgerichtet auf den Streifen. */}
+      {/* Date axis: start · middle · end, aligned with the strip. */}
       <div className="grid grid-cols-[5.5rem_1fr] gap-2 pt-0.5">
         <span />
         <div className="flex justify-between text-[10px] text-ink-faint tabular">

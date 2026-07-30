@@ -1,6 +1,7 @@
 import { useId } from 'react';
 
 /**
+/**
  * Vertical daily bars (dose or count over time). Dependency-free, responsive
  * via `viewBox`. Optional: a dashed mean line and tap selection of a single day
  * (full-height hit area per bar).
@@ -9,7 +10,7 @@ interface Props {
   values: number[];
   color: string;
   height?: number;
-  /** Mean line (same unit as `values`); null/omitted = none. */
+/** Mean line (same unit as `values`); null/omitted = none. */
   avg?: number | null;
   /** Override the y maximum (otherwise derived from the values). */
   max?: number;
@@ -63,7 +64,7 @@ export function VBars({ values, color, height = 96, avg = null, max, selectedInd
         const isSel = selectedIndex === i;
         return (
           <g key={i}>
-            {/* full-height hit area (keeps zero days tappable too) */}
+{/* full-height hit area (keeps zero days tappable too) */}
             {onSelect && (
               <rect
                 x={PAD_X + slotW * i}

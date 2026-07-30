@@ -17,6 +17,7 @@ export interface HBarItem {
 }
 
 /**
+/**
  * Horizontal ranking bars — deliberately HTML rather than SVG: text, seals and
  * secondary lines stay crisp and accessible that way. Bar width = `value / max`,
  * labelled directly on the bar (no axes).
