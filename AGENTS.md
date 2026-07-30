@@ -4,43 +4,93 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 > **`CLAUDE.md` ist ein Symlink auf `AGENTS.md`** — der Inhalt gilt für beide.
 
-## Letzter Durchlauf (2026-07-29)
+## Projektweite Konventionen
 
-**Neuer „Statistik"-Bereich — grafische Konsum-Auswertung.** 6. Bottom-Nav-Tab
-(`/statistik`, Icon `BarChart3`) mit sofort lesbaren, dependency-freien Inline-SVG-
-Diagrammen (kein Charting-Lib, offline-APK-tauglich, warme Nacht-Palette). Alles
-clientseitig aus vorhandenen Endpunkten aggregiert — **kein Server-/DB-Code**.
-- **Neu:** `web/src/lib/analytics.ts` (Aggregations-/Mathematik-Schicht: `parseAmount`
-  für Freitext-Mengen, Ranglisten, Tages-Dosis-Serien, Tageszeit-Verteilung, Pearson-
-  Korrelation), `web/src/components/charts/` (VBars, HBars, Punchcard, DaypartChart,
-  DualAxis), `web/src/screens/StatistikScreen.tsx`.
-- **8 Module:** KPI-Band · Konsum-Kalender (Punchcard Substanz×Tag) · Menge über Zeit
-  (pro Substanz, in deren Einheit — Mengen **nie** über Substanzen summiert) ·
-  **Wirkstoff-Bilanz (KI)** · Top-Substanzen · Tageszeit-Muster · Plan-Treue über Zeit
-  (reuse `isPlanIntake` + Version-Recency-Indexing aus `HistoryScreen`) ·
-  Substanz × Wohlbefinden (Dosis vs. 11-Skalen-Metrik, `r` + „Korrelation ≠ Kausalität").
-- **Geändert:** `App.tsx` (Route), `BottomNav.tsx` (Tab). Verifiziert:
-  `typecheck:all` + `web build` grün, 39/39 Analytics-Smoke-Assertions grün.
+- **Auto-Commit durch das Dashboard:** Das Coding-Dashboard committet & pusht
+  automatisch am Session-Ende. Niemals selbst `git add` / `git commit` /
+  `git push` / `git checkout -b` ausführen — das bricht den Auto-Handoff.
+  Eigene Commits würden das Dashboard-Commit verdoppeln / konkurrieren.
+- **Nur der **neueste** `Letzter Durchlauf`-Block steht hier.** Ältere
+  Session-Blöcke sind nach `docs/changelog.md` ausgelagert (neueste zuerst),
+  damit diese Datei dauerhaft Architektur-Wissen enthält und nicht zur
+  Changelog-Spiegelung wird. Bei Abschluss einer Session: aktuellen Stand
+  hier anhängen + ältere Blöcke nach `docs/changelog.md` verschieben.
+- **Interaktive Sessions sind erlaubt:** `AskUserQuestion` darf für offene
+  Scope-Entscheidungen genutzt werden — der User wartet auf Antworten, statt
+  dass Annahmen getroffen werden.
 
-**KI-„Wirkstoff-Bilanz" — Gesamtkonsum eines Wirkstoffs über ALLE Quellen.** Liest Dose
-+ Notiz und rechnet z. B. das **Gesamt-Koffein** aus Energy-Drink + Cola + Kaffee +
-Tablette zusammen. Architektur: das LLM liefert **einmal pro Substanz** ein gecachtes
-„Rezept" (mg Wirkstoff pro Portion + Portionsdefinition), die **Hochrechnung auf die
-protokollierte Menge macht deterministisch der Client**.
-- **Server:** Tabelle `substance_profiles` (Cache, `input_hash` → Stale-Erkennung),
-  `lib/ingredients.ts` (Eingabe sammeln, Prompt, zod-Parse, Chunking à 25),
-  `routes/ingredients.ts` (`GET /api/ingredients` offen; `POST /api/ingredients/analyze`
-  CF-Access + 503-Guard + Busy-Lock). Reuse `generateText` (jetzt via optionalen
-  `client`-Param mehrfach nutzbar); **läuft standardmäßig über das MiniMax-Abo**
-  (`config.ingredients`: `INGREDIENTS_API_KEY` > `CHAT_API_KEY` > `MINIMAX_API_KEY`,
-  Anthropic-kompatibler MiniMax-Endpunkt, Modell `MiniMax-M3`) — wie die Daten-Konsole,
-  also **kein Anthropic-Key nötig**.
-- **Client:** `analytics.ts` (`scaleServings`/`applyProfile`/`compoundReports` +
-  Einheiten-Umrechnung mg↔g, ml↔l, Portions-`milliliters`/`grams`, count→Portionen;
-  `equivalentFor` „≈ N Tassen Kaffee") · Modul mit KI-Analyse-Button, Wirkstoff-Chips,
-  Quellen-Aufschlüsselung, „So rechnet die KI"-Transparenz, „Schätzung ≠ Laborwert".
-  Verifiziert: 22 Scaling/Aggregations- + 13 Parse-Smoke-Assertions grün, E2E-Endpunkt
-  (503-Guard) grün.
+## Letzter Durchlauf (2026-07-30)
+
+**Bilinguale UI (DE/EN) — komplette Projekt-Übersetzung + Englisch als zweite
+Sprache.** Leichtgewichtiger eigener i18n-Layer (Context + `useT()` / `translate()`,
+kein runtime-Dep, spiegelt den Stil aus `theme.tsx`). Default-Sprache aus
+`navigator.language` mit DE-Fallback; User-Override in `localStorage["mediary.locale"]`.
+`activeLocale()` als modul-lokale Variable, synchron in `setLocale` gesetzt, damit
+auch nicht-React-Helper (Format, `Intl.DateTimeFormat`-Cache) den neuen Locale
+sofort sehen. Dateninvarianten (Substanznamen, `nameKey()`-Locale `'de'`, `Mit:`,
+`DEFAULTS.md`-Parser-Token, API-/Route-Pfade) bleiben unverändert deutsch.
+- **Client-i18n-Foundation:** `web/src/lib/i18n.tsx` (`Locale`, `LOCALES`, `MessageKey`,
+  `TVars`, `INTL_LOCALE = { de: 'de-DE', en: 'en-GB' }`, `I18nProvider`,
+  `useI18n`, `useT`, `activeLocale`, `activeIntlLocale`, `translate`, `detectLocale`,
+  `initialLocale`). `web/src/locales/{de,en}/{common,metrics}.ts` + `screens/*.ts`,
+  flach gemerged über `index.ts`; `en` mit `Messages = { [K in keyof typeof de]: string }`,
+  damit `as const` die deutschen Literal-Typen nicht in `en` einschmuggelt. ~295 Keys.
+- **Locale-aware shared libs:** `web/src/lib/format.ts` (`formatDayLabel`/
+  `formatDayShort`/`formatMonthDay`/`formatFull`/`formatEffective`/`relativeDays`/
+  `greeting` routen durch `translate()`; `Intl.DateTimeFormat` gecached je Locale),
+  neue Helper-Funktion `isConsumptionToday(date)` ersetzt das fehleranfällige
+  `relativeDays(x) === 'heute'`-Pattern. `web/src/lib/metrics.ts` ohne
+  `METRICS`-Konstante: jetzt `metricList()`, `metricLabel()`, `metricShort()`,
+  `METRIC_KEYS` (locale-unabhängig). `web/src/lib/plan.ts` ohne `DAYPARTS`:
+  jetzt `DAYPART_KEYS` (Tuple für Type-Narrowing), `DaypartKey`, `daypartList()`,
+  `planFieldLabel()`. `web/src/lib/analytics.ts` mit `activeIntlLocale()` in zwei
+  `localeCompare`-Calls; `scaleServings`/`applyProfile`/`compoundReports`/
+  `equivalentFor` neutral strukturiert (Kind+Count, kein deutscher Phrasen-String).
+- **Alle 9 Screens + Komponenten:** `web/src/App.tsx` wickelt `<I18nProvider>`
+  um `<ThemeProvider>`, Route-Pfade bleiben deutsch (`/verlauf`, `/tagebuch` …)
+  als stabile Identifier (vom Android-Widget deep-linked). `BottomNav.tsx`,
+  `AssessmentSheet.tsx`, `DefaultsEditor/*`, `PageHeader.tsx`, `SentDreamsLog.tsx`,
+  `SentDreamDrawer.tsx`, `AdminWhatsappPanel.tsx`, `AppShell.tsx`,
+  `DreamProse.tsx`, `charts/{VBars,HBars,Punchcard,DaypartChart,DualAxis}.tsx`,
+  `screens/{QuickEntry,History,Plan,Diary,Trends,Statistik,Console,Settings}*.tsx`
+  — alle Strings über `useT()` / `translate()`. `index.html` mit `lang="de"` als
+  Pre-Hydration-Default; `<I18nProvider>` überschreibt beim Mount.
+- **Server-Lokalisierung:** `server/src/config.ts` mit `parseAiLanguage()` + neuem
+  `config.aiLanguage` (`AI_LANGUAGE=de|en`, Default `de`). `server/src/lib/diary.ts`
+  mit `SYSTEM_PROMPT_DE` (verbatim) + neuem `SYSTEM_PROMPT_EN`,
+  `localizedSystemPrompt(lang)`, `DIARY_LABELS`, `diaryLanguageDirective`,
+  `buildDayPrompt(day, lang)`, `generateDiary({ language })`. `server/src/lib/dreams.ts`
+  mit `DREAM_LABELS` (de/en), `languageDirective(lang)` an System-Prompt angehängt
+  (read-only `system_prompt.md` bleibt unangetastet), `Intl.DateTimeFormat` schaltet
+  de-DE/en-US. `server/src/lib/ingredients.ts` mit `SYSTEM_PROMPT_DE`/`EN`,
+  `localizedIngredientsSystemPrompt`, language-parameterisiertes `buildUserPrompt`,
+  `analyzeSubstances({ language })`. **Wichtig:** `inputHash()` enthält
+  `config.aiLanguage`, damit der Profil-Cache bei Sprachwechsel invalidiert
+  (empirisch verifiziert: unterschiedliche Hashes für de/en). Alle
+  API-Fehler-Strings übersetzt (`'Eine Analyse läuft bereits'` → 'An analysis
+  is already running.', `'Kein Traum für diesen Tag'` → 'No dream for this day',
+  `'Kein Bericht für diesen Tag'` → 'No report for this day', `'Ungültiges Datum'`
+  → 'Invalid date'). Smoke gegen `/tmp/m-i18n/db.sqlite` mit `curl` grün.
+- **Android-Widget:** `web/android-native-src/res/values/strings.xml` (English) +
+  neues `web/android-native-src/res/values-de/strings.xml` (German). Kotlin-Dateien
+  nutzen `getString(R.string.x)` mit formatierten Ressourcen; Kommentare übersetzt.
+- **Doku:** `README.md`, `SAMPLES.md`, `docs/{architecture,api,deployment,
+  pitfalls,development,roadmap}.md` komplett übersetzt. `docs/changelog.md`
+  Zeilen 1–244 englisch; Zeilen 245+ in zwei Wellen übersetzt (Parser-Rewrite +
+  Tile-Sort/Amount-Normalization/Companion/Plan-Versions/Quick-Picks). Verbleibende
+  German-Vorkommen ausschließlich Daten-Invarianten (Substanznamen, Regex-Patterns,
+  Datei-/API-Pfade, Sample-cURL-Bodies).
+- **Verifikation:** `npm run typecheck:all` exit 0, `npm run build` (web+server)
+  grün, Server-Smoke gegen `/tmp/m-i18n/db.sqlite` mit allen übersetzten
+  Endpunkten erfolgreich. Verbleibende German-Vorkommen: nur Daten-Invarianten
+  (Substanznamen in Backticks, Regex-Char-Klassen, API-/Datei-Pfade, cURL-Sample-
+  Bodies, CLI-`console.error`/`console.log` in `server/src/dream.ts` +
+  `server/src/import.ts` — diese Tools sind Operator-facing, nicht API-Responses).
+  Drei letzte Server-API-Strings in der Verifikationsphase übersetzt:
+  `server/src/lib/cloudflare_access.ts:145` (`'No Cloudflare Access token supplied
+  (header Cf-Access-Jwt-Assertion)'`), `server/src/lib/time.ts:91`
+  (`'Invalid date/time format: …'`), `server/src/routes/plan.ts:204`
+  (`'Invalid date'`).
 
 # meDiary — Medikations-Tagebuch
 
@@ -117,6 +167,17 @@ docker compose up -d --build # Produktionscontainer bauen + starten (inkl. ffmpe
 - **`web/android/` ist gitignored** — Capacitor-Scaffold wird lokal generiert
   und ist nicht im Repo. Native Quellen für das Widget liegen in
   `web/android-native-src/`.
+- **i18n-Dateninvarianten (NICHT übersetzen):** Substanznamen (auch in
+  cURL-Sample-Bodies, Backticks, Beispiel-Strings), das `nameKey()`-Locale-Tag
+  `'de'` (DARF NICHT dem aktiven UI-Locale folgen — sonst bricht Umlaut-Matching
+  für `CBD-Öl` ↔ `cbd-öl`), `Mit:` / `Morgens` / `Mittags` / `Abends` / `Nachts`
+  / `NACH` / `DAVOR`-Parser-Token in `DEFAULTS.md`, API-/Route-Pfade
+  (`/api/intakes`, `/verlauf` …), `localStorage`-Keys (`mediary.locale`,
+  `mediary.widget.*`), `Intl.Collator` / `Intl.DateTimeFormat`-Locale-Tags für
+  Datums-Sortierung. Neue deutsche UI-Strings IMMER über `useT()` /
+  `translate()` ergänzen und in **beide** `web/src/locales/{de,en}/*.ts`
+  registrieren — die `Messages`-Typ-Definition in `en/index.ts` stellt
+  sicher, dass kein Key fehlt (`typecheck:all` bricht sonst).
 
 ## Tech-Stack
 

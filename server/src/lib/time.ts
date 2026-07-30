@@ -88,5 +88,5 @@ export function normalizeDateTime(input: string): string {
   // ISO mit Zeitzone -> in lokale Wanduhrzeit umwandeln
   const d = new Date(input);
   if (!Number.isNaN(d.getTime())) return toLocalISO(d);
-  throw new Error(`Ungültiges Datum/Zeit-Format: ${input}`);
+  throw new Error(`Invalid date/time format: ${input}`);
 }

@@ -7,6 +7,7 @@ import { SubstanceSection } from './SubstanceSection';
 import { haptics } from '../../lib/haptics';
 import { nameKey } from '../../lib/names';
 import { useCompliance } from '../../lib/queries';
+import { useT } from '../../lib/i18n';
 import type { DefaultsSection } from '../../lib/types';
 import type { ComplianceReport } from '../../lib/types';
 
@@ -14,7 +15,7 @@ interface StructuredViewProps {
   sections: DefaultsSection[];
   onChange: (next: DefaultsSection[]) => void;
   onOpenAddSubstance: () => void;
-  /** Substanz, die aus dem Compliance-Bereich nachgepflegt werden soll. */
+  /** Substance to be back-filled from the compliance area. */
   prefilledName?: string | null;
   onPrefillConsumed?: () => void;
 }
@@ -26,6 +27,7 @@ export function StructuredView({
   prefilledName,
   onPrefillConsumed,
 }: StructuredViewProps) {
+  const t = useT();
   const { data: compliance } = useCompliance();
   const compliantKeys = useMemo(() => new Set((compliance?.compliant ?? []).map((c) => nameKey(c.name))), [compliance]);
   const missingNames = useMemo(
@@ -44,8 +46,7 @@ export function StructuredView({
     haptics.light();
   };
 
-  // Compliance-vorbelegte Substanzen anbieten, die aktuell nicht in der
-  // Draft-Liste stehen.
+  // Offer compliance-prefilled substances that aren't already in the draft.
   const missingSuggestions: { name: string; intakeCount: number }[] = useMemo(() => {
     if (!compliance) return [];
     const haveKeys = new Set(sections.map((s) => nameKey(s.name)));
@@ -66,13 +67,13 @@ export function StructuredView({
 
       {sections.length === 0 && (
         <Card className="p-6 text-center space-y-3">
-          <p className="text-ink-muted">Noch keine Substanzen in DEFAULTS.md.</p>
+          <p className="text-ink-muted">{t('defaults.empty.title')}</p>
           <div className="flex flex-wrap items-center justify-center gap-2">
             <Button variant="primary" size="md" icon={<Plus size={16} />} onClick={addEmpty}>
-              Leere Sektion anlegen
+              {t('defaults.empty.addBlank')}
             </Button>
             <Button variant="soft" size="md" onClick={onOpenAddSubstance}>
-              Substanz mit Kachel anlegen
+              {t('defaults.empty.addWithTile')}
             </Button>
           </div>
         </Card>
@@ -100,26 +101,26 @@ export function StructuredView({
             <ShieldAlert size={16} />
           </span>
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium text-ink">Neue Sektion: {prefilledName}</p>
+            <p className="text-sm font-medium text-ink">{t('defaults.prefill.title', { name: prefilledName })}</p>
             <p className="text-xs text-ink-muted">
-              Wurde soeben aus dem Compliance-Bericht nachgepflegt — bitte Menge/Notiz ergänzen.
+              {t('defaults.prefill.detail')}
             </p>
           </div>
           <Button variant="soft" size="sm" onClick={() => applyMissing(prefilledName)}>
-            Anlegen
+            {t('defaults.prefill.create')}
           </Button>
           <Button variant="ghost" size="sm" onClick={onPrefillConsumed ?? (() => {})}>
-            Verwerfen
+            {t('defaults.prefill.discard')}
           </Button>
         </div>
       )}
 
       <div className="flex flex-wrap items-center gap-2 pt-2">
         <Button variant="primary" size="md" icon={<Plus size={16} />} onClick={addEmpty}>
-          Neue Sektion
+          {t('defaults.action.addSection')}
         </Button>
         <Button variant="soft" size="md" onClick={onOpenAddSubstance}>
-          + Substanz mit Kachel
+          {t('defaults.action.addWithTile')}
         </Button>
       </div>
 
@@ -127,7 +128,7 @@ export function StructuredView({
         <div className="rounded-3xl ring-1 ring-line bg-surface p-4 space-y-2 mt-3">
           <div className="flex items-center gap-2 text-xs text-ink-muted">
             <ShieldCheck size={14} />
-            <span className="font-semibold uppercase tracking-wide">Vorgeschlagen aus Compliance</span>
+            <span className="font-semibold uppercase tracking-wide">{t('defaults.compliance.eyebrow')}</span>
           </div>
           <div className="flex flex-wrap gap-2">
             {missingSuggestions.map((m) => (
@@ -138,7 +139,7 @@ export function StructuredView({
                 onClick={() => applyMissing(m.name)}
               >
                 + {m.name}
-                <span className="ml-1 text-[10px] text-ink-faint">({m.intakeCount}×)</span>
+                <span className="ml-1 text-[10px] text-ink-faint">{t('defaults.compliance.suggestionCount', { count: m.intakeCount })}</span>
               </Button>
             ))}
           </div>
@@ -153,9 +154,10 @@ function emptySection(name = ''): DefaultsSection {
 }
 
 function ComplianceSummary({ compliance }: { compliance: ComplianceReport | undefined }) {
+  const t = useT();
   if (!compliance) {
     return (
-      <Card className="p-4 text-xs text-ink-faint">Compliance-Bericht wird geladen …</Card>
+      <Card className="p-4 text-xs text-ink-faint">{t('defaults.compliance.summaryLoading')}</Card>
     );
   }
   const compliantCount = compliance.compliant.length;
@@ -166,13 +168,13 @@ function ComplianceSummary({ compliance }: { compliance: ComplianceReport | unde
         <ShieldCheck size={16} />
       </span>
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone="good">{compliantCount} mit Eintrag</Badge>
+        <Badge tone="good">{t('defaults.compliance.withEntry', { count: compliantCount })}</Badge>
         {missingCount > 0 ? (
-          <Badge tone="warn">{missingCount} ohne Eintrag</Badge>
+          <Badge tone="warn">{t('defaults.compliance.withoutEntry', { count: missingCount })}</Badge>
         ) : (
-          <Badge tone="good">Alles abgedeckt</Badge>
+          <Badge tone="good">{t('defaults.compliance.fullyCovered')}</Badge>
         )}
-        <span className="text-ink-faint">· {compliance.total} unterschiedliche Substanzen</span>
+        <span className="text-ink-faint">{t('defaults.compliance.totalSubstances', { count: compliance.total })}</span>
       </div>
     </Card>
   );

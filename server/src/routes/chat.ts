@@ -27,18 +27,18 @@ import {
 export const chatRouter = Router();
 
 /**
- * „Daten-Konsole" (Chat with your data) — agentische Natürlichsprache-Konsole.
+ * "Data console" (Chat with your data) — agentic natural-language console.
  *
- * Sicherheitsmodell (siehe lib/chat_tools.ts): Lesen läuft read-only; Schreiben
- * NUR über typisierte, vorab geprüfte Change-Sets, die der Mensch in der UI
- * bestätigt. Die mutierenden Endpunkte (Modell-Aufruf, Anwenden, Undo, Verwerfen)
- * sind — wie `POST /api/intakes/text` — per Cloudflare Access geschützt
- * (fail-closed; `CF_ACCESS_DISABLED=true` als bewusster Local-Bypass) und
- * zusätzlich rate-limitiert. Die Lese-Endpunkte (Status, Liste) sind offen wie
- * der Rest der privaten API.
+ * Security model (see lib/chat_tools.ts): reads run read-only; writes ONLY
+ * happen through typed, pre-validated change-sets that the human confirms in
+ * the UI. The mutating endpoints (model call, apply, undo, discard) are — like
+ * `POST /api/intakes/text` — protected by Cloudflare Access (fail-closed;
+ * `CF_ACCESS_DISABLED=true` as an explicit local bypass) and additionally
+ * rate-limited. The read endpoints (status, list) are open like the rest of
+ * the private API.
  */
 
-// ───────────────────────── Serialisierung ─────────────────────────
+// ───────────────────────── Serialisation ─────────────────────────
 
 function serializeChangeSet(row: ChatChangeSetRow) {
   return {
@@ -65,12 +65,12 @@ function safeParse(s: string | null): unknown {
   }
 }
 
-// ───────────────────────── System-Prompt ─────────────────────────
+// ───────────────────────── System prompt ─────────────────────────
 
 /**
- * Baut den System-Prompt mit dem LIVE introspizierten Schema. M3 hat ein
- * 1M-Kontextfenster, daher liegt das volle Schema komfortabel im Prompt; das
- * `inspect_schema`-Tool bleibt für Detailfragen verfügbar.
+ * Builds the system prompt with the LIVE introspected schema. M3 has a
+ * 1M context window, so the full schema fits comfortably in the prompt; the
+ * `inspect_schema` tool remains available for detail questions.
  */
 function buildSystemPrompt(): string {
   const schema = runInspectSchema();
@@ -116,7 +116,7 @@ chatRouter.get('/status', (_req, res) => {
   res.json({ available: chatAvailable(), model: chatAvailable() ? chatModel() : null });
 });
 
-// ───────────────────────── Change-Sets lesen ─────────────────────────
+// ───────────────────────── Read change sets ─────────────────────────
 
 chatRouter.get('/change-sets', (req, res) => {
   const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : undefined;
@@ -135,12 +135,12 @@ chatRouter.get('/change-sets/:id', (req, res) => {
   res.json({ changeSet: serializeChangeSet(row), latestAppliedId: latestAppliedChangeSet()?.id ?? null });
 });
 
-// ───────────────────────── Chat-Nachricht (SSE) ─────────────────────────
+// ───────────────────────── Chat message (SSE) ─────────────────────────
 
 let lastMessageAt = 0;
 
 const messageSchema = z.object({
-  message: z.string().trim().min(1, 'Nachricht darf nicht leer sein').max(4000),
+  message: z.string().trim().min(1, 'Message must not be empty').max(4000),
   history: z
     .array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(8000) }))
     .max(40)
@@ -155,7 +155,7 @@ function sse(res: Response, event: string, data: unknown): void {
 chatRouter.post('/message', requireCloudflareAccess, async (req, res) => {
   if (!chatAvailable()) {
     return res.status(503).json({
-      error: 'Daten-Konsole nicht konfiguriert. Setze CHAT_API_KEY (oder MINIMAX_API_KEY) in der .env.',
+      error: 'Data console not configured. Set CHAT_API_KEY (or MINIMAX_API_KEY) in the .env.',
     });
   }
 
@@ -164,7 +164,7 @@ chatRouter.post('/message', requireCloudflareAccess, async (req, res) => {
     const since = Date.now() - lastMessageAt;
     if (since < minInterval) {
       return res.status(429).json({
-        error: `Zu viele Anfragen — kurz warten.`,
+        error: `Too many requests — please wait.`,
         retryAfterMs: minInterval - since,
       });
     }
@@ -175,17 +175,17 @@ chatRouter.post('/message', requireCloudflareAccess, async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
   const { message, history } = parsed.data;
 
-  // SSE-Header setzen und sofort flushen.
+  // Set SSE headers and flush immediately.
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache, no-transform');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // gegen Proxy-Buffering (nginx)
+  res.setHeader('X-Accel-Buffering', 'no'); // against proxy buffering (nginx)
   res.flushHeaders?.();
 
   const controller = new AbortController();
   req.on('close', () => controller.abort());
 
-  // Verlauf (nur Text-Turns) + neue Nachricht → Messages.
+  // History (text turns only) + new message → messages.
   const messages = [
     ...(history ?? []).map((h) => ({ role: h.role, content: h.text })),
     { role: 'user' as const, content: message },
@@ -214,7 +214,7 @@ chatRouter.post('/message', requireCloudflareAccess, async (req, res) => {
             sse(res, 'changeset', { changeSet: serializeChangeSet(row) });
             return { id: row.id, affected: preview.totalAffected };
           } catch (e) {
-            return { error: `Vorschau konnte nicht berechnet werden: ${(e as Error).message}` };
+            return { error: `Preview could not be computed: ${(e as Error).message}` };
           }
         },
       },
@@ -224,31 +224,30 @@ chatRouter.post('/message', requireCloudflareAccess, async (req, res) => {
   } catch (e) {
     if (e instanceof ChatNotConfiguredError) sse(res, 'error', { error: e.message });
     else if (controller.signal.aborted) {
-      /* Client weg — nichts mehr zu senden. */
+      /* Client gone — nothing more to send. */
     } else sse(res, 'error', { error: (e as Error).message });
   } finally {
     res.end();
   }
 });
 
-// ───────────────────────── Anwenden / Undo / Verwerfen ─────────────────────────
+// ───────────────────────── Apply / Undo / Discard ─────────────────────────
 
-/** Statuskonflikt (z. B. bereits angewandt / nicht mehr jüngste) → HTTP 409. */
+/** Status conflict (e.g. already applied / no longer most recent) → HTTP 409. */
 class ChangeSetConflict extends Error {}
 
 /**
- * Anwenden in EINER (verschachtelten) Transaktion. Der Status- und
- * Validitäts-Check passiert AUTORITATIV INNERHALB der Transaktion — die
- * Vorab-Prüfung in der Route liefert nur die freundliche Fehlermeldung. So kann
- * ein Change-Set selbst bei (künftig) nebenläufigen/asynchronen Aufrufern nicht
- * zweimal angewandt werden (TOCTOU geschlossen): wer das Rennen verliert, sieht
- * status≠'proposed' und bricht ab.
+ * Apply in ONE (nested) transaction. The status and validity check happens
+ * AUTHORITATIVELY INSIDE the transaction — the pre-check in the route only
+ * returns the friendly error message. This ensures a change-set cannot be
+ * applied twice even with (future) concurrent/async callers (TOCTOU closed):
+ * whoever loses the race sees status≠'proposed' and aborts.
  */
 const applyChangeSetTxn = db.transaction((id: number) => {
   const row = changeSetById(id);
-  if (!row) throw new ChangeSetConflict('Change-Set nicht gefunden.');
+  if (!row) throw new ChangeSetConflict('Change set not found.');
   if (row.status !== 'proposed') {
-    throw new ChangeSetConflict(`Change-Set ist bereits „${row.status}" — nicht erneut anwendbar.`);
+    throw new ChangeSetConflict(`Change set is already "${row.status}" — cannot apply again.`);
   }
   const validated = validateOperations(safeParse(row.operations));
   if (!validated.ok) throw new Error(validated.error);
@@ -260,9 +259,9 @@ const applyChangeSetTxn = db.transaction((id: number) => {
 chatRouter.post('/change-sets/:id/apply', requireCloudflareAccess, (req, res) => {
   const id = Number(req.params.id);
   const row = changeSetById(id);
-  if (!row) return res.status(404).json({ error: 'Change-Set nicht gefunden' });
+  if (!row) return res.status(404).json({ error: 'Change set not found' });
   if (row.status !== 'proposed') {
-    return res.status(409).json({ error: `Change-Set ist bereits „${row.status}" — nicht erneut anwendbar.` });
+    return res.status(409).json({ error: `Change set is already "${row.status}" — cannot apply again.` });
   }
   const validated = validateOperations(safeParse(row.operations));
   if (!validated.ok) return res.status(400).json({ error: validated.error });
@@ -276,25 +275,25 @@ chatRouter.post('/change-sets/:id/apply', requireCloudflareAccess, (req, res) =>
     });
   } catch (e) {
     if (e instanceof ChangeSetConflict) return res.status(409).json({ error: e.message });
-    res.status(500).json({ error: `Anwenden fehlgeschlagen: ${(e as Error).message}` });
+    res.status(500).json({ error: `Apply failed: ${(e as Error).message}` });
   }
 });
 
 /**
- * Undo in EINER Transaktion mit autoritativem Re-Check: Status muss noch
- * 'applied' UND das jüngste angewandte Set sein. Das schließt das Fenster, in dem
- * zwei parallele Undos beide den Vorab-Check passieren und restoreSnapshot
- * doppelt liefe.
+ * Undo in ONE transaction with authoritative re-check: status must still be
+ * 'applied' AND it must be the most recently applied set. This closes the
+ * window in which two parallel undos would both pass the pre-check and
+ * restoreSnapshot would run twice.
  */
 const undoChangeSetTxn = db.transaction((id: number) => {
   const row = changeSetById(id);
-  if (!row || row.status !== 'applied') throw new ChangeSetConflict('Change-Set ist nicht (mehr) angewandt.');
+  if (!row || row.status !== 'applied') throw new ChangeSetConflict('Change set is not (or no longer) applied.');
   const latest = latestAppliedChangeSet();
   if (!latest || latest.id !== id) {
-    throw new ChangeSetConflict('Nur die zuletzt angewandte Änderung kann rückgängig gemacht werden.');
+    throw new ChangeSetConflict('Only the most recently applied change can be undone.');
   }
   const snapshot = safeParse(row.undo_snapshot) as ChangeSnapshot | null;
-  if (!snapshot) throw new Error('Kein Undo-Snapshot vorhanden.');
+  if (!snapshot) throw new Error('No undo snapshot present.');
   restoreSnapshot(snapshot);
   markChangeSetUndone(id);
 });
@@ -302,13 +301,13 @@ const undoChangeSetTxn = db.transaction((id: number) => {
 chatRouter.post('/change-sets/:id/undo', requireCloudflareAccess, (req, res) => {
   const id = Number(req.params.id);
   const row = changeSetById(id);
-  if (!row) return res.status(404).json({ error: 'Change-Set nicht gefunden' });
+  if (!row) return res.status(404).json({ error: 'Change set not found' });
   if (row.status !== 'applied') {
-    return res.status(409).json({ error: `Nur angewandte Change-Sets können rückgängig gemacht werden (Status: ${row.status}).` });
+    return res.status(409).json({ error: `Only applied change sets can be undone (status: ${row.status}).` });
   }
   const latest = latestAppliedChangeSet();
   if (!latest || latest.id !== id) {
-    return res.status(409).json({ error: 'Nur die zuletzt angewandte Änderung kann rückgängig gemacht werden.' });
+    return res.status(409).json({ error: 'Only the most recently applied change can be undone.' });
   }
 
   try {
@@ -319,16 +318,16 @@ chatRouter.post('/change-sets/:id/undo', requireCloudflareAccess, (req, res) => 
     });
   } catch (e) {
     if (e instanceof ChangeSetConflict) return res.status(409).json({ error: e.message });
-    res.status(500).json({ error: `Undo fehlgeschlagen: ${(e as Error).message}` });
+    res.status(500).json({ error: `Undo failed: ${(e as Error).message}` });
   }
 });
 
 chatRouter.post('/change-sets/:id/discard', requireCloudflareAccess, (req, res) => {
   const id = Number(req.params.id);
   const row = changeSetById(id);
-  if (!row) return res.status(404).json({ error: 'Change-Set nicht gefunden' });
+  if (!row) return res.status(404).json({ error: 'Change set not found' });
   if (row.status !== 'proposed') {
-    return res.status(409).json({ error: `Change-Set ist „${row.status}" — nichts zu verwerfen.` });
+    return res.status(409).json({ error: `Change set is "${row.status}" — nothing to discard.` });
   }
   markChangeSetDiscarded(id);
   res.json({ changeSet: serializeChangeSet(changeSetById(id)!) });

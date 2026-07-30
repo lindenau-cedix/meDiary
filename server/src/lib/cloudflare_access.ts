@@ -142,7 +142,7 @@ export function requireCloudflareAccess(req: Request, res: Response, next: NextF
   }
   const token = tokenFromRequest(req);
   if (!token) {
-    res.status(401).json({ error: 'Kein Cloudflare-Access-Token übermittelt (Header Cf-Access-Jwt-Assertion)' });
+    res.status(401).json({ error: 'No Cloudflare Access token supplied (header Cf-Access-Jwt-Assertion)' });
     return;
   }
   const issuer = accessIssuer(teamDomain);

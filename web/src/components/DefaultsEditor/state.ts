@@ -1,23 +1,29 @@
 /**
- * Lokaler Mirror von `server/src/lib/defaults.ts` für die Raw-Tab-Vorschau
- * und die strukturierten Felder. Bewusst NICHT der einzige Serializer — der
- * Server besitzt die Wahrheit und baut den finalen Markdown-Text aus
- * Section-Structs. Diese Datei hier spiegelt nur das, was im Frontend-
- * Draft gehalten wird.
+ * Local mirror of `server/src/lib/defaults.ts` used for the raw-tab preview
+ * and the structured fields. Deliberately NOT the only serializer — the
+ * server owns the truth and assembles the final Markdown text from section
+ * structs. This file just mirrors what the frontend draft is holding.
  *
- * Wir duplizieren die Regex-Konstanten aus dem Server-File; eine
- * zentrale geteilte Datei lohnt nicht für eine reine Client-Read-only-
- * Parser-Funktion, die Round-Trip-Treue kommt vom Server.
+ * We duplicate the regex constants from the server file; a single shared
+ * file isn't worth it for a pure client read-only parser — round-trip
+ * fidelity comes from the server.
+ *
+ * IMPORTANT: the literals inside the regexes (`Menge`, `Notiz`, `Mit`,
+ * `##`, …) are parser tokens that the server's `parseSections` and
+ * `buildMarkdownFromParsed` rely on byte-for-byte. Translate this file's
+ * COMMENTS, never its parsing literals.
  */
 
 import type { DefaultsSection, DefaultsSectionCompanion } from '../../lib/types';
 
+// NOTE: keep these literal tokens verbatim — the server parser matches on
+// them. Aliases are mirrored from server/src/lib/defaults.ts.
 const AMOUNT_RE = /^[-*]?\s*(?:\*\*)?\s*(?:Menge|Dosis|Amount)\s*(?:\*\*)?\s*:\s*(.+?)\s*\**\s*$/i;
 const NOTE_RE = /^[-*]?\s*(?:\*\*)?\s*(?:Notiz|Note|Hinweis)\s*(?:\*\*)?\s*:\s*(.+?)\s*$/i;
 const COMPANION_RE = /^[-*]?\s*(?:\*\*)?\s*(?:Mit|Zusammen mit|With)\s*(?:\*\*)?\s*:\s*(.+?)\s*$/i;
 const HEADING_RE = /^(#{2,6})\s+(.*)$/;
 
-/** `Name | Menge | Notiz` → Companion. */
+/** `Name | Amount | Note` → companion struct. */
 function parseCompanion(raw: string): DefaultsSectionCompanion | null {
   const parts = raw.split('|').map((p) => p.trim());
   const name = parts[0];
@@ -30,10 +36,10 @@ function parseCompanion(raw: string): DefaultsSectionCompanion | null {
 }
 
 /**
- * Zerlegt Rohtext in Sektionen für die Initial-Befüllung des strukturierten
- * Editors. Spiegelt das Server-Pendant (`parseSections`), ist aber tolerant
- * gegenüber kleinen Drifts, weil die Server-Serialisierung die Wahrheit
- * baut.
+ * Splits raw text into sections for the initial population of the
+ * structured editor. Mirrors the server counterpart (`parseSections`) but
+ * tolerates small drifts — the server serialization is what produces the
+ * canonical output.
  */
 export function sectionsFromRaw(raw: string): DefaultsSection[] {
   const lines = raw.split(/\r?\n/);
@@ -97,8 +103,8 @@ export function sectionsFromRaw(raw: string): DefaultsSection[] {
 }
 
 /**
- * Tiefer Strukturgleichheitstest. Reicht für die "Speichern"-Button-
- * Enable-Logik; ignoriert React-Keys / undefined-Felder.
+ * Deep structural equality test. Good enough for the Save button enable
+ * logic; ignores React keys and undefined fields.
  */
 export function sectionsEqual(a: DefaultsSection[], b: DefaultsSection[]): boolean {
   if (a.length !== b.length) return false;

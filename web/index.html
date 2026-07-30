@@ -1,4 +1,9 @@
 <!doctype html>
+<!--
+  lang="de" is only the pre-hydration default (German is the i18n fallback).
+  `I18nProvider` overwrites it with the resolved locale on mount, so screen
+  readers get the right language once the app has booted.
+-->
 <html lang="de">
   <head>
     <meta charset="UTF-8" />

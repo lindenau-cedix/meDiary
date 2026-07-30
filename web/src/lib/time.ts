@@ -1,38 +1,38 @@
 /**
- * Zeit-Helfer für die Frontend-Tageslogik. Spiegelt die Server-Seite
- * (`server/src/lib/time.ts`): lokale Wand­uhr-Zeiten als Strings
- * ("YYYY-MM-DDTHH:mm[:ss]"), Tagesgrenze 03:30 Europe/Berlin
- * (`DAY_BOUNDARY`). Einnahmen 00:00–03:29 zählen zum Vortag.
+ * Time helpers for the frontend's day logic. Mirrors the server side
+ * (`server/src/lib/time.ts`): local wall-clock times as strings
+ * ("YYYY-MM-DDTHH:mm[:ss]"), day boundary 03:30 Europe/Berlin
+ * (`DAY_BOUNDARY`). Intakes 00:00–03:29 count towards the previous day.
  *
- * Der Server setzt in `serializeIntake` bereits den korrekten
- * Konsum-Tag (`intake.date`); diese Helfer werden im Frontend vor
- * allem gebraucht, um "heute" / "gestern" / "morgen" konsistent zur
- * 03:30-Grenze zu bestimmen, wenn kein Server-Wert vorliegt (z. B. die
- * Default-Auswahl im Composer oder der "Heute"-Button im
- * Assessment-Sheet).
+ * The server already sets the correct consumption day (`intake.date`) in
+ * `serializeIntake`; these helpers are mostly used in the frontend to
+ * determine "today" / "yesterday" / "tomorrow" consistently with the
+ * 03:30 boundary when no server value is available (e.g. the default
+ * selection in the composer or the "Today" button in the assessment
+ * sheet).
  */
 
 export const DAY_BOUNDARY = { hour: 3, minute: 30 } as const;
 
-/** Tagesdatum "YYYY-MM-DD" aus einem lokalen Datetime-String. */
+/** Day date "YYYY-MM-DD" from a local datetime string. */
 export function dateOf(localDateTime: string): string {
   return localDateTime.slice(0, 10);
 }
 
-/** Stunde (0–23) aus einem lokalen Datetime-String. */
+/** Hour (0–23) from a local datetime string. */
 export function hourOf(localDateTime: string): number {
   return Number(localDateTime.slice(11, 13));
 }
 
-/** Minuten (0–59) aus einem lokalen Datetime-String. */
+/** Minute (0–59) from a local datetime string. */
 export function minuteOf(localDateTime: string): number {
   return Number(localDateTime.slice(14, 16));
 }
 
 /**
- * Konsum-/Medikations-Tag eines Zeitpunkts (Tagesgrenze siehe
- * `DAY_BOUNDARY`). Akzeptiert sowohl "YYYY-MM-DDTHH:mm" als auch
- * "YYYY-MM-DDTHH:mm:ss" — verhält sich exakt wie der Server-Helfer.
+ * Consumption/medication day of a given timestamp (day boundary see
+ * `DAY_BOUNDARY`). Accepts both "YYYY-MM-DDTHH:mm" and
+ * "YYYY-MM-DDTHH:mm:ss" — behaves exactly like the server helper.
  */
 export function consumptionDay(localDateTime: string): string {
   const day = dateOf(localDateTime);
@@ -45,27 +45,27 @@ export function consumptionDay(localDateTime: string): string {
   return day;
 }
 
-/** Aktueller Konsum-Tag ("YYYY-MM-DD") gemäß DAY_BOUNDARY. */
+/** Current consumption day ("YYYY-MM-DD") per DAY_BOUNDARY. */
 export function consumptionToday(): string {
   return consumptionDay(nowLocalInput() + ':00');
 }
 
-/** Konsum-Tag vor n Kalendertagen — Basis `consumptionToday()`,
- *  NICHT der reine Wand­uhr-Tag. Für „Liste der letzten N
- *  Konsum-Tage" als Server-Filter nutzbar. */
+/** Consumption day n calendar days ago — base `consumptionToday()`,
+ *  NOT the plain wall-clock day. Useful as a server filter for "list of
+ *  the last N consumption days". */
 export function consumptionTodayOffset(n: number): string {
   const d = parseLocal(consumptionToday());
   d.setDate(d.getDate() - n);
   return toDateString(d);
 }
 
-/** "YYYY-MM-DD" aus einem Date-Objekt (lokale Zeit). */
+/** "YYYY-MM-DD" from a Date object (local time). */
 export function toDateString(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** Parst "YYYY-MM-DDTHH:mm[:ss]" als lokale Zeit. */
+/** Parse "YYYY-MM-DDTHH:mm[:ss]" as local time. */
 export function parseLocal(s: string): Date {
   const [datePart, timePart = '00:00:00'] = s.split('T');
   const [y, mo, da] = datePart.split('-').map(Number);
@@ -73,7 +73,7 @@ export function parseLocal(s: string): Date {
   return new Date(y, mo - 1, da, h, mi, se);
 }
 
-/** "YYYY-MM-DDTHH:mm" der aktuellen lokalen Zeit. */
+/** "YYYY-MM-DDTHH:mm" of the current local time. */
 export function nowLocalInput(): string {
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');

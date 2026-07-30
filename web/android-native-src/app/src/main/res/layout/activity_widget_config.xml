@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Konfigurations-Activity. Bewusst schlicht — vertikales LinearLayout,
-  Spinner, EditText, RadioGroup, Button. Das Theme
-  `Theme.AppCompat.Light.DarkActionBar` wird im AndroidManifest
-  gesetzt; eine AppCompat-Activity erwartet eine `appcompat`-Theme.
+  Configuration activity. Intentionally simple: a vertical LinearLayout,
+  Spinner, EditText, RadioGroup, and Button. The
+  `Theme.AppCompat.Light.DarkActionBar` theme is set in AndroidManifest;
+  an AppCompat activity expects an AppCompat theme.
 -->
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -49,7 +49,7 @@
             android:layout_height="wrap_content"
             android:inputType="text"
             android:imeOptions="actionDone"
-            android:hint="z. B. 50 mg" />
+            android:hint="@string/widget_config_amount_example" />
 
         <TextView
             android:layout_width="match_parent"

@@ -22,6 +22,7 @@ import {
   AlertTriangle,
   SquareTerminal,
   ChevronRight,
+  Languages,
 } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -36,15 +37,23 @@ import { haptics } from '../lib/haptics';
 import { useTheme, type ThemePref } from '../lib/theme';
 import { getApiBase, setApiBase, api } from '../lib/api';
 import { useCompliance, useImportIntakes } from '../lib/queries';
+import { useI18n, useT, type Locale } from '../lib/i18n';
 
-const THEME_OPTIONS: { value: ThemePref; label: string; Icon: typeof Sun }[] = [
-  { value: 'system', label: 'System', Icon: Monitor },
-  { value: 'light', label: 'Hell', Icon: Sun },
-  { value: 'dark', label: 'Dunkel', Icon: Moon },
+const THEME_OPTIONS: { value: ThemePref; labelKey: 'settings.theme.system' | 'settings.theme.light' | 'settings.theme.dark'; Icon: typeof Sun }[] = [
+  { value: 'system', labelKey: 'settings.theme.system', Icon: Monitor },
+  { value: 'light', labelKey: 'settings.theme.light', Icon: Sun },
+  { value: 'dark', labelKey: 'settings.theme.dark', Icon: Moon },
+];
+
+const LANGUAGE_OPTIONS: { value: Locale; labelKey: 'settings.language.german' | 'settings.language.english' }[] = [
+  { value: 'de', labelKey: 'settings.language.german' },
+  { value: 'en', labelKey: 'settings.language.english' },
 ];
 
 export function SettingsScreen() {
   const { pref, setPref } = useTheme();
+  const { locale, setLocale } = useI18n();
+  const t = useT();
   const toast = useToast();
   const qc = useQueryClient();
   const navigate = useNavigate();
@@ -66,11 +75,11 @@ export function SettingsScreen() {
       setTesting('ok');
       qc.invalidateQueries();
       haptics.success();
-      toast.show({ message: 'Server verbunden' });
+      toast.show({ message: t('settings.server.connectedToast') });
     } catch {
       setTesting('fail');
       haptics.warning();
-      toast.show({ tone: 'warning', message: 'Keine Verbindung', detail: 'Adresse erreichbar?' });
+      toast.show({ tone: 'warning', message: t('settings.server.noConnection'), detail: t('settings.server.noConnectionDetail') });
     }
   };
 
@@ -81,16 +90,16 @@ export function SettingsScreen() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `meDiary-konsumvorgaenge-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.download = `meDiary-intakes-${new Date().toISOString().slice(0, 10)}.xlsx`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 1000);
       haptics.success();
-      toast.show({ message: 'Export erstellt', detail: 'XLSX-Datei mit Einnahmen' });
+      toast.show({ message: t('settings.importExport.exportDone'), detail: t('settings.importExport.exportDetail') });
     } catch (e) {
       haptics.warning();
-      toast.show({ tone: 'warning', message: 'Export fehlgeschlagen', detail: (e as Error).message });
+      toast.show({ tone: 'warning', message: t('settings.importExport.exportFailed'), detail: (e as Error).message });
     } finally {
       setExportingIntakes(false);
     }
@@ -101,26 +110,24 @@ export function SettingsScreen() {
     event.target.value = '';
     if (!file) return;
 
-    const confirmed = window.confirm(
-      'Dieser Import löscht alle vorhandenen Einnahmen und ersetzt sie durch die XLSX-Datei. Fortfahren?',
-    );
+    const confirmed = window.confirm(t('settings.importExport.importConfirm'));
     if (!confirmed) return;
 
     try {
       const result = await importIntakes.mutateAsync(file);
       haptics.success();
       toast.show({
-        message: 'Import abgeschlossen',
-        detail: `${result.imported} importiert, ${result.replaced} ersetzt`,
+        message: t('settings.importExport.importDone'),
+        detail: t('settings.importExport.importDetail', { imported: result.imported, replaced: result.replaced }),
       });
     } catch (e) {
       haptics.warning();
-      toast.show({ tone: 'warning', message: 'Import fehlgeschlagen', detail: (e as Error).message });
+      toast.show({ tone: 'warning', message: t('settings.importExport.importFailed'), detail: (e as Error).message });
     }
   };
 
-  /** Leitet auf den neuen Editor weiter und legt den Substanznamen als
-   *  "Anlegen"-Chip im strukturierten Editor ab. */
+  /** Forward to the new editor and seed the structured editor with the
+   *  substance name via a "create" chip. */
   const goAddMissing = (name: string) => {
     haptics.light();
     navigate(`/standardnotizen?prefill=${encodeURIComponent(name)}`);
@@ -130,14 +137,14 @@ export function SettingsScreen() {
 
   return (
     <>
-      <PageHeader title="Einstellungen" />
+      <PageHeader title={t('settings.title')} />
 
       <div className="space-y-7">
-        {/* Darstellung */}
+        {/* Appearance */}
         <section>
-          <SectionLabel className="px-1 mb-2.5">Darstellung</SectionLabel>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.theme.label')}</SectionLabel>
           <div className="grid grid-cols-3 gap-2">
-            {THEME_OPTIONS.map(({ value, label, Icon }) => (
+            {THEME_OPTIONS.map(({ value, labelKey, Icon }) => (
               <button
                 key={value}
                 onClick={() => {
@@ -150,15 +157,38 @@ export function SettingsScreen() {
                 )}
               >
                 <Icon size={20} />
-                <span className="text-[13px] font-medium">{label}</span>
+                <span className="text-[13px] font-medium">{t(labelKey)}</span>
               </button>
             ))}
           </div>
         </section>
 
-        {/* Substanzen */}
+        {/* Language */}
         <section>
-          <SectionLabel className="px-1 mb-2.5">Substanzen</SectionLabel>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.language.label')}</SectionLabel>
+          <div className="grid grid-cols-2 gap-2">
+            {LANGUAGE_OPTIONS.map(({ value, labelKey }) => (
+              <button
+                key={value}
+                onClick={() => {
+                  haptics.select();
+                  setLocale(value);
+                }}
+                className={cx(
+                  'press flex items-center justify-center gap-1.5 rounded-2xl py-3.5 ring-1 transition-colors',
+                  locale === value ? 'bg-primary-soft ring-primary/40 text-primary' : 'bg-surface ring-line text-ink-muted',
+                )}
+              >
+                <Languages size={18} />
+                <span className="text-[13px] font-medium">{t(labelKey)}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+
+        {/* Substances */}
+        <section>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.substances.section')}</SectionLabel>
           <Card className="overflow-hidden">
             <button
               onClick={() => setManageOpen(true)}
@@ -168,22 +198,22 @@ export function SettingsScreen() {
                 <Pill size={18} />
               </span>
               <span className="flex-1">
-                <span className="block font-medium text-ink">Substanzen verwalten</span>
-                <span className="block text-xs text-ink-muted">Liste zum Antippen, Farben, Nachtmedikation</span>
+                <span className="block font-medium text-ink">{t('settings.substances.manage')}</span>
+                <span className="block text-xs text-ink-muted">{t('settings.substances.manageSubtitle')}</span>
               </span>
             </button>
           </Card>
         </section>
 
-        {/* WhatsApp (Admin) — gated; rendert nichts, wenn adminEnabled=false */}
+        {/* WhatsApp (Admin) — gated; renders nothing when adminEnabled=false */}
         <section>
-          <SectionLabel className="px-1 mb-2.5">WhatsApp</SectionLabel>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.whatsapp.section')}</SectionLabel>
           <AdminWhatsappPanel />
         </section>
 
-        {/* Daten-Konsole */}
+        {/* Data console */}
         <section>
-          <SectionLabel className="px-1 mb-2.5">Daten-Konsole</SectionLabel>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.console.section')}</SectionLabel>
           <Card className="overflow-hidden">
             <Link
               to="/konsole"
@@ -193,10 +223,8 @@ export function SettingsScreen() {
                 <SquareTerminal size={18} />
               </span>
               <span className="flex-1">
-                <span className="block font-medium text-ink">Chat mit deinen Daten</span>
-                <span className="block text-xs text-ink-muted">
-                  Massen-Korrekturen in Worten — Vorschau &amp; Bestätigung vor jeder Änderung
-                </span>
+                <span className="block font-medium text-ink">{t('settings.console.link')}</span>
+                <span className="block text-xs text-ink-muted">{t('settings.console.subtitle')}</span>
               </span>
               <ChevronRight size={18} className="text-ink-faint" />
             </Link>
@@ -205,23 +233,19 @@ export function SettingsScreen() {
 
         {/* Import/Export */}
         <section>
-          <SectionLabel className="px-1 mb-2.5">Import/Export</SectionLabel>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.importExport.section')}</SectionLabel>
           <Card className="p-4 space-y-3">
             <div className="flex items-center gap-2.5 text-ink-muted">
               <FileSpreadsheet size={18} />
               <div className="min-w-0">
-                <p className="text-sm">Konsumvorgänge als XLSX</p>
-                <p className="text-xs text-ink-faint">
-                  Medikationsplan und Plan-Verlauf bleiben unverändert.
-                </p>
+                <p className="text-sm">{t('settings.importExport.heading')}</p>
+                <p className="text-xs text-ink-faint">{t('settings.importExport.headingHint')}</p>
               </div>
             </div>
 
             <div className="flex items-start gap-2.5 rounded-2xl bg-warn/10 px-3 py-2.5 text-warn">
               <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-              <p className="text-xs leading-relaxed">
-                Import ersetzt alle vorhandenen Einnahmen durch den Inhalt der Datei.
-              </p>
+              <p className="text-xs leading-relaxed">{t('settings.importExport.warn')}</p>
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2">
@@ -231,7 +255,7 @@ export function SettingsScreen() {
                 onClick={exportIntakes}
                 loading={exportingIntakes}
               >
-                Exportieren
+                {t('settings.importExport.export')}
               </Button>
               <Button
                 variant="danger"
@@ -239,7 +263,7 @@ export function SettingsScreen() {
                 onClick={() => intakeImportRef.current?.click()}
                 loading={importIntakes.isPending}
               >
-                Importieren
+                {t('settings.importExport.import')}
               </Button>
             </div>
             <input
@@ -254,11 +278,11 @@ export function SettingsScreen() {
 
         {/* Server */}
         <section>
-          <SectionLabel className="px-1 mb-2.5">Server</SectionLabel>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.server.section')}</SectionLabel>
           <Card className="p-4 space-y-3">
             <div className="flex items-center gap-2.5 text-ink-muted">
               <Server size={18} />
-              <p className="text-sm">Adresse der meDiary-API</p>
+              <p className="text-sm">{t('settings.server.heading')}</p>
             </div>
             <TextInput
               value={serverUrl}
@@ -266,16 +290,13 @@ export function SettingsScreen() {
                 setServerUrl(e.target.value);
                 setTesting('idle');
               }}
-              placeholder="https://mein-server:4000"
+              placeholder={t('settings.server.placeholder')}
               inputMode="url"
               autoCapitalize="off"
               autoCorrect="off"
               spellCheck={false}
             />
-            <p className="text-xs text-ink-faint leading-relaxed">
-              Leer lassen, wenn Frontend und API von derselben Adresse ausgeliefert werden. In der Android-App hier die
-              Adresse deines Servers eintragen.
-            </p>
+            <p className="text-xs text-ink-faint leading-relaxed">{t('settings.server.hint')}</p>
             <div className="flex items-center gap-3">
               <Button
                 variant="soft"
@@ -290,27 +311,27 @@ export function SettingsScreen() {
                 }
                 onClick={saveServer}
               >
-                Speichern & testen
+                {t('settings.server.saveAndTest')}
               </Button>
-              {testing === 'ok' && <span className="text-sm text-good">verbunden</span>}
-              {testing === 'fail' && <span className="text-sm text-bad">nicht erreichbar</span>}
+              {testing === 'ok' && <span className="text-sm text-good">{t('settings.server.connected')}</span>}
+              {testing === 'fail' && <span className="text-sm text-bad">{t('settings.server.unreachable')}</span>}
             </div>
           </Card>
         </section>
 
-        {/* DEFAULTS-Compliance */}
+        {/* DEFAULTS compliance */}
         <section>
-          <SectionLabel className="px-1 mb-2.5">Prüfung: DEFAULTS.md</SectionLabel>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.compliance.section')}</SectionLabel>
           <Card className="p-4 space-y-3">
             <div className="flex items-center gap-2.5 text-ink-muted">
               <ShieldCheck size={18} />
-              <p className="text-sm">Hat jede Substanz einen Eintrag in DEFAULTS.md?</p>
+              <p className="text-sm">{t('settings.compliance.heading')}</p>
               <div className="flex-1" />
               <button
                 onClick={() => refetchCompliance()}
                 className="press grid place-items-center size-8 rounded-xl text-ink-faint hover:text-ink-muted hover:bg-surface2"
-                aria-label="Erneut prüfen"
-                title="Erneut prüfen"
+                aria-label={t('settings.compliance.refreshAria')}
+                title={t('settings.compliance.refreshTitle')}
               >
                 <RefreshCw size={15} className={complianceLoading ? 'animate-spin' : ''} />
               </button>
@@ -319,19 +340,19 @@ export function SettingsScreen() {
             {compliance ? (
               <>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <Badge tone="good">{compliance.compliant.length} mit Eintrag</Badge>
+                  <Badge tone="good">{t('settings.compliance.withEntry', { count: compliance.compliant.length })}</Badge>
                   {missing.length > 0 ? (
-                    <Badge tone="warn">{missing.length} ohne Eintrag</Badge>
+                    <Badge tone="warn">{t('settings.compliance.withoutEntry', { count: missing.length })}</Badge>
                   ) : (
-                    <Badge tone="good">Alles abgedeckt</Badge>
+                    <Badge tone="good">{t('settings.compliance.allCovered')}</Badge>
                   )}
-                  <span className="text-ink-faint">· {compliance.total} unterschiedliche Substanzen</span>
+                  <span className="text-ink-faint">· {t('settings.compliance.totalSubstances', { count: compliance.total })}</span>
                 </div>
 
                 {missing.length > 0 && (
                   <div className="rounded-2xl ring-1 ring-line overflow-hidden">
                     <p className="px-3 py-2 text-xs font-semibold text-ink-muted bg-surface2/60">
-                      Ohne DEFAULTS-Eintrag
+                      {t('settings.compliance.missingHeading')}
                     </p>
                     <ul className="divide-y divide-hairline">
                       {missing.map((m) => (
@@ -340,8 +361,10 @@ export function SettingsScreen() {
                           <div className="flex-1 min-w-0">
                             <p className="text-sm font-medium text-ink truncate">{m.name}</p>
                             <p className="text-xs text-ink-faint">
-                              {m.intakeCount} Einnahme{m.intakeCount === 1 ? '' : 'n'}
-                              {m.inSubstances ? '' : ' · noch keine Kachel'}
+                              {m.intakeCount === 1
+                                ? t('settings.compliance.intakeCount', { count: m.intakeCount })
+                                : t('settings.compliance.intakeCountMany', { count: m.intakeCount })}
+                              {m.inSubstances ? '' : ` · ${t('settings.compliance.noTile')}`}
                             </p>
                           </div>
                           <Button
@@ -350,7 +373,7 @@ export function SettingsScreen() {
                             icon={<Plus size={14} />}
                             onClick={() => goAddMissing(m.name)}
                           >
-                            Eintrag
+                            {t('settings.compliance.addEntry')}
                           </Button>
                         </li>
                       ))}
@@ -359,14 +382,14 @@ export function SettingsScreen() {
                 )}
               </>
             ) : (
-              <p className="text-xs text-ink-faint">Lade Compliance-Bericht …</p>
+              <p className="text-xs text-ink-faint">{t('settings.compliance.loading')}</p>
             )}
           </Card>
         </section>
 
         {/* DEFAULTS.md */}
         <section>
-          <SectionLabel className="px-1 mb-2.5">Standard-Notizen (DEFAULTS.md)</SectionLabel>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.defaults.section')}</SectionLabel>
           <Card className="overflow-hidden">
             <Link
               to="/standardnotizen"
@@ -376,26 +399,24 @@ export function SettingsScreen() {
                 <FileText size={18} />
               </span>
               <span className="flex-1">
-                <span className="block font-medium text-ink">Standard-Notizen bearbeiten</span>
-                <span className="block text-xs text-ink-muted">
-                  Pro Substanz ein Formular (Menge, Notiz, Begleitstoffe) — oder direkt im Markdown
-                </span>
+                <span className="block font-medium text-ink">{t('settings.defaults.link')}</span>
+                <span className="block text-xs text-ink-muted">{t('settings.defaults.subtitle')}</span>
               </span>
               <ChevronRight size={18} className="text-ink-faint" />
             </Link>
           </Card>
         </section>
 
-        {/* Über */}
+        {/* About */}
         <section className="pb-4">
-          <SectionLabel className="px-1 mb-2.5">Über</SectionLabel>
+          <SectionLabel className="px-1 mb-2.5">{t('settings.about.section')}</SectionLabel>
           <Card className="p-4 flex items-center gap-3">
             <span className="grid place-items-center size-10 rounded-2xl bg-primary text-primary-fg font-display text-lg">
               m
             </span>
             <div className="flex-1">
               <p className="font-medium text-ink">meDiary</p>
-              <p className="text-xs text-ink-muted">Medikations-Tagebuch · v1.0</p>
+              <p className="text-xs text-ink-muted">{t('settings.about.tagline')}</p>
             </div>
             <Github size={18} className="text-ink-faint" />
           </Card>

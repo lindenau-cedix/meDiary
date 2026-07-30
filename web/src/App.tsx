@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider, useTheme } from './lib/theme';
+import { I18nProvider } from './lib/i18n';
 import { ToasterProvider } from './components/Toaster';
 import { initNative } from './lib/native';
 import { AppShell } from './components/AppShell';
@@ -32,27 +33,32 @@ function NativeInit() {
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider>
-        <ToasterProvider>
-          <NativeInit />
-          <HashRouter>
-            <Routes>
-              <Route element={<AppShell />}>
-                <Route index element={<QuickEntryScreen />} />
-                <Route path="verlauf" element={<HistoryScreen />} />
-                <Route path="tagebuch" element={<DiaryScreen />} />
-                <Route path="plan" element={<PlanScreen />} />
-                <Route path="werte" element={<TrendsScreen />} />
-                <Route path="statistik" element={<StatistikScreen />} />
-                <Route path="konsole" element={<ConsoleScreen />} />
-                <Route path="einstellungen" element={<SettingsScreen />} />
-                <Route path="standardnotizen" element={<DefaultsEditorScreen />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </Route>
-            </Routes>
-          </HashRouter>
-        </ToasterProvider>
-      </ThemeProvider>
+      <I18nProvider>
+        <ThemeProvider>
+          <ToasterProvider>
+            <NativeInit />
+            <HashRouter>
+              <Routes>
+                {/* Route paths stay in German on purpose: they are stable
+                    identifiers, deep-linked from the Android widget and
+                    bookmarks. Only the visible labels are translated. */}
+                <Route element={<AppShell />}>
+                  <Route index element={<QuickEntryScreen />} />
+                  <Route path="verlauf" element={<HistoryScreen />} />
+                  <Route path="tagebuch" element={<DiaryScreen />} />
+                  <Route path="plan" element={<PlanScreen />} />
+                  <Route path="werte" element={<TrendsScreen />} />
+                  <Route path="statistik" element={<StatistikScreen />} />
+                  <Route path="konsole" element={<ConsoleScreen />} />
+                  <Route path="einstellungen" element={<SettingsScreen />} />
+                  <Route path="standardnotizen" element={<DefaultsEditorScreen />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </Route>
+              </Routes>
+            </HashRouter>
+          </ToasterProvider>
+        </ThemeProvider>
+      </I18nProvider>
     </QueryClientProvider>
   );
 }

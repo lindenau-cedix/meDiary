@@ -9,7 +9,7 @@ export function Spinner({ className }: { className?: string }) {
   );
 }
 
-export function LoadingScreen({ label = 'Lädt …' }: { label?: string }) {
+export function LoadingScreen({ label }: { label?: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-3 py-20 text-ink-faint">
       <Spinner className="text-primary" />
@@ -26,6 +26,10 @@ export function SectionLabel({ children, className }: { children: ReactNode; cla
   );
 }
 
+/**
+ * Empty-state placeholder. All visible text is supplied by the caller — the
+ * component itself only renders the layout.
+ */
 export function EmptyState({
   icon,
   title,
@@ -37,7 +41,7 @@ export function EmptyState({
   title: string;
   description?: string;
   action?: ReactNode;
-  /** Override für den Icon-Chip (Default `bg-surface2 text-ink-faint`). */
+  /** Override for the icon chip (default `bg-surface2 text-ink-faint`). */
   iconClassName?: string;
 }) {
   return (

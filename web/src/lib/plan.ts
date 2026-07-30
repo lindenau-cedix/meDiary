@@ -1,22 +1,23 @@
 import type { PlanItem } from './types';
+import { translate, type MessageKey } from './i18n';
 
 /**
- * Umlaut-bewusste Substanz-Normalisierung: gleicher Key für "Quetiapin" und
- * "quetiapin" (oder "CBD-Öl" und "cbd-öl"). Bewusst NICHT `String.toLowerCase`
- * (ASCII-only, würde "Ö" unverändert lassen) — wir nehmen die
- * ICU/CLDR-Variante, die der SQLite `lower()` entspricht, das die App
- * selbst nicht verwendet (siehe server/src/lib/names.ts).
+ * Umlaut-aware substance normalisation: the same key for "Quetiapin" and
+ * "quetiapin" (or "CBD-Öl" and "cbd-öl"). Deliberately NOT
+ * `String.toLowerCase` (ASCII-only, it would leave "Ö" untouched) — we use the
+ * ICU/CLDR variant. The `'de'` tag is a DATA INVARIANT, not a UI language
+ * setting: it must not follow the selected locale (see server/src/lib/names.ts).
  */
 export function nameKey(name: string): string {
   return name.trim().toLocaleLowerCase('de');
 }
 
 /**
- * Normalisiert eine Dosis-/Mengen-Angabe für den *Vergleich* (nicht für die
- * Anzeige): umlaut-, whitespace- und einheiten-tolerant, damit "150mg",
- * "150 mg" und "150 MG" denselben Schlüssel ergeben. Dezimal-Komma wird zu
- * Punkt vereinheitlicht ("0,5" → "0.5"), ein abschließender Punkt fällt weg.
- * Leerer/Null-Wert → "" (matcht nie eine konkrete Plan-Dosis).
+ * Normalises a dose/amount value for *comparison* (not for display):
+ * tolerant of umlauts, whitespace and unit spacing, so "150mg", "150 mg" and
+ * "150 MG" all yield the same key. A decimal comma is unified to a dot
+ * ("0,5" → "0.5") and a trailing dot is dropped. Empty/null → "" (never
+ * matches a concrete plan dose).
  */
 export function doseKey(raw: string | null | undefined): string {
   if (!raw) return '';
@@ -32,27 +33,26 @@ export function doseKey(raw: string | null | undefined): string {
     .trim();
 }
 
-/** Zulässige Plan-Dosen einer Substanz (bereits über doseKey normalisiert). */
+/** Permitted plan doses for a substance (already normalised via doseKey). */
 export interface PlanDoseEntry {
-  /** Menge der zulässigen Dosis-Schlüssel. Leer = der Plan gibt für diese
-   *  Substanz keine konkrete Dosis vor (dann genügt der Substanz-Match). */
+  /** Set of permitted dose keys. Empty = the plan prescribes no concrete dose
+   *  for this substance (a substance match is then sufficient). */
   doses: Set<string>;
 }
 
 /**
- * Index nameKey → zulässige Plan-Dosen aus dem aktuell wirksamen Plan. Als
- * Dosis gilt jeder nicht-leere Slot-Wert (Morgens/Mittags/Abends/Nachts) sowie
- * die generische `strength` — der Markdown-Import legt die echte Dosis in die
- * Slots ("150 mg"), das Seed-/Formular-Format hält sie in `strength`. Der
- * Platzhalter "✓" (Slot ohne Mengenangabe) zählt NICHT als konkrete Dosis.
+ * Index nameKey → permitted plan doses from the currently effective plan. Every
+ * non-empty slot value (morning/noon/evening/night) counts as a dose, as does
+ * the generic `strength` — the Markdown import puts the real dose into the slots
+ * ("150 mg"), while the seed/form format keeps it in `strength`. The placeholder
+ * "✓" (a slot without an amount) does NOT count as a concrete dose.
  *
- * Bewusst werden im Formular-/Seed-Format AUCH reine Stückzahlen aus den Slots
- * (z. B. "1" = 1 Tablette) als zulässige Dosis aufgenommen: der Ein-Tipp-
- * Sammeleintrag (`POST /api/intakes/plan-batch`) protokolliert genau diesen
- * Slot-Wert 1:1 als `amount`, weshalb "1" dort eine planmäßige Menge IST. In
- * den echten Markdown-Plandaten tragen die Slots reale Dosen (mit Einheit),
- * sodass gar keine nackten Stückzahlen entstehen — der Sonderfall ist also
- * auf das Formular-Modell begrenzt.
+ * In the form/seed format, bare unit counts from the slots (for example "1" =
+ * 1 tablet) are deliberately accepted as valid doses too: the one-tap collective
+ * entry (`POST /api/intakes/plan-batch`) logs exactly that slot value verbatim as
+ * `amount`, which makes "1" a scheduled amount there. Real Markdown plan data
+ * carries actual doses (with units) in the slots, so no bare counts arise —
+ * the special case is therefore limited to the form model.
  */
 export function planDoseIndex(plan: { items?: PlanItem[] | null } | null | undefined): Map<string, PlanDoseEntry> {
   const map = new Map<string, PlanDoseEntry>();
@@ -71,11 +71,11 @@ export function planDoseIndex(plan: { items?: PlanItem[] | null } | null | undef
 }
 
 /**
- * True, wenn die Einnahme *planmäßig* ist: Substanz steht im aktuell wirksamen
- * Plan UND ihre Dosis stimmt mit dem Plan überein. Gibt der Plan für die
- * Substanz keine konkrete Dosis vor (nur "✓" / kein Mengenwert), genügt der
- * Substanz-Match. Fehlt die Menge der Einnahme, während der Plan eine konkrete
- * Dosis vorgibt, gilt sie als NICHT planmäßig (Abweichung nicht verifizierbar).
+ * True when the intake is *as scheduled*: the substance appears in the currently
+ * effective plan AND its dose matches the plan. If the plan prescribes no
+ * concrete dose for the substance (only "✓" / no amount), a substance match is
+ * sufficient. If the intake has no amount while the plan does prescribe a
+ * concrete dose, it counts as NOT scheduled (the deviation is unverifiable).
  */
 export function isPlanIntake(
   intake: { substanceName: string; amount: string | null },
@@ -87,28 +87,48 @@ export function isPlanIntake(
   return entry.doses.has(doseKey(intake.amount));
 }
 
-export const DAYPARTS = [
-  { key: 'morning', label: 'Morgens', short: 'M' },
-  { key: 'noon', label: 'Mittags', short: 'Mi' },
-  { key: 'evening', label: 'Abends', short: 'A' },
-  { key: 'night', label: 'Nachts', short: 'N' },
-] as const;
+/**
+ * The four plan slots in canonical order.
+ *
+ * Kept as a `const` tuple of bare keys so the literal types survive and
+ * `item[key]` still type-checks against `PlanItem`. Labels are *not* stored
+ * here — they depend on the active locale (see `daypartList()`).
+ */
+export const DAYPART_KEYS = ['morning', 'noon', 'evening', 'night'] as const;
 
-export const FIELD_LABELS: Record<string, string> = {
-  strength: 'Stärke',
-  morning: 'Morgens',
-  noon: 'Mittags',
-  evening: 'Abends',
-  night: 'Nachts',
-  unit: 'Einheit',
-  reason: 'Grund',
-  notes: 'Hinweis',
-};
+export type DaypartKey = (typeof DAYPART_KEYS)[number];
+
+/**
+ * Dayparts with labels in the active locale. A function, not a constant, so a
+ * language switch produces fresh strings on the next render.
+ */
+export function daypartList(): { key: DaypartKey; label: string; short: string }[] {
+  return DAYPART_KEYS.map((key) => ({
+    key,
+    label: translate(`daypart.${key}` as MessageKey),
+    short: translate(`daypart.${key}.short` as MessageKey),
+  }));
+}
+
+/**
+ * Label for a plan *diff* field: the four slots plus the metadata fields.
+ * Unknown fields fall back to the raw name, matching the previous
+ * `FIELD_LABELS[f] ?? f` behaviour at the call site.
+ */
+export function planFieldLabel(field: string): string {
+  if ((DAYPART_KEYS as readonly string[]).includes(field)) {
+    return translate(`daypart.${field}` as MessageKey);
+  }
+  if (field === 'strength' || field === 'unit' || field === 'reason' || field === 'notes') {
+    return translate(`planField.${field}` as MessageKey);
+  }
+  return field;
+}
 
 export function dosingSummary(item: PlanItem): string {
-  return DAYPARTS.map((d) => (item[d.key] ? item[d.key] : '0')).join(' – ');
+  return DAYPART_KEYS.map((key) => item[key] || '0').join(' – ');
 }
 
 export function hasAnyDosing(item: PlanItem): boolean {
-  return DAYPARTS.some((d) => !!item[d.key]);
+  return DAYPART_KEYS.some((key) => !!item[key]);
 }

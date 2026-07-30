@@ -10,7 +10,8 @@ import { TrendChart } from '../components/TrendChart';
 import { AssessmentSheet } from '../components/AssessmentSheet';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
-import { METRICS } from '../lib/metrics';
+import { metricList } from '../lib/metrics';
+import { useT } from '../lib/i18n';
 import { scoreColor, goodness } from '../lib/colors';
 import {
   todayStr,
@@ -30,6 +31,7 @@ const RANGES = [
 ];
 
 export function TrendsScreen() {
+  const t = useT();
   const [range, setRange] = useState(30);
   const [editing, setEditing] = useState<{ open: boolean; date: string }>({
     open: false,
@@ -39,17 +41,26 @@ export function TrendsScreen() {
   const [chartsOpen, setChartsOpen] = useState(false);
   const { data: assessments = [], isLoading } = useAssessments(dateNDaysAgo(range), todayStr());
 
+  // Locale-aware: metric labels and range eyebrow depend on the active locale,
+  // so the list/metrics are recomputed on every render rather than memoised.
+  const metrics = metricList();
+
   const valuesFor = (key: string): (number | null)[] =>
     assessments.map((a) => a.scores[key] ?? null);
 
   return (
     <>
       <PageHeader
-        title="Werte"
-        eyebrow={`${assessments.length} Tagesbilder · ${range} Tage`}
+        title={t('nav.values')}
+        eyebrow={t('trends.eyebrow', {
+          count: assessments.length === 1
+            ? t('trends.eyebrowCount.one', { count: assessments.length })
+            : t('trends.eyebrowCount.many', { count: assessments.length }),
+          range,
+        })}
         action={
           <Button size="sm" icon={<Plus size={16} />} onClick={() => setPickerOpen(true)}>
-            Neu
+            {t('action.add')}
           </Button>
         }
       />
@@ -78,23 +89,24 @@ export function TrendsScreen() {
         <LoadingScreen />
       ) : (
         <>
-          {/* Aktuelles Tagesbild (Konsum-Tag) — schneller Zugriff. */}
+          {/* Current assessment (consumption day) — quick access. */}
           <TodayHero
             assessments={assessments}
+            metrics={metrics}
             onOpenToday={() => setEditing({ open: true, date: consumptionToday() })}
           />
 
-          {/* Liste aller Tagesbilder im Zeitfenster. */}
+          {/* All assessments within the time window. */}
           <div className="mt-7">
-            <SectionLabel className="mb-2.5 px-1">Tagesbilder im Zeitraum</SectionLabel>
+            <SectionLabel className="mb-2.5 px-1">{t('trends.list.heading')}</SectionLabel>
             {assessments.length === 0 ? (
               <EmptyState
                 icon={<Moon size={26} />}
-                title="Noch keine Tagesbilder"
-                description="Nach dem Eintragen der Nachtmedikation wirst du nach deinem Tag gefragt — oder lege jetzt eines an."
+                title={t('trends.empty.title')}
+                description={t('trends.empty.description')}
                 action={
                   <Button icon={<Plus size={18} />} onClick={() => setPickerOpen(true)}>
-                    Tagesbild anlegen
+                    {t('trends.empty.action')}
                   </Button>
                 }
               />
@@ -106,6 +118,7 @@ export function TrendsScreen() {
                     <AssessmentRow
                       key={a.date}
                       assessment={a}
+                      metrics={metrics}
                       onOpen={() => setEditing({ open: true, date: a.date })}
                     />
                   ))}
@@ -113,7 +126,7 @@ export function TrendsScreen() {
             )}
           </div>
 
-          {/* Trends-Charts — zusammenklappbar, um die Liste nicht zu verdrängen. */}
+          {/* Trend charts — collapsible so they don't push the list down. */}
           {assessments.length > 0 && (
             <div className="mt-7">
               <button
@@ -124,7 +137,7 @@ export function TrendsScreen() {
                 className="press w-full flex items-center justify-between gap-3 mb-2.5 px-1"
                 aria-expanded={chartsOpen}
               >
-                <SectionLabel>11 Skalen — Trends</SectionLabel>
+                <SectionLabel>{t('trends.charts.heading')}</SectionLabel>
                 <ChevronDown
                   size={16}
                   className={cx('text-ink-faint transition-transform', chartsOpen && 'rotate-180')}
@@ -132,7 +145,7 @@ export function TrendsScreen() {
               </button>
               {chartsOpen && (
                 <div className="space-y-2.5">
-                  {METRICS.map((m) => (
+                  {metrics.map((m) => (
                     <MetricCard
                       key={m.key}
                       metric={m}
@@ -165,21 +178,24 @@ export function TrendsScreen() {
 }
 
 /**
- * Schnellzugriff auf den heutigen Konsum-Tag: zeigt Datum, Anzahl erfasster
- * Skalen und einen Ø-Wert. Tippen = AssessmentSheet für den Konsum-Tag
- * öffnen (auch wenn das Tagesbild noch leer ist).
+ * Quick-access card for today's consumption day: shows the date, how many of
+ * the 11 scales are filled, and an average. Tapping opens the AssessmentSheet
+ * for the consumption day (even when no assessment exists yet).
  */
 function TodayHero({
   assessments,
+  metrics,
   onOpenToday,
 }: {
   assessments: Assessment[];
+  metrics: Metric[];
   onOpenToday: () => void;
 }) {
+  const t = useT();
   const today = consumptionToday();
   const cur = assessments.find((a) => a.date === today);
   const filledCount = cur
-    ? METRICS.filter((m) => cur.scores[m.key] != null).length
+    ? metrics.filter((m) => cur.scores[m.key] != null).length
     : 0;
   const avg = cur
     ? (() => {
@@ -200,12 +216,14 @@ function TodayHero({
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-[13px] font-medium text-ink-muted truncate">
-            Heute · {formatFull(today)}
+            {t('trends.today.eyebrow', { date: formatFull(today) })}
           </p>
           <p className="font-display text-2xl leading-tight text-ink mt-0.5 tabular">
             {cur
-              ? `${filledCount}/${METRICS.length} Werte${avg != null ? ` · Ø ${avg}` : ''}`
-              : 'Noch nicht erfasst'}
+              ? avg != null
+                ? t('trends.today.filled', { filled: filledCount, total: metrics.length, avg })
+                : t('trends.today.filledNoAvg', { filled: filledCount, total: metrics.length })
+              : t('trends.today.empty')}
           </p>
           {cur?.note && (
             <p className="text-[13px] text-ink-muted leading-snug mt-1 line-clamp-2">
@@ -267,12 +285,15 @@ function MetricCard({ metric, values }: { metric: Metric; values: (number | null
 
 function AssessmentRow({
   assessment,
+  metrics,
   onOpen,
 }: {
   assessment: Assessment;
+  metrics: Metric[];
   onOpen: () => void;
 }) {
-  const filledCount = METRICS.filter((m) => assessment.scores[m.key] != null).length;
+  const t = useT();
+  const filledCount = metrics.filter((m) => assessment.scores[m.key] != null).length;
   const avg = (() => {
     const nums = Object.values(assessment.scores).filter(
       (v): v is number => typeof v === 'number',
@@ -291,12 +312,17 @@ function AssessmentRow({
         <div className="flex items-baseline gap-2">
           <p className="font-medium text-ink">{formatDayLabel(assessment.date)}</p>
           <span className="text-[11px] text-ink-faint tabular">
-            {filledCount}/{METRICS.length}
-            {avg != null ? ` · Ø ${Math.round(avg * 10) / 10}` : ''}
+            {avg != null
+              ? t('trends.row.summaryWithAvg', {
+                  filled: filledCount,
+                  total: metrics.length,
+                  avg: Math.round(avg * 10) / 10,
+                })
+              : t('trends.row.summaryNoAvg', { filled: filledCount, total: metrics.length })}
           </span>
         </div>
         <p className="text-[11px] text-ink-faint tabular mt-0.5">
-          {formatFull(assessment.date)} · {relativeDays(assessment.date)}
+          {t('trends.row.meta', { date: formatFull(assessment.date), relative: relativeDays(assessment.date) })}
         </p>
         {assessment.note && (
           <p className="text-[13px] text-ink-muted leading-snug mt-1 line-clamp-2">
@@ -309,10 +335,10 @@ function AssessmentRow({
 }
 
 /**
- * Minimaler Datum-Picker als Sheet: ein `type="date"` Input + ein paar
- * Schnellauswahl-Buttons (Heute, Gestern, vorgestern, vor 7 Tagen). Reicht
- * für die Aufgabe "Werte für ein bestimmtes Datum nachtragen/anlegen" — ein
- * voller Kalender ist hier überdimensioniert.
+ * Minimal date picker as a Sheet: a `type="date"` input plus a handful of
+ * quick-pick buttons (today, yesterday, day before, 7 days ago). Enough for
+ * the "log or amend scores for a given date" use case — a full calendar
+ * would be overkill here.
  */
 function DatePickerSheet({
   open,
@@ -323,6 +349,7 @@ function DatePickerSheet({
   onClose: () => void;
   onPick: (date: string) => void;
 }) {
+  const t = useT();
   const today = consumptionToday();
   const [date, setDate] = useState(today);
   const yesterday = useMemo(() => {
@@ -341,11 +368,10 @@ function DatePickerSheet({
     return d.toISOString().slice(0, 10);
   }, [today]);
 
-  // Beim Schließen + Wieder-Öffnen auf den heutigen Konsum-Tag zurücksetzen.
+  // Reset to today whenever the sheet closes + reopens. setState during
+  // render is officially allowed in React 18 when idempotent and unconditional
+  // (see React 18 "set state in render" pattern) — that is the case here.
   if (!open && date !== today) {
-    // setState während des Renderings ist in React 18 offiziell erlaubt, wenn
-    // es idempotent und ohne Bedingung erfolgt (s. React 18 "set state in
-    // render"-Pattern). Hier ist es beides.
     setDate(today);
   }
 
@@ -356,28 +382,28 @@ function DatePickerSheet({
       open={open}
       onClose={onClose}
       size="md"
-      title="Tagesbild anlegen"
-      subtitle="Wähle einen Konsum-Tag (Tagesgrenze 03:30)"
+      title={t('trends.picker.title')}
+      subtitle={t('trends.picker.subtitle')}
       footer={
         <div className="flex items-center gap-3">
           <div className="flex-1 text-sm text-ink-muted">
             <span className="tabular font-semibold text-ink">{date || '—'}</span>
           </div>
           <Button variant="ghost" onClick={onClose}>
-            Abbrechen
+            {t('action.cancel')}
           </Button>
           <Button
             icon={<Plus size={18} />}
             disabled={!/^\d{4}-\d{2}-\d{2}$/.test(date)}
             onClick={() => onPick(date)}
           >
-            Anlegen
+            {t('action.add')}
           </Button>
         </div>
       }
     >
       <div className="space-y-4 pt-1">
-        <Field label="Datum">
+        <Field label={t('trends.picker.field.date')}>
           <TextInput
             type="date"
             value={date}
@@ -388,14 +414,14 @@ function DatePickerSheet({
 
         <div>
           <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-ink-faint mb-2 pl-1">
-            Schnellauswahl
+            {t('trends.picker.quickHeading')}
           </p>
           <div className="flex flex-wrap gap-2">
             {[
-              quick('Heute', today),
-              quick('Gestern', yesterday),
-              quick('Vorgestern', dayBefore),
-              quick('Vor 7 Tagen', sevenAgo),
+              quick(t('trends.picker.quick.today'), today),
+              quick(t('trends.picker.quick.yesterday'), yesterday),
+              quick(t('trends.picker.quick.dayBefore'), dayBefore),
+              quick(t('trends.picker.quick.sevenAgo'), sevenAgo),
             ].map((q) => (
               <button
                 key={q.date}
@@ -416,11 +442,12 @@ function DatePickerSheet({
           </div>
         </div>
 
-        <p className="text-[12px] text-ink-faint leading-relaxed">
-          Hinweis: Der Server arbeitet mit <strong>Konsum-Tagen</strong> (Tagesgrenze 03:30).
-          Eine Eingabe 00:00–03:29 zählt zum Vortag — beim Eintragen der
-          Nachtmedikation wird der passende Konsum-Tag automatisch gesetzt.
-        </p>
+        <p
+          className="text-[12px] text-ink-faint leading-relaxed"
+          // The picker note embeds a <strong> around "consumption day" for
+          // emphasis; HTML is intentional and lives inside the catalog string.
+          dangerouslySetInnerHTML={{ __html: t('trends.picker.note') }}
+        />
       </div>
     </Sheet>
   );

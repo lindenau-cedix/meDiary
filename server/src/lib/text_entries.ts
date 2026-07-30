@@ -2,39 +2,39 @@ import { toLocalISO } from './time.js';
 import { nameKey } from './names.js';
 
 /**
- * Freitext-Parser für `POST /api/intakes/text` — wandelt mehrzeiligen Text in
- * Einnahme-Einträge um. Format pro Zeile (siehe SAMPLES.md im Projekt-Root):
+ * Free-text parser for `POST /api/intakes/text` — turns multi-line text into
+ * intake entries. Format per line (see SAMPLES.md in the project root):
  *
  *   (DD.MM(.YYYY)) XX:XX: BB ZZ (AAA), YY ZZ (AAA) und YY ZZ (AAA)
  *   jetzt: BB ZZ (AAA)
  *   BB ZZ (AAA)
  *
- * Legende: BB = Substanz, ZZ = Menge, AAA = Notiz (in Klammern, optional).
- * Ohne Zeit oder mit `jetzt:` gilt die aktuelle Zeit; ohne Jahr das aktuelle
- * Jahr, ohne Datum der heutige Tag. Jede Zeile wird einzeln verarbeitet;
- * innerhalb einer Zeile trennen Kommas und „ und " die Einträge.
+ * Legend: BB = substance, ZZ = amount, AAA = note (in parens, optional).
+ * Without a time or with `jetzt:` the current time applies; without a year
+ * the current year; without a date today. Each line is processed on its own;
+ * within a line, commas and "und" separate the entries.
  *
- * Menge und Substanz dürfen in BEIDER Reihenfolge stehen: „Pregabalin 100 mg"
- * ebenso wie „100mg Pregabalin" / „200 mg Lorazepam". Ein bereits bekannter
- * Substanzname (`knownKeys`) dient dabei als Trennung zwischen Menge und Notiz;
- * ist der Name noch unbekannt, wird ein führendes Mengen-Token als Menge und
- * der Rest als (neuer) Substanzname gelesen.
+ * Amount and substance may appear in EITHER order: "Pregabalin 100 mg" as
+ * well as "100mg Pregabalin" / "200 mg Lorazepam". An already-known substance
+ * name (`knownKeys`) acts as the boundary between amount and note; if the
+ * name is still unknown, a leading amount token is read as the amount and
+ * the rest as a (new) substance name.
  *
- * Eine Zeile ist atomar: enthält sie auch nur einen unparsbaren Eintrag,
- * wird die GANZE Zeile als Fehler gemeldet (nichts daraus angelegt) — so
- * kann der Aufrufer die korrigierte Zeile gefahrlos erneut senden, ohne die
- * übrigen Einträge der Zeile zu duplizieren.
+ * A line is atomic: if it contains even one unparseable entry, the WHOLE
+ * line is reported as an error (nothing is created from it) — so the caller
+ * can safely resend the corrected line without duplicating the other entries
+ * of that line.
  */
 
 export interface ParsedTextEntry {
-  /** 1-basierte Zeilennummer im Eingabetext. */
+  /** 1-based line number in the input text. */
   line: number;
   substanceName: string;
-  /** Menge wie im Text angegeben; null = Standarddosis/DEFAULTS greifen. */
+  /** Amount as specified in the text; null = default dose / DEFAULTS apply. */
   amount: string | null;
-  /** Notiz aus der Klammer; null = DEFAULTS-Notiz greift. */
+  /** Note from the parentheses; null = DEFAULTS note applies. */
   note: string | null;
-  /** Lokale Wanduhrzeit "YYYY-MM-DDTHH:mm:ss". */
+  /** Local wall-clock time "YYYY-MM-DDTHH:mm:ss". */
   takenAt: string;
 }
 
@@ -47,19 +47,19 @@ export interface TextLineError {
 export interface ParsedText {
   entries: ParsedTextEntry[];
   errors: TextLineError[];
-  /** Anzahl nicht-leerer Zeilen im Eingabetext. */
+  /** Number of non-empty lines in the input text. */
   lineCount: number;
 }
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** Kalender-echte Datumsprüfung (lehnt z. B. 31.02. ab). */
+/** Calendar-true date check (rejects e.g. 2026-02-31). */
 function isValidDate(year: number, month: number, day: number): boolean {
   const d = new Date(year, month - 1, day);
   return d.getFullYear() === year && d.getMonth() === month - 1 && d.getDate() === day;
 }
 
-/** Relative Tagesangaben als Offset (in Tagen) zum heutigen Datum. */
+/** Relative day expressions as offset (in days) from today. */
 const RELATIVE_DAYS: Record<string, number> = {
   vorgestern: -2,
   gestern: -1,
@@ -69,24 +69,24 @@ const RELATIVE_DAYS: Record<string, number> = {
 };
 
 /**
- * Liest das optionale Zeit-Präfix einer Zeile und liefert Einnahme-Zeitpunkt
- * plus den Rest (die Einträge). Unterstützt wird, jeweils mit optionalem
- * Trenn-Doppelpunkt vor den Einträgen:
+ * Reads the optional time prefix of a line and returns the intake timestamp
+ * plus the remainder (the entries). Each of the following is supported, with
+ * an optional separating colon before the entries:
  *
- *  - `jetzt:` → aktuelle Zeit
- *  - Datum: `DD.MM`, `DD.MM.`, `DD.MM.YYYY` oder relativ
+ *  - `jetzt:` → current time
+ *  - Date: `DD.MM`, `DD.MM.`, `DD.MM.YYYY`, or relative
  *    (`heute`/`gestern`/`vorgestern`/`morgen`/`übermorgen`)
- *  - Uhrzeit: `HH:MM`, `HH:MM Uhr`, `HH.MM Uhr`, `HH Uhr` (nur Stunde),
- *    optional eingeleitet mit `um` (z. B. „um 20 Uhr")
- *  - Datum und Uhrzeit kombiniert (`12.06. 20 Uhr:`, `gestern 8:30 Uhr:`)
+ *  - Time: `HH:MM`, `HH:MM Uhr`, `HH.MM Uhr`, `HH Uhr` (hour only),
+ *    optionally introduced with `um` (e.g. "um 20 Uhr")
+ *  - Date and time combined (`12.06. 20 Uhr:`, `gestern 8:30 Uhr:`)
  *
- * Ohne Datum gilt der heutige Tag, ohne Jahr das aktuelle, ohne Uhrzeit die
- * aktuelle Uhrzeit (Datum-only) bzw. die explizit genannte. Ohne erkennbares
- * Präfix gilt `now` und die ganze Zeile sind Einträge.
+ * Without a date, today applies; without a year, the current year; without a
+ * time, the current time (date-only) or the explicitly stated time. Without
+ * any recognizable prefix, `now` applies and the whole line is entries.
  *
- * Die `Uhr`-Erkennung trennt Punkt-Zeiten von Datumsangaben: `8.30 Uhr` ist
- * eine Zeit (08:30), `12.06.` ein Datum — eine gepunktete Zahl direkt vor
- * `Uhr` wird daher nie als Datum gelesen.
+ * The `Uhr` recognition separates dotted times from dates: `8.30 Uhr` is a
+ * time (08:30), `12.06.` is a date — a dotted number immediately before
+ * `Uhr` is therefore never read as a date.
  */
 function parsePrefix(line: string, now: Date): { takenAt: string; rest: string } {
   let rest = line;
@@ -99,7 +99,7 @@ function parsePrefix(line: string, now: Date): { takenAt: string; rest: string }
   let day = now.getDate();
   let hasDate = false;
 
-  // --- Datum: relativ (gestern/heute/…) ODER numerisch DD.MM(.YYYY) ---
+  // --- Date: relative (gestern/heute/…) OR numeric DD.MM(.YYYY) ---
   const rel = /^(vorgestern|gestern|heute|übermorgen|morgen)\b[\s:]*/i.exec(rest);
   if (rel) {
     const offset = RELATIVE_DAYS[rel[1].toLocaleLowerCase('de')];
@@ -111,20 +111,20 @@ function parsePrefix(line: string, now: Date): { takenAt: string; rest: string }
     rest = rest.slice(rel[0].length);
   } else {
     const dm = /^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?\.?(?=[\s:]|$)/.exec(rest);
-    // Eine gepunktete Zahl direkt vor „Uhr" ist eine Uhrzeit, kein Datum.
+    // A dotted number directly before "Uhr" is a time, not a date.
     if (dm && !/^\s*uhr\b/i.test(rest.slice(dm[0].length))) {
       day = Number(dm[1]);
       month = Number(dm[2]);
       year = dm[3] ? Number(dm[3]) : now.getFullYear();
       if (!isValidDate(year, month, day)) {
-        throw new Error(`Ungültiges Datum: „${dm[0].trim().replace(/[.:]+$/, '')}"`);
+        throw new Error(`Invalid date: "${dm[0].trim().replace(/[.:]+$/, '')}"`);
       }
       hasDate = true;
       rest = rest.slice(dm[0].length);
     }
   }
 
-  // --- Uhrzeit: HH:MM (Uhr), HH.MM Uhr, HH Uhr — optional mit „um" ---
+  // --- Time: HH:MM (Uhr), HH.MM Uhr, HH Uhr — optionally preceded by "um" ---
   const afterDate = rest.replace(/^\s*/, '');
   const um = /^um\s+/i.exec(afterDate);
   const timeStr = um ? afterDate.slice(um[0].length) : afterDate;
@@ -149,17 +149,17 @@ function parsePrefix(line: string, now: Date): { takenAt: string; rest: string }
   let hasTime = false;
   if (timeMatch && hour !== null) {
     if (hour > 23 || (minute ?? 0) > 59) {
-      throw new Error(`Ungültige Uhrzeit: „${timeMatch[0].trim()}"`);
+      throw new Error(`Invalid time: "${timeMatch[0].trim()}"`);
     }
     hasTime = true;
-    rest = timeStr.slice(timeMatch[0].length); // „um" und Datum-Trenner verworfen
+    rest = timeStr.slice(timeMatch[0].length); // "um" and date separator discarded
   }
 
   if (!hasDate && !hasTime) return { takenAt: toLocalISO(now), rest: rest.trim() };
 
-  // Ein bekräftigendes Tageszeit-Wort hinter der Zeit ("21 Uhr nachts:",
-  // "8:30 morgens:", "gestern abend") ist Präfix-Residuum, keine Notiz —
-  // zusammen mit dem optionalen Trenn-Doppelpunkt entfernen.
+  // A corroborative time-of-day word after the time ("21 Uhr nachts:",
+  // "8:30 morgens:", "gestern abend") is prefix residue, not a note —
+  // remove along with the optional separating colon.
   rest = rest
     .replace(
       /^\s*(?:morgens?|vormittags?|mittags?|nachmittags?|abends?|nachts?|nacht|früh|frueh|tagsüber|tagsueber)\b/i,
@@ -168,7 +168,7 @@ function parsePrefix(line: string, now: Date): { takenAt: string; rest: string }
     .replace(/^\s*:?\s*/, '')
     .trim();
 
-  // Datum ohne Uhrzeit → aktuelle Uhrzeit an jenem Tag; explizite Zeit → :00 Sek.
+  // Date without time → current time of that day; explicit time → :00 seconds.
   const h = hasTime ? (hour as number) : now.getHours();
   const mi = hasTime ? (minute as number) : now.getMinutes();
   const sec = hasTime ? 0 : now.getSeconds();
@@ -179,16 +179,17 @@ function parsePrefix(line: string, now: Date): { takenAt: string; rest: string }
 }
 
 /**
- * Trennt die Eintrags-Liste einer Zeile an Kommas und „ und " — aber nur auf
- * Klammertiefe 0 (Notizen dürfen Kommas/und enthalten) und nicht bei
- * Dezimal-Kommas (Ziffer,Ziffer wie "0,5 ml").
+ * Splits the entry list of a line at commas and "und" — but only at
+ * parenthesis depth 0 (notes may contain commas/"und") and not at decimal
+ * commas (digit,digit like "0,5 ml").
  *
- * Kommas trennen immer; „ und " trennt nur, wenn der rechte Teil tatsächlich
- * wie ein neuer Eintrag beginnt (führende Menge oder bekannter Substanzname).
- * So bleibt „Lithium 600 mg morgens und abends" EIN Eintrag (Notiz
- * „morgens und abends"), während „Elvanse 30 mg und Lithium 600 mg" zwei
- * Einträge bleibt. (Erkennt der Parser den Substanznamen rechts nicht, weil er
- * neu ist, fällt „und X" in die Notiz — Klammern erzwingen die Trennung.)
+ * Commas always split; "und" only splits when the right side actually starts
+ * like a new entry (leading amount or a known substance name). That way
+ * "Lithium 600 mg morgens und abends" stays ONE entry (note
+ * "morgens und abends"), while "Elvanse 30 mg und Lithium 600 mg" stays
+ * two entries. (If the parser does not recognise the substance name on the
+ * right because it is new, "und X" falls into the note — parentheses force
+ * the split.)
  */
 function splitEntries(s: string, knownKeys: Set<string>): string[] {
   type Seg = { sep: 'start' | 'comma' | 'und'; text: string };
@@ -222,19 +223,19 @@ function splitEntries(s: string, knownKeys: Set<string>): string[] {
   }
   segs.push({ sep, text: buf });
 
-  // „ und "-Segmente, die NICHT wie ein neuer Eintrag beginnen, gehören zur
-  // Notiz des vorigen Eintrags und werden wieder angehängt.
+  // "und"-segments that do NOT start like a new entry belong to the previous
+  // entry's note and are appended again.
   const parts: string[] = [];
   for (const seg of segs) {
-    // Separator-Artefakte (führendes/abschließendes „und" aus „und X", „X und",
-    // „und und X") sowie reine Satzzeichen-Segmente (".", "...", "?") verwerfen.
+    // Discard separator artefacts (leading/trailing "und" from "und X",
+    // "X und", "und und X") and pure-punctuation segments (".", "...", "?").
     const text = seg.text
       .trim()
       .replace(/^und\s+/i, '')
       .replace(/\s+und$/i, '')
       .trim();
     if (!text || /^und$/i.test(text)) continue;
-    if (!/[\p{L}\p{N}]/u.test(text)) continue; // kein Buchstabe/Ziffer → kein Eintrag
+    if (!/[\p{L}\p{N}]/u.test(text)) continue; // no letter/digit → no entry
     if (seg.sep === 'und' && parts.length > 0 && !looksLikeEntryStart(text, knownKeys)) {
       parts[parts.length - 1] = `${parts[parts.length - 1]} und ${text}`;
     } else {
@@ -245,12 +246,12 @@ function splitEntries(s: string, knownKeys: Set<string>): string[] {
 }
 
 /**
- * Heuristik: Beginnt das Textstück einen eigenen Eintrag (für die Frage, ob
- * „ und " trennt)? Wahr, wenn es IRGENDWO eine Mengenangabe (Dosis) enthält
- * oder einen bekannten Substanznamen — sonst (z. B. „abends", „bei Bedarf",
- * „morgens und abends") ist es Notiz-Fortsetzung. Die Menge-irgendwo-Regel
- * fängt unbekannte Substanzen mit Menge-danach ein („Hustensaft 10 ml"), die
- * sonst als ganzer Eintrag in der Notiz verschwinden würden.
+ * Heuristic: Does the text fragment start its own entry (the question of
+ * whether "und" splits)? True if it contains an amount (dose) ANYWHERE or
+ * a known substance name — otherwise (e.g. "abends", "bei Bedarf",
+ * "morgens und abends") it is note continuation. The "amount anywhere" rule
+ * catches unknown substances with amount-after ("Hustensaft 10 ml") that
+ * would otherwise vanish into the note as a whole entry.
  */
 function looksLikeEntryStart(seg: string, knownKeys: Set<string>): boolean {
   const tokens = seg.split(/\s+/).filter(Boolean);
@@ -261,43 +262,44 @@ function looksLikeEntryStart(seg: string, knownKeys: Set<string>): boolean {
 
 const startsWithDigit = (token: string) => /^[\d½¼¾]/.test(token);
 
-// Mess-Einheiten — sowohl direkt an einer Zahl geklebt ("100mg") als auch als
-// eigenständiges Token ("200 mg" → das „mg").
+// Measurement units — either glued directly to a number ("100mg") or as a
+// standalone token ("200 mg" → the "mg").
 const MEASURE_UNITS = 'mg|µg|mcg|ug|g|kg|ml|l|cl|dl|ie|iu|mmol|mol|%';
 const MEASURE_UNIT = new RegExp(`^(?:${MEASURE_UNITS})$`, 'i');
 
-// Zahl-Kern eines Mengen-Tokens: Ganzzahl/Dezimal "300"/"0,5", Bruch "1/2",
-// Bereich "1-2" oder Unicode-Bruch "½/¼/¾". Eine Mess-Einheit darf direkt
-// dahinter kleben ("100mg", "½mg", "0,5ml").
+// Number core of an amount token: integer/decimal "300"/"0,5", fraction "1/2",
+// range "1-2", or Unicode fraction "½/¼/¾". A measurement unit may be glued
+// directly behind ("100mg", "½mg", "0,5ml").
 const NUMBER_CORE = '(?:\\d+(?:[.,/]\\d+)?(?:-\\d+(?:[.,/]\\d+)?)?|[½¼¾])';
 const AMOUNT_TOKEN = new RegExp(`^${NUMBER_CORE}(?:${MEASURE_UNITS})?$`, 'i');
 
-// Darreichungs-/Zähl-Wörter, die NACH einer Zahl eine Menge bilden
+// Dosage/count words that, AFTER a number, form an amount
 // ("2 Tabletten", "1/2 Tablette", "3 Tropfen", "20 Hub", "1 TL").
 const DOSE_WORD =
   /^(?:tablette|tabletten|tab|tabs|tbl|tablet|tablets|kapsel|kapseln|kaps|kap|cap|caps|tropfen|trpf|gtt|stück|stücke|stk|sprühstoß|sprühstöße|sprühstösse|spruehstoss|pumpstoß|pumpstöße|hub|hübe|pille|pillen|dragee|dragees|drg|teelöffel|esslöffel|messlöffel|tl|el|msp|prise|prisen|beutel|sachet|sachets|ampulle|ampullen|amp|einheit|einheiten)$/i;
 
 /**
- * Reines Mengen-Token: "300", "0,5", "1/2", "½", Bereich "1-2" oder
- * Zahl+Einheit "100mg" / Bruch+Einheit "½mg".
+ * Pure amount token: "300", "0,5", "1/2", "½", range "1-2", or
+ * number+unit "100mg" / fraction+unit "½mg".
  */
 function isAmountToken(token: string): boolean {
   return AMOUNT_TOKEN.test(token);
 }
 
-/** Eigenständiges Einheiten-Token nach einer Zahl: Mess-Einheit oder Dosis-Wort. */
+/** Standalone unit token after a number: measurement unit or dose word. */
 const isUnitToken = (token: string) => MEASURE_UNIT.test(token) || DOSE_WORD.test(token);
 
-// Adverbiale Notiz-Wörter (Tageszeit / Einnahme-Hinweis), die nie Bestandteil
-// eines Substanznamens sind. Steht so ein Wort am ENDE eines (sonst unbekannten)
-// Namens, gehört es in die Notiz: „Pregabalin morgens" → Name „Pregabalin",
-// Notiz „morgens". Bei bekannten Namen erledigt das schon der Anker (Case 1).
+// Adverbial note words (time of day / intake hint) that never belong to a
+// substance name. If such a word appears at the END of an (otherwise
+// unknown) name, it goes into the note: "Pregabalin morgens" → name
+// "Pregabalin", note "morgens". For known names the anchor (Case 1) handles
+// this already.
 const NOTE_WORD =
   /^(?:morgens?|vormittags?|mittags?|nachmittags?|abends?|nachts?|nacht|früh|frueh|spät|spaet|tagsüber|tagsueber|nüchtern|nuechtern)$/i;
 
 /**
- * Trennt abschließende adverbiale Notiz-Wörter vom Namen ab. Bewahrt mindestens
- * ein Namens-Token (ein Eintrag aus nur Notiz-Wörtern bleibt unverändert).
+ * Strips trailing adverbial note words off the name. Preserves at least one
+ * name token (an entry made of only note words is left unchanged).
  */
 function peelTrailingNoteWords(name: string): { name: string; note: string | null } {
   const toks = name.split(/\s+/).filter(Boolean);
@@ -308,10 +310,10 @@ function peelTrailingNoteWords(name: string): { name: string; note: string | nul
 }
 
 /**
- * Länge der führenden Mengen-Token-Folge (Zahl-Tokens, dann Einheiten-Tokens);
- * 0 = keine Menge am Anfang. Damit lässt sich eine Menge am Anfang einer
- * Token-Folge von einer nachfolgenden Frei-Notiz trennen ("150 mg morgens" →
- * Menge "150 mg", Notiz "morgens").
+ * Length of the leading amount-token run (number tokens, then unit tokens);
+ * 0 = no amount at the start. Lets us separate an amount at the start of a
+ * token sequence from a trailing free-text note ("150 mg morgens" →
+ * amount "150 mg", note "morgens").
  */
 function leadingAmountRun(tokens: string[]): number {
   if (tokens.length === 0 || !isAmountToken(tokens[0])) return 0;
@@ -322,10 +324,10 @@ function leadingAmountRun(tokens: string[]): number {
 }
 
 /**
- * Erste maximale Mengen-Folge IRGENDWO in den Tokens (Zahl-Tokens, dann
- * Einheiten-Tokens) als {start, len} — oder null. Damit lässt sich eine Dosis
- * herausziehen, die hinter einem Beschreiber steht ("retard 450 mg" →
- * Menge "450 mg"; "morgens 150 mg" → Menge "150 mg").
+ * First maximal amount run ANYWHERE in the tokens (number tokens, then
+ * unit tokens) as {start, len} — or null. Lets us pull out a dose that
+ * stands behind a descriptor ("retard 450 mg" → amount "450 mg";
+ * "morgens 150 mg" → amount "150 mg").
  */
 function findAmountRun(tokens: string[]): { start: number; len: number } | null {
   for (let i = 0; i < tokens.length; i++) {
@@ -339,8 +341,8 @@ function findAmountRun(tokens: string[]): { start: number; len: number } | null 
 }
 
 /**
- * True, wenn die Tokens GENAU eine Mengenangabe bilden — führende Mengen-Tokens,
- * gefolgt von optionalen Einheiten-Tokens, ohne Rest. "100mg" / "200 mg" /
+ * True if the tokens form EXACTLY one amount — leading amount tokens,
+ * followed by optional unit tokens, with no remainder. "100mg" / "200 mg" /
  * "0,5 ml" / "500 mg" ✓ — "nüchtern" / "3 HTP" ✗.
  */
 function isQuantityRun(tokens: string[]): boolean {
@@ -352,11 +354,11 @@ function isQuantityRun(tokens: string[]): boolean {
 }
 
 /**
- * True, wenn die Span-Tokens mit einer KLAREN Mengenangabe beginnen ("100mg …"
- * oder "200 mg …"). Solche Spannen sind keine echten Substanznamen, sondern
- * Altlasten des früheren Fehlverhaltens (die Menge landete im Namen, z. B. eine
- * Substanz „100mg Pregabalin"). Eine bloße Zahl am Anfang ("5 HTP", "Omega 3")
- * ist KEIN Mengen-Präfix.
+ * True if the span tokens start with a CLEAR amount ("100mg …" or
+ * "200 mg …"). Such spans are not real substance names but legacy
+ * artefacts of an earlier misbehaviour (the amount ended up in the name,
+ * e.g. a substance "100mg Pregabalin"). A bare number at the start
+ * ("5 HTP", "Omega 3") is NOT an amount prefix.
  */
 function isAmountLed(tokens: string[]): boolean {
   if (tokens.length === 0 || !isAmountToken(tokens[0])) return false;
@@ -365,11 +367,11 @@ function isAmountLed(tokens: string[]): boolean {
 }
 
 /**
- * Sucht die LÄNGSTE zusammenhängende Token-Folge, deren Name zu einer bereits
- * bekannten Substanz gehört (`knownKeys`, via `nameKey` normalisiert). Spannen,
- * die mit einer Mengenangabe beginnen ("100mg …"), werden übersprungen — so
- * gewinnt "Pregabalin" gegen eine evtl. vorhandene Altlast-Substanz
- * "100mg Pregabalin". Liefert {start, end} (inklusiv) oder null.
+ * Finds the LONGEST contiguous token span whose name belongs to a known
+ * substance (`knownKeys`, normalized via `nameKey`). Spans that start with
+ * an amount ("100mg …") are skipped — so "Pregabalin" wins over a possible
+ * legacy substance "100mg Pregabalin". Returns {start, end} (inclusive) or
+ * null.
  */
 function findKnownSpan(tokens: string[], knownKeys: Set<string>): { start: number; end: number } | null {
   if (knownKeys.size === 0) return null;

@@ -21,16 +21,16 @@ import { METRICS } from './metrics.js';
 import { dreamText, minimaxAvailable, minimaxModel } from './minimax.js';
 
 /**
- * Nächtliches „Träumen": die tägliche, sachlich-medizinische Auswertung, die
- * `system_prompt.md` beschreibt. Der „Traum" IST diese Auswertung — träumerisch
- * sind nur Branding/Präsentation, nicht der Text.
+ * Nightly "dreaming": the daily, factual-medical assessment described by
+ * `system_prompt.md`. The "dream" IS this assessment — only branding/
+ * presentation is dream-like, not the text itself.
  *
- * Ablauf je Tag:
- *   1. Ziel-Tag bestimmen (Default: Konsum-Vortag, siehe `dreamTargetDate`).
- *   2. Kontext zusammenbauen (Plan Soll/Ist, außerplanmäßig, Wachzeit, Notizen,
- *      11 Skalen, die Träume der letzten 7 Tage) — `gatherDreamContext`.
- *   3. system_prompt.md (frisch von Platte) + Kontext an MiniMax M3 schicken.
- *   4. Ergebnis als Traum unter dem Ziel-Tag speichern (idempotent, PK = date).
+ * Flow per day:
+ *   1. Determine target day (default: consumption-day before, see `dreamTargetDate`).
+ *   2. Assemble context (plan target/actual, off-plan, wake time, notes,
+ *      11 scales, the dreams of the last 7 days) — `gatherDreamContext`.
+ *   3. Send system_prompt.md (fresh from disk) + context to MiniMax M3.
+ *   4. Save the result as the dream for the target day (idempotent, PK = date).
  */
 
 const longFmt = new Intl.DateTimeFormat('de-DE', {
@@ -39,20 +39,243 @@ const longFmt = new Intl.DateTimeFormat('de-DE', {
   month: 'long',
   year: 'numeric',
 });
+const longFmtEn = new Intl.DateTimeFormat('en-US', {
+  weekday: 'long',
+  day: 'numeric',
+  month: 'long',
+  year: 'numeric',
+});
 function dayDate(date: string): Date {
   return new Date(`${date}T12:00:00`);
 }
-function labelOf(date: string): string {
-  return longFmt.format(dayDate(date));
+function labelOf(date: string, lang: 'de' | 'en' = 'de'): string {
+  return (lang === 'en' ? longFmtEn : longFmt).format(dayDate(date));
 }
 
-// ───────────────────────── Ziel-Tag ─────────────────────────
+/**
+ * Language-dependent labels for the prompt-scaffolding headings and short
+ * hint texts in `gatherDreamContext`. NOT a translation of user/domain data
+ * (substance names, intake notes, METRIC labels, Hermes reports) — those
+ * stay unchanged in whatever language they were recorded in.
+ *
+ * Only the structural headings and German inline sentences currently hard-
+ * coded in the file get switched. New sections must be added in both
+ * languages.
+ */
+type DreamLang = 'de' | 'en';
+const DREAM_LABELS: Record<DreamLang, {
+  header: string;
+  intro: (label: string, date: string) => string;
+  sections: {
+    planCurrent: string;
+    planEmpty: string;
+    planVersionPrefix: (from: string, note: string | null) => string;
+    plannedDoses: string;
+    noPlannedDoses: string;
+    actualIntakes: string;
+    noIntakes: string;
+    intakeLine: (time: string, substance: string, amount: string, note: string) => string;
+    offPlan: string;
+    noOffPlan: string;
+    wake: string;
+    wakeFull: (first: string, last: string, hours: string) => string;
+    wakeHint: string;
+    wakeLast: (time: string) => string;
+    wakeFirst: (time: string) => string;
+    noWake: string;
+    notes: string;
+    assessmentNote: (text: string) => string;
+    intakeNote: (time: string, substance: string, text: string) => string;
+    noNotes: string;
+    scales: string;
+    scalesNoAssessment: string;
+    scalesPolarityHint: string;
+    scalesPolarityPositive: string;
+    scalesPolarityNegative: string;
+    scaleLine: (label: string, value: string | number, pol: string) => string;
+    report: string;
+    reportNone: string;
+    reportSource: (source: string) => string;
+    previousHeader: string;
+    previousHint: string;
+    previousEmpty: string;
+    previousDay: (label: string, date: string) => string;
+    recentReportsHeader: string;
+    recentReportsHint: string;
+    recentReportsEmpty: string;
+    recentReportDay: (label: string, date: string, source: string) => string;
+    closing: (label: string) => string;
+  };
+  slots: { morning: string; noon: string; evening: string; night: string };
+  noFixedDose: string;
+}> = {
+  de: {
+    header: '# Tagesdaten für die Auswertung',
+    intro: (label, date) =>
+      `Ziel-Tag (Konsum-Tag, Tagesgrenze 03:30 Europe/Berlin): **${label}** (${date}).`,
+    sections: {
+      planCurrent: '## Aktueller Medikationsplan',
+      planEmpty: 'Kein Medikationsplan hinterlegt.',
+      planVersionPrefix: (from, note) => `(gültig ab ${from}${note ? ` — ${note}` : ''})`,
+      plannedDoses: '## Geplante Einnahmen (Soll)',
+      noPlannedDoses: 'Keine festen geplanten Dosen.',
+      actualIntakes: '## Tatsächliche Einnahmen (Ist)',
+      noIntakes: 'Keine Einnahmen erfasst.',
+      intakeLine: (time, substance, amount, note) =>
+        `- ${time} ${substance}${amount}${note}`,
+      offPlan: '## Außerplanmäßiger Konsum',
+      noOffPlan: 'Kein außerplanmäßiger Konsum erfasst (alle Einnahmen stehen im Plan).',
+      wake: '## Wachzeit',
+      wakeFull: (first, last, hours) =>
+        `Aufwachen bis Einschlafen: ${first}–${last} (≈ ${hours} h wach).`,
+      wakeHint:
+        ' Hinweis: Das ist die **Wachspanne** (Aufstehen bis Zubettgehen), NICHT Bildschirm-/PC-Zeit.',
+      wakeLast: (time) => `Letzter Wach-Moment: ${time} (kein Aufwach-Zeitpunkt erfasst).`,
+      wakeFirst: (time) => `Erster Wach-Moment: ${time} (kein Einschlaf-Zeitpunkt erfasst).`,
+      noWake: 'Keine Wachzeit-Daten für diesen Tag.',
+      notes: '## Tagesnotizen (Freitext)',
+      assessmentNote: (text) => `Tagesbild-Notiz: ${text}`,
+      intakeNote: (time, substance, text) => `(${time} ${substance}) ${text}`,
+      noNotes: 'Keine Notizen.',
+      scales: '## Tagesskalen (1–10)',
+      scalesNoAssessment: 'Kein Tagesbild erfasst.',
+      scalesPolarityHint:
+        '(Polarität in Klammern: ↑günstig = höher ist besser, ↑belastend = höher ist schlechter.)',
+      scalesPolarityPositive: '↑günstig',
+      scalesPolarityNegative: '↑belastend',
+      scaleLine: (label, value, pol) => `- ${label}: ${value} (${pol})`,
+      report: '## Tagesbericht des Hermes-Agents',
+      reportNone:
+        'Kein Tagesbericht für diesen Tag (Cron läuft erst um 03:30 — wenn er fehlt, lief der Agent nicht oder die Zustellung schlug fehl).',
+      reportSource: (source) => `(Quelle: ${source})`,
+      previousHeader: '## Deine letzten 7 Auswertungen',
+      previousHint:
+        'Lies sie und vermeide Wiederholungen (siehe Anti-Wiederholung im System-Prompt): bestätige/widerlege/verfeinere offene Hypothesen, bring mind. eine genuin neue Beobachtung.',
+      previousEmpty: '_Noch keine früheren Auswertungen vorhanden._',
+      previousDay: (label, date) => `### ${label} (${date})`,
+      recentReportsHeader: '## Tagesberichte des Hermes-Agents (jüngste 7 Tage)',
+      recentReportsHint:
+        'Was der Hermes-Agent an diesen Tagen getan hat (Coding, Cron-Läufe, Deploys, Fehler). ' +
+        'Beziehe dich auf Muster daraus, wenn sie für die Auswertung relevant sind.',
+      recentReportsEmpty: '_Noch keine früheren Tagesberichte vorhanden._',
+      recentReportDay: (label, date, source) => `### ${label} (${date})${source ? ` — ${source}` : ''}`,
+      closing: (label) =>
+        `Erstelle nun die Auswertung für **${label}** gemäß deinen Vorgaben (Rolle, Epistemik, Anti-Wiederholung, Ausgabeformat).`,
+    },
+    slots: { morning: 'morgens', noon: 'mittags', evening: 'abends', night: 'nachts' },
+    noFixedDose: '— keine feste Tagesdosis',
+  },
+  en: {
+    header: '# Daily data for evaluation',
+    intro: (label, date) =>
+      `Target day (consumption day, day boundary 03:30 Europe/Berlin): **${label}** (${date}).`,
+    sections: {
+      planCurrent: '## Current medication plan',
+      planEmpty: 'No medication plan on file.',
+      planVersionPrefix: (from, note) => `(effective from ${from}${note ? ` — ${note}` : ''})`,
+      plannedDoses: '## Planned intakes (target)',
+      noPlannedDoses: 'No fixed planned doses.',
+      actualIntakes: '## Actual intakes (actual)',
+      noIntakes: 'No intakes recorded.',
+      intakeLine: (time, substance, amount, note) =>
+        `- ${time} ${substance}${amount}${note}`,
+      offPlan: '## Off-plan consumption',
+      noOffPlan: 'No off-plan consumption recorded (every intake is on the plan).',
+      wake: '## Wake time',
+      wakeFull: (first, last, hours) =>
+        `Wake to sleep: ${first}–${last} (≈ ${hours} h awake).`,
+      wakeHint:
+        ' Note: this is the **waking span** (getting up to going to bed), NOT screen/PC time.',
+      wakeLast: (time) => `Last waking moment: ${time} (no wake-up time recorded).`,
+      wakeFirst: (time) => `First waking moment: ${time} (no sleep time recorded).`,
+      noWake: 'No wake-time data for this day.',
+      notes: '## Daily notes (free text)',
+      assessmentNote: (text) => `Assessment note: ${text}`,
+      intakeNote: (time, substance, text) => `(${time} ${substance}) ${text}`,
+      noNotes: 'No notes.',
+      scales: '## Daily scales (1–10)',
+      scalesNoAssessment: 'No daily assessment recorded.',
+      scalesPolarityHint:
+        '(Polarity in brackets: ↑favourable = higher is better, ↑burden = higher is worse.)',
+      scalesPolarityPositive: '↑favourable',
+      scalesPolarityNegative: '↑burden',
+      scaleLine: (label, value, pol) => `- ${label}: ${value} (${pol})`,
+      report: "## Hermes agent's daily report",
+      reportNone:
+        "No daily report for this day (cron only runs at 03:30 — if it is missing, the agent did not run or delivery failed).",
+      reportSource: (source) => `(source: ${source})`,
+      previousHeader: '## Your last 7 evaluations',
+      previousHint:
+        'Read them and avoid repetition (see anti-repetition in the system prompt): confirm/reject/refine open hypotheses, and add at least one genuinely new observation.',
+      previousEmpty: '_No earlier evaluations yet._',
+      previousDay: (label, date) => `### ${label} (${date})`,
+      recentReportsHeader: "## Hermes agent's daily reports (most recent 7 days)",
+      recentReportsHint:
+        "What the Hermes agent did on these days (coding, cron runs, deploys, errors). " +
+        'Refer to patterns from these when relevant to the evaluation.',
+      recentReportsEmpty: '_No earlier daily reports yet._',
+      recentReportDay: (label, date, source) => `### ${label} (${date})${source ? ` — ${source}` : ''}`,
+      closing: (label) =>
+        `Now produce the evaluation for **${label}** per your instructions (role, epistemology, anti-repetition, output format).`,
+    },
+    slots: { morning: 'morning', noon: 'noon', evening: 'evening', night: 'night' },
+    noFixedDose: '— no fixed daily dose',
+  },
+};
+
+/** Returns the slot description of a plan item in the configured language. */
+function planSlotsLang(item: PlanItemRow, lang: DreamLang): string {
+  const slots = DREAM_LABELS[lang].slots;
+  const parts: string[] = [];
+  if (item.morning) parts.push(`${slots.morning} ${item.morning}`);
+  if (item.noon) parts.push(`${slots.noon} ${item.noon}`);
+  if (item.evening) parts.push(`${slots.evening} ${item.evening}`);
+  if (item.night) parts.push(`${slots.night} ${item.night}`);
+  return parts.join(', ') || DREAM_LABELS[lang].noFixedDose;
+}
 
 /**
- * Konsum-Tag, über den heute Nacht geträumt wird = Konsum-Vortag
- * (`consumptionDay(jetzt) − 1`). Um 04:20 ist der gerade vergangene Tag der
- * Vortag; genau dessen Daten (inkl. Nachtmedikation/Tagesbild, die per
- * 03:30-Grenze zum Vortag zählen) sind vollständig. Analog zum Habit-Endpoint.
+ * Sets the language directive for the model. Appended BEFORE the context to
+ * the system prompt, so `system_prompt.md` (read-only) remains the persona
+ * source and the language switch lives centrally in the code.
+ *
+ * Phrased twice (DE/EN), so the model reliably reads the directive even when
+ * the surrounding system prompt is in the other language.
+ */
+function languageDirective(lang: 'de' | 'en'): string {
+  if (lang === 'en') {
+    return [
+      '',
+      '## Output language (mandatory)',
+      '',
+      'Respond ONLY in English. Every heading, sentence and value you write must be in English —',
+      'even though parts of the user-supplied context below may still be in German (substance',
+      "names, intake notes, the user's own daily notes, the Hermes agent's report, etc.).",
+      'Those are user/domain data you READ — your WRITTEN output stays English.',
+      'Do NOT translate quoted user data; leave it as-is.',
+    ].join('\n');
+  }
+  return [
+    '',
+    '## Ausgabesprache (verbindlich)',
+    '',
+    'Antworte AUSSCHLIESSLICH auf Deutsch. Jede Überschrift, jeder Satz und jeder',
+    'Wert, den du schreibst, muss auf Deutsch sein — auch wenn Teile des unten',
+    'gelieferten Kontexts (Substanznamen, Einnahme-Notizen, eigene Tagesnotizen,',
+    'Hermes-Bericht …) auf Englisch sein können. Das sind Nutzer-/Domain-Daten,',
+    'die du LIEST — dein OUTPUT bleibt Deutsch. Zitierte Nutzerdaten NICHT',
+    'übersetzen, sondern unverändert lassen.',
+  ].join('\n');
+}
+
+// ───────────────────────── Target day ─────────────────────────
+
+/**
+ * Consumption day about which tonight's dream is generated = consumption
+ * day before (`consumptionDay(now) − 1`). At 04:20 the day just past is the
+ * day before; precisely its data (including night medication / daily
+ * assessment, which the 03:30 boundary assigns to the previous day) is
+ * complete. Analogous to the habit endpoint.
  */
 export function dreamTargetDate(now: string = nowLocalISO()): string {
   const today = consumptionDay(now);
@@ -61,9 +284,9 @@ export function dreamTargetDate(now: string = nowLocalISO()): string {
   return dateOf(toLocalISO(d));
 }
 
-// ───────────────────────── Kontext sammeln ─────────────────────────
+// ───────────────────────── Gather context ─────────────────────────
 
-/** Wand­uhr-Bereich [date 03:30, date+1 03:29:59], der genau Konsum-Tag `date` abdeckt. */
+/** Wall-clock range [date 03:30, date+1 03:29:59] covering exactly consumption day `date`. */
 function consumptionRange(date: string): { start: string; end: string } {
   const next = new Date(`${date}T12:00:00`);
   next.setDate(next.getDate() + 1);
@@ -78,85 +301,86 @@ function intakesForDay(date: string): IntakeRow[] {
     .all(start, end) as IntakeRow[];
 }
 
-/** "HH:MM" aus lokalem Datetime-String. */
+/** "HH:MM" from a local datetime string. */
 function clock(iso: string): string {
   return iso.slice(11, 16);
 }
-/** "HH:MM" aus Unix-Sekunden (lokale Zeit). */
+/** "HH:MM" from unix seconds (local time). */
 function clockUnix(unix: number): string {
   const d = new Date(unix * 1000);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** Beschreibung der Plan-Dosierung eines Items über die Tages-Slots. */
+/** Description of a plan item's dosing across the day slots (German legacy). */
 function planSlots(item: PlanItemRow): string {
-  const parts: string[] = [];
-  if (item.morning) parts.push(`morgens ${item.morning}`);
-  if (item.noon) parts.push(`mittags ${item.noon}`);
-  if (item.evening) parts.push(`abends ${item.evening}`);
-  if (item.night) parts.push(`nachts ${item.night}`);
-  return parts.join(', ') || '— keine feste Tagesdosis';
+  return planSlotsLang(item, 'de');
 }
 
 export interface DreamContext {
   date: string;
   label: string;
-  /** Zusammengebauter User-Inhalt (Markdown) für das Modell. */
+  /** Assembled user content (markdown) for the model. */
   prompt: string;
-  /** Diagnose: hatte der Tag überhaupt Inhalt (Einnahmen/Tagesbild/Wachzeit)? */
+  /** Diagnostic: did the day have any content at all (intakes/assessment/wake time)? */
   hasContent: boolean;
 }
 
 /**
- * Baut den strukturierten Kontext (deutsches Markdown) für die Auswertung des
- * Konsum-Tages `date`. Vollständigkeit vor Kürzung (M3 hat großes Kontextfenster).
+ * Builds the structured context (English markdown) for evaluating consumption
+ * day `date`. Completeness over brevity (M3 has a large context window).
  *
- * Eingelesen werden (in dieser Reihenfolge): Medikationsplan (Soll),
- * Einnahmen (Ist), außerplanmäßiger Konsum, Wachzeit, Tagesnotizen,
- * 11 Tagesskalen, **Tagesbericht des Hermes-Agents (siehe /api/report/new)**,
- * die 7 jüngsten Träume und die 7 jüngsten Agent-Berichte.
+ * Read in (this order): medication plan (target), intakes (actual), off-plan
+ * consumption, wake time, daily notes, 11 daily scales, **Hermes agent's
+ * daily report (see /api/report/new)**, the 7 most recent dreams, and the
+ * 7 most recent agent reports.
  */
-export function gatherDreamContext(date: string): DreamContext {
+export function gatherDreamContext(date: string, lang: 'de' | 'en' = 'de'): DreamContext {
+  const L = DREAM_LABELS[lang];
+  const localLabel = labelOf(date, lang);
   const lines: string[] = [];
-  lines.push(`# Tagesdaten für die Auswertung`);
+  lines.push(L.header);
   lines.push('');
-  lines.push(`Ziel-Tag (Konsum-Tag, Tagesgrenze 03:30 Europe/Berlin): **${labelOf(date)}** (${date}).`);
+  lines.push(L.intro(localLabel, date));
   lines.push('');
 
-  // ── Medikationsplan (zum Ziel-Tag wirksam) ──
+  // ── Medication plan (effective for target day) ──
   const version = planVersionAt(date);
   const planItems = version ? planItemsFor(version.id) : [];
-  lines.push(`## Aktueller Medikationsplan`);
+  lines.push(L.sections.planCurrent);
   if (planItems.length === 0) {
-    lines.push('Kein Medikationsplan hinterlegt.');
+    lines.push(L.sections.planEmpty);
   } else {
-    if (version) lines.push(`(gültig ab ${version.effective_from}${version.note ? ` — ${version.note}` : ''})`);
+    if (version) lines.push(L.sections.planVersionPrefix(version.effective_from, version.note));
     for (const it of planItems) {
       const strength = it.strength ? ` ${it.strength}` : '';
       const reason = it.reason ? ` · Grund: ${it.reason}` : '';
       const notes = it.notes ? ` · ${it.notes}` : '';
-      lines.push(`- ${it.substance_name}${strength}: ${planSlots(it)}${reason}${notes}`);
+      // Slot description is also rendered in the target language.
+      const slotsText = planSlotsLang(it, lang);
+      const reasonEn = it.reason ? ` · Reason: ${it.reason}` : '';
+      const reasonLocalized = lang === 'en' ? reasonEn : reason;
+      lines.push(`- ${it.substance_name}${strength}: ${slotsText}${reasonLocalized}${notes}`);
     }
   }
   lines.push('');
 
-  // ── Einnahmen des Tages ──
+  // ── Day's intakes ──
   const intakes = intakesForDay(date);
   const planKeys = new Set(planItems.map((p) => nameKey(p.substance_name)));
 
-  lines.push(`## Geplante Einnahmen (Soll)`);
+  lines.push(L.sections.plannedDoses);
   const plannedDosed = planItems.filter((p) => p.morning || p.noon || p.evening || p.night);
   if (plannedDosed.length === 0) {
-    lines.push('Keine festen geplanten Dosen.');
+    lines.push(L.sections.noPlannedDoses);
   } else {
-    for (const it of plannedDosed) lines.push(`- ${it.substance_name}: ${planSlots(it)}`);
+    for (const it of plannedDosed) lines.push(`- ${it.substance_name}: ${planSlotsLang(it, lang)}`);
   }
   lines.push('');
 
-  lines.push(`## Tatsächliche Einnahmen (Ist)`);
+  lines.push(L.sections.actualIntakes);
   if (intakes.length === 0) {
-    lines.push('Keine Einnahmen erfasst.');
+    lines.push(L.sections.noIntakes);
   } else {
     for (const it of intakes) {
       const amount = it.amount ? ` ${it.amount}` : '';
@@ -166,11 +390,11 @@ export function gatherDreamContext(date: string): DreamContext {
   }
   lines.push('');
 
-  // ── Außerplanmäßiger Konsum (Substanzen, die nicht im Plan stehen) ──
+  // ── Off-plan consumption (substances not in the plan) ──
   const offPlan = intakes.filter((it) => !planKeys.has(nameKey(it.substance_name)));
-  lines.push(`## Außerplanmäßiger Konsum`);
+  lines.push(L.sections.offPlan);
   if (offPlan.length === 0) {
-    lines.push('Kein außerplanmäßiger Konsum erfasst (alle Einnahmen stehen im Plan).');
+    lines.push(L.sections.noOffPlan);
   } else {
     for (const it of offPlan) {
       const amount = it.amount ? ` ${it.amount}` : '';
@@ -180,43 +404,44 @@ export function gatherDreamContext(date: string): DreamContext {
   }
   lines.push('');
 
-  // ── Wachzeit ──
+  // ── Wake time ──
   const habit = db.prepare(`SELECT * FROM daily_habits WHERE date = ?`).get(date) as HabitRow | undefined;
-  lines.push(`## Wachzeit`);
+  lines.push(L.sections.wake);
   if (habit && (habit.wake_first_unix != null || habit.wake_last_unix != null)) {
     const first = habit.wake_first_unix;
     const last = habit.wake_last_unix;
     if (first != null && last != null) {
       const hours = Math.max(0, (last - first) / 3600);
-      lines.push(
-        `Aufwachen bis Einschlafen: ${clockUnix(first)}–${clockUnix(last)} (≈ ${hours.toFixed(1)} h wach). ` +
-          `Hinweis: Das ist die **Wachspanne** (Aufstehen bis Zubettgehen), NICHT Bildschirm-/PC-Zeit.`,
-      );
+      lines.push(L.sections.wakeFull(clockUnix(first), clockUnix(last), hours.toFixed(1)) + L.sections.wakeHint);
     } else if (last != null) {
-      lines.push(`Letzter Wach-Moment: ${clockUnix(last)} (kein Aufwach-Zeitpunkt erfasst).`);
+      lines.push(L.sections.wakeLast(clockUnix(last)));
     } else if (first != null) {
-      lines.push(`Erster Wach-Moment: ${clockUnix(first)} (kein Einschlaf-Zeitpunkt erfasst).`);
+      lines.push(L.sections.wakeFirst(clockUnix(first)));
     }
   } else {
-    lines.push('Keine Wachzeit-Daten für diesen Tag.');
+    lines.push(L.sections.noWake);
   }
   lines.push('');
 
-  // ── Tagesnotizen (Freitext) ──
+  // ── Daily notes (free text) ──
   const assessment = db
     .prepare(`SELECT * FROM daily_assessments WHERE date = ?`)
     .get(date) as AssessmentRow | undefined;
   const intakeNotes = intakes.filter((it) => it.notes && it.notes.trim());
-  lines.push(`## Tagesnotizen (Freitext)`);
+  lines.push(L.sections.notes);
   const noteLines: string[] = [];
-  if (assessment?.note && assessment.note.trim()) noteLines.push(`Tagesbild-Notiz: ${assessment.note.trim()}`);
-  for (const it of intakeNotes) noteLines.push(`(${clock(it.taken_at)} ${it.substance_name}) ${it.notes!.trim()}`);
-  if (noteLines.length === 0) lines.push('Keine Notizen.');
+  if (assessment?.note && assessment.note.trim()) noteLines.push(L.sections.assessmentNote(assessment.note.trim()));
+  for (const it of intakeNotes) noteLines.push(L.sections.intakeNote(clock(it.taken_at), it.substance_name, it.notes!.trim()));
+  if (noteLines.length === 0) lines.push(L.sections.noNotes);
   else for (const n of noteLines) lines.push(`- ${n}`);
   lines.push('');
 
-  // ── 11 Tagesskalen ──
-  lines.push(`## Tagesskalen (1–10)`);
+  // ── 11 daily scales ──
+  // Scale labels (m.label) stay German domain identifiers — the app owner
+  // named them so and the statistics tab uses them identically; rerouting
+  // would decouple the dream context from the well-being tab. Instead, the
+  // polarity label is emitted in the target language.
+  lines.push(L.sections.scales);
   let scores: Record<string, number> = {};
   if (assessment) {
     try {
@@ -227,98 +452,92 @@ export function gatherDreamContext(date: string): DreamContext {
   }
   const hasScores = METRICS.some((m) => typeof scores[m.key] === 'number');
   if (!hasScores) {
-    lines.push('Kein Tagesbild erfasst.');
+    lines.push(L.sections.scalesNoAssessment);
   } else {
-    lines.push('(Polarität in Klammern: ↑günstig = höher ist besser, ↑belastend = höher ist schlechter.)');
+    lines.push(L.sections.scalesPolarityHint);
     for (const m of METRICS) {
       const v = scores[m.key];
-      const pol = m.polarity === 'positive' ? '↑günstig' : '↑belastend';
-      lines.push(`- ${m.label}: ${typeof v === 'number' ? v : '—'} (${pol})`);
+      const pol = m.polarity === 'positive' ? L.sections.scalesPolarityPositive : L.sections.scalesPolarityNegative;
+      lines.push(L.sections.scaleLine(m.label, typeof v === 'number' ? v : '—', pol));
     }
   }
   lines.push('');
 
-  // ── Tagesbericht des Hermes-Agents (POST /api/report/new, 03:30-Cron) ──
-  // Wird vom Hermes-Agent kurz nach Mitternacht eingeliefert und beschreibt,
-  // was der Agent an diesem Konsum-Tag getan hat (Coding-Sessions, Cron-Läufe,
-  // Deploys, Fehler …). Liefert zusätzlichen Kontext: welche Software-/Server-
-  // Aktivität mit den Skalen/Notizen des Tages zusammenfiel.
+  // ── Hermes agent's daily report (POST /api/report/new, 03:30 cron) ──
+  // Delivered by the Hermes agent shortly after midnight and describes what
+  // the agent did on this consumption day (coding sessions, cron runs,
+  // deploys, errors …). Supplies additional context: which software/server
+  // activity coincided with the day's scales/notes.
+  // The report itself is domain/user text and stays unchanged in whatever
+  // language it was delivered in; only the section heading is switched.
   const todayReport = reportFor(date);
-  lines.push(`## Tagesbericht des Hermes-Agents`);
+  lines.push(L.sections.report);
   if (!todayReport) {
-    lines.push('Kein Tagesbericht für diesen Tag (Cron läuft erst um 03:30 — wenn er fehlt, lief der Agent nicht oder die Zustellung schlug fehl).');
+    lines.push(L.sections.reportNone);
   } else {
-    if (todayReport.source) lines.push(`(Quelle: ${todayReport.source})`);
+    if (todayReport.source) lines.push(L.sections.reportSource(todayReport.source));
     lines.push(todayReport.report.trim());
   }
   lines.push('');
 
-  // ── Die 7 jüngsten Auswertungen (nicht zwingend 7 Kalendertage — leere
-  //    Tage erzeugen keinen Traum, daher können sie weiter zurückreichen). ──
+  // ── The 7 most recent evaluations (not necessarily 7 calendar days — empty
+  //    days generate no dream, so they can reach further back). ──
   const previous = dreamsBefore(date, 7);
-  lines.push(`## Deine letzten 7 Auswertungen`);
-  lines.push(
-    'Lies sie und vermeide Wiederholungen (siehe Anti-Wiederholung im System-Prompt): bestätige/widerlege/verfeinere offene Hypothesen, bring mind. eine genuin neue Beobachtung.',
-  );
+  lines.push(L.sections.previousHeader);
+  lines.push(L.sections.previousHint);
   lines.push('');
   if (previous.length === 0) {
-    lines.push('_Noch keine früheren Auswertungen vorhanden._');
+    lines.push(L.sections.previousEmpty);
   } else {
     for (const p of previous) {
-      lines.push(`### ${labelOf(p.date)} (${p.date})`);
+      lines.push(L.sections.previousDay(labelOf(p.date, lang), p.date));
       lines.push(p.content.trim());
       lines.push('');
     }
   }
   lines.push('');
 
-  // ── Die 7 jüngsten Hermes-Agent-Tagesberichte (analog zu den Träumen):
-  //    ermöglichen dem Modell, Muster zwischen Agent-Aktivität und Befinden
-  //    über die Woche hinweg zu sehen (Coding-Marathons, Deploy-Stress,
-  //    Server-Ausfälle …). ──
+  // ── The 7 most recent Hermes agent daily reports (analogous to dreams):
+  //    enable the model to spot patterns between agent activity and well-being
+  //    across the week (coding marathons, deploy stress, server outages …). ──
   const recentReports = reportsBefore(date, 7);
-  lines.push(`## Tagesberichte des Hermes-Agents (jüngste 7 Tage)`);
-  lines.push(
-    'Was der Hermes-Agent an diesen Tagen getan hat (Coding, Cron-Läufe, Deploys, Fehler). ' +
-      'Beziehe dich auf Muster daraus, wenn sie für die Auswertung relevant sind.',
-  );
+  lines.push(L.sections.recentReportsHeader);
+  lines.push(L.sections.recentReportsHint);
   lines.push('');
   if (recentReports.length === 0) {
-    lines.push('_Noch keine früheren Tagesberichte vorhanden._');
+    lines.push(L.sections.recentReportsEmpty);
   } else {
     for (const r of recentReports) {
-      lines.push(`### ${labelOf(r.date)} (${r.date})${r.source ? ` — ${r.source}` : ''}`);
+      lines.push(L.sections.recentReportDay(labelOf(r.date, lang), r.date, r.source ?? ''));
       lines.push(r.report.trim());
       lines.push('');
     }
   }
   lines.push('');
 
-  lines.push(
-    `Erstelle nun die Auswertung für **${labelOf(date)}** gemäß deinen Vorgaben (Rolle, Epistemik, Anti-Wiederholung, Ausgabeformat).`,
-  );
+  lines.push(L.sections.closing(localLabel));
 
   const hasContent = intakes.length > 0 || hasScores || habit != null || todayReport != null;
-  return { date, label: labelOf(date), prompt: lines.join('\n'), hasContent };
+  return { date, label: localLabel, prompt: lines.join('\n'), hasContent };
 }
 
-// ───────────────────────── system_prompt.md lesen ─────────────────────────
+// ───────────────────────── Read system_prompt.md ─────────────────────────
 
-/** Liest system_prompt.md frisch von Platte (kein Cache). Wirft, wenn nicht vorhanden. */
+/** Reads system_prompt.md fresh from disk (no cache). Throws if not present. */
 export function readSystemPrompt(): string {
   try {
     const txt = fs.readFileSync(config.dream.systemPromptPath, 'utf8').trim();
-    if (!txt) throw new Error('leer');
+    if (!txt) throw new Error('empty');
     return txt;
   } catch {
     throw new Error(
-      `system_prompt.md nicht gefunden/lesbar unter ${config.dream.systemPromptPath} ` +
-        `(DREAM_SYSTEM_PROMPT_PATH setzen, um den Pfad zu überschreiben).`,
+      `system_prompt.md not found/readable at ${config.dream.systemPromptPath} ` +
+        `(set DREAM_SYSTEM_PROMPT_PATH to override the path).`,
     );
   }
 }
 
-// ───────────────────────── Generierung ─────────────────────────
+// ───────────────────────── Generation ─────────────────────────
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -330,14 +549,14 @@ export interface GenerateDreamResult {
 }
 
 /**
- * Erzeugt (und speichert) den Traum für einen Konsum-Tag.
- *  - `date`: Ziel-Tag (Default `dreamTargetDate()`).
- *  - `force`: vorhandenen Traum überschreiben (sonst Idempotenz: skip).
- *  - `retries`: Anzahl zusätzlicher Versuche bei Netz-/API-Fehlern (Default 2 → 3 gesamt).
- *  - `signal`: optionaler AbortSignal.
+ * Generates (and saves) the dream for a consumption day.
+ *  - `date`: target day (default `dreamTargetDate()`).
+ *  - `force`: overwrite an existing dream (otherwise idempotent: skip).
+ *  - `retries`: number of additional attempts on network/API errors (default 2 → 3 total).
+ *  - `signal`: optional AbortSignal.
  *
- * Bei leerem Tag (keine Einnahmen/Tagesbild/Wachzeit) wird NICHT generiert
- * (`status:'empty'`) — es gäbe nichts auszuwerten und es spart API-Kosten.
+ * On an empty day (no intakes/assessment/wake time) generation is SKIPPED
+ * (`status:'empty'`) — there is nothing to evaluate and it saves API cost.
  */
 export async function generateDream(opts?: {
   date?: string;
@@ -345,23 +564,28 @@ export async function generateDream(opts?: {
   retries?: number;
   signal?: AbortSignal;
   now?: string;
+  /** Output language (default: config.aiLanguage). */
+  language?: 'de' | 'en';
 }): Promise<GenerateDreamResult> {
   const now = opts?.now ?? nowLocalISO();
   const date = opts?.date ?? dreamTargetDate(now);
   const force = opts?.force ?? false;
   const retries = opts?.retries ?? 2;
+  const language = opts?.language ?? config.aiLanguage;
 
   const existing = dreamFor(date);
   if (existing && !force) {
     return { date, status: 'skipped', dream: existing, attempts: 0 };
   }
 
-  const ctx = gatherDreamContext(date);
+  const ctx = gatherDreamContext(date, language);
   if (!ctx.hasContent) {
     return { date, status: 'empty', dream: existing, attempts: 0 };
   }
 
-  const system = readSystemPrompt();
+  // system_prompt.md stays the read-only persona source; the language
+  // directive is appended so the switch lives centrally in the code.
+  const system = readSystemPrompt() + '\n' + languageDirective(language);
 
   let lastError: Error | null = null;
   let attempts = 0;
@@ -373,24 +597,24 @@ export async function generateDream(opts?: {
       return { date, status: 'created', dream, attempts };
     } catch (e) {
       lastError = e as Error;
-      // Konfigurationsfehler (kein Key) und Token-Abbruch (gleiche Parameter →
-      // gleiches Ergebnis) sind nicht retry-bar.
+      // Configuration errors (no key) and token truncation (same parameters →
+      // same result) are not retryable.
       if (lastError.name === 'MinimaxNotConfiguredError' || lastError.name === 'MinimaxTruncatedError') break;
       if (attempt < retries) {
-        // Exponentielles Backoff: 2s, 6s, 18s … (datensparsames Logging).
+        // Exponential backoff: 2s, 6s, 18s … (data-minimal logging).
         const backoff = 2000 * Math.pow(3, attempt);
         console.warn(
-          `[dream] Versuch ${attempts} für ${date} fehlgeschlagen (${lastError.message}); ` +
-            `erneuter Versuch in ${Math.round(backoff / 1000)}s.`,
+          `[dream] attempt ${attempts} for ${date} failed (${lastError.message}); ` +
+            `retrying in ${Math.round(backoff / 1000)}s.`,
         );
         await sleep(backoff);
       }
     }
   }
-  throw lastError ?? new Error('Traum-Generierung fehlgeschlagen.');
+  throw lastError ?? new Error('Dream generation failed.');
 }
 
-/** `date` ± `delta` Tage als YYYY-MM-DD (lokal, robust über Monatsgrenzen). */
+/** `date` ± `delta` days as YYYY-MM-DD (local, safe across month boundaries). */
 function shiftDay(date: string, delta: number): string {
   const d = new Date(`${date}T12:00:00`);
   d.setDate(d.getDate() + delta);
@@ -405,18 +629,19 @@ export interface CatchUpResult {
 }
 
 /**
- * Holt fehlende Träume der jüngsten `days` Konsum-Tage nach. Behebt zwei Lücken:
- *  - **Neustart über das 04:20-Fenster hinweg** (Deploy/Reboot/Suspend): der
- *    einmal-pro-Tag-Timer plant nur den NÄCHSTEN Lauf, der heute verpasste Tag
- *    würde nie nachgeholt.
- *  - **Leerer Tag, der später Inhalt bekommt** (rückwirkende Einnahmen /
- *    nachgetragenes Tagesbild): am 04:20 war `hasContent=false` (status:'empty',
- *    nichts gespeichert), jetzt gäbe es etwas auszuwerten.
+ * Backfills missing dreams for the most recent `days` consumption days.
+ * Closes two gaps:
+ *  - **Restarts across the 04:20 window** (deploy/reboot/suspend): the
+ *    once-per-day timer only schedules the NEXT run; the day missed today
+ *    would never be backfilled.
+ *  - **Empty day that later gets content** (backfilled intakes / late
+ *    assessment): at 04:20 `hasContent=false` (status:'empty', nothing saved),
+ *    now there is something to evaluate.
  *
- * Idempotent & günstig: Tage mit vorhandenem Traum werden übersprungen, leere
- * Tage brechen VOR dem MiniMax-Call ab. Es entstehen nur API-Calls für Tage mit
- * Inhalt aber ohne Traum. Aufruf beim Serverstart (fire-and-forget, unter
- * `withDreamLock` serialisiert) — siehe `startDreamScheduler`.
+ * Idempotent & cheap: days with an existing dream are skipped, empty days
+ * abort BEFORE the MiniMax call. Only days with content but no dream incur
+ * API calls. Called on server start (fire-and-forget, serialized under
+ * `withDreamLock`) — see `startDreamScheduler`.
  */
 export async function catchUpDreams(opts?: { days?: number; now?: string }): Promise<CatchUpResult> {
   const now = opts?.now ?? nowLocalISO();
@@ -437,14 +662,14 @@ export async function catchUpDreams(opts?: { days?: number; now?: string }): Pro
       else result.skipped++;
     } catch (e) {
       result.failed++;
-      // Datensparsam: nur Tag + Meldung, keine Payloads.
-      console.error(`[dream] Catch-up für ${day} fehlgeschlagen: ${(e as Error).message}`);
+      // Data-minimal: only day + message, no payloads.
+      console.error(`[dream] catch-up for ${day} failed: ${(e as Error).message}`);
     }
   }
   return result;
 }
 
-/** True, wenn das nächtliche Träumen einsatzbereit ist (Key vorhanden). */
+/** True if the nightly dreaming is operational (key present). */
 export function dreamAvailable(): boolean {
   return minimaxAvailable();
 }

@@ -8,6 +8,7 @@ import { useToast } from './Toaster';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { useSubstances, useSubstanceMutations } from '../lib/queries';
+import { useT } from '../lib/i18n';
 import type { Substance } from '../lib/types';
 
 const SWATCHES = ['#5B8DB8', '#8E6BB0', '#D98E48', '#7EA46B', '#C9A14A', '#9C5C8A', '#5FA8A0', '#B5727A', '#6E8C6A', '#C2705A'];
@@ -23,6 +24,7 @@ interface FormState {
 const empty: FormState = { id: null, name: '', defaultDose: '', unit: '', color: SWATCHES[3], isNightMed: false };
 
 export function SubstanceManager({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useT();
   const toast = useToast();
   const [showArchived, setShowArchived] = useState(false);
   const { data: subs = [] } = useSubstances(true);
@@ -58,35 +60,38 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
       if (editing) await update.mutateAsync({ id: form.id!, body });
       else await create.mutateAsync(body);
       haptics.success();
-      toast.show({ message: editing ? 'Substanz aktualisiert' : 'Substanz angelegt', detail: body.name });
+      toast.show({
+        message: editing ? t('settings.substances.updated') : t('settings.substances.created'),
+        detail: body.name,
+      });
       setForm(empty);
     } catch (e) {
-      toast.show({ tone: 'warning', message: 'Fehler', detail: (e as Error).message });
+      toast.show({ tone: 'warning', message: t('settings.substances.errorTitle'), detail: (e as Error).message });
     }
   };
 
   const archive = async (s: Substance) => {
     await remove.mutateAsync({ id: s.id });
     haptics.medium();
-    toast.show({ message: 'Archiviert', detail: s.name });
+    toast.show({ message: t('settings.substances.archived'), detail: s.name });
     if (form.id === s.id) setForm(empty);
   };
   const restore = async (s: Substance) => {
     await update.mutateAsync({ id: s.id, body: { archived: false } });
-    toast.show({ message: 'Wiederhergestellt', detail: s.name });
+    toast.show({ message: t('settings.substances.restored'), detail: s.name });
   };
 
   return (
-    <Sheet open={open} onClose={onClose} size="lg" title="Substanzen" subtitle="Deine Liste zum Antippen">
+    <Sheet open={open} onClose={onClose} size="lg" title={t('settings.substances.title')} subtitle={t('settings.substances.subtitle')}>
       {/* Editor */}
       <div className="rounded-3xl bg-surface2/70 ring-1 ring-line p-4 space-y-3">
         <div className="flex items-center justify-between">
           <p className="font-sans text-sm font-semibold text-ink-muted">
-            {editing ? 'Substanz bearbeiten' : 'Neue Substanz'}
+            {editing ? t('settings.substances.editHeading') : t('settings.substances.newHeading')}
           </p>
           {editing && (
             <button onClick={() => setForm(empty)} className="press text-xs text-ink-faint inline-flex items-center gap-1">
-              <X size={13} /> abbrechen
+              <X size={13} /> {t('settings.substances.cancel')}
             </button>
           )}
         </div>
@@ -95,7 +100,7 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
           <SubstanceSeal name={form.name || '?'} color={form.color} size="lg" />
           <div className="flex-1">
             <TextInput
-              placeholder="Name, z. B. Quetiapin"
+              placeholder={t('settings.substances.namePlaceholder')}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
               autoFocus
@@ -104,16 +109,16 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
         </div>
 
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Standarddosis">
+          <Field label={t('settings.substances.defaultDose')}>
             <TextInput
-              placeholder="z. B. 150 mg"
+              placeholder={t('settings.substances.defaultDosePlaceholder')}
               value={form.defaultDose}
               onChange={(e) => setForm({ ...form, defaultDose: e.target.value })}
             />
           </Field>
-          <Field label="Einheit (optional)">
+          <Field label={t('settings.substances.unit')}>
             <TextInput
-              placeholder="mg, Tbl., IE …"
+              placeholder={t('settings.substances.unitPlaceholder')}
               value={form.unit}
               onChange={(e) => setForm({ ...form, unit: e.target.value })}
             />
@@ -121,7 +126,7 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
         </div>
 
         <div>
-          <p className="text-[13px] font-medium text-ink-muted pl-1 mb-2">Farbe</p>
+          <p className="text-[13px] font-medium text-ink-muted pl-1 mb-2">{t('settings.substances.color')}</p>
           <div className="flex flex-wrap gap-2.5">
             {SWATCHES.map((c) => (
               <button
@@ -135,7 +140,7 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
                   form.color === c && 'ring-2 ring-offset-2 ring-offset-surface ring-ink/40 scale-110',
                 )}
                 style={{ backgroundColor: c }}
-                aria-label={`Farbe ${c}`}
+                aria-label={t('settings.substances.colorAria', { color: c })}
               />
             ))}
           </div>
@@ -149,11 +154,11 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
           onClick={submit}
           disabled={!form.name.trim()}
         >
-          {editing ? 'Änderungen speichern' : 'Substanz hinzufügen'}
+          {editing ? t('settings.substances.saveChanges') : t('settings.substances.add')}
         </Button>
       </div>
 
-      {/* Liste */}
+      {/* List */}
       <div className="mt-5 space-y-1.5">
         {active.map((s) => (
           <div
@@ -170,16 +175,16 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
               </p>
               {s.defaultDose && <p className="text-xs text-ink-muted">{s.defaultDose}</p>}
             </button>
-            <button onClick={() => edit(s)} className="press grid place-items-center size-9 rounded-xl text-ink-faint hover:bg-surface2" aria-label="Bearbeiten">
+            <button onClick={() => edit(s)} className="press grid place-items-center size-9 rounded-xl text-ink-faint hover:bg-surface2" aria-label={t('settings.substances.editAria')}>
               <Pencil size={16} />
             </button>
-            <button onClick={() => archive(s)} className="press grid place-items-center size-9 rounded-xl text-ink-faint hover:bg-bad/10 hover:text-bad" aria-label="Archivieren">
+            <button onClick={() => archive(s)} className="press grid place-items-center size-9 rounded-xl text-ink-faint hover:bg-bad/10 hover:text-bad" aria-label={t('settings.substances.archiveAria')}>
               <Trash2 size={16} />
             </button>
           </div>
         ))}
         {active.length === 0 && (
-          <p className="text-center text-sm text-ink-muted py-6">Noch keine Substanzen — lege oben deine erste an.</p>
+          <p className="text-center text-sm text-ink-muted py-6">{t('settings.substances.emptyList')}</p>
         )}
       </div>
 
@@ -189,7 +194,9 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
             onClick={() => setShowArchived((v) => !v)}
             className="text-xs font-medium text-ink-faint hover:text-ink-muted"
           >
-            {showArchived ? 'Archivierte verbergen' : `Archivierte anzeigen (${archived.length})`}
+            {showArchived
+              ? t('settings.substances.archivedHide')
+              : t('settings.substances.archivedShow', { count: archived.length })}
           </button>
           {showArchived && (
             <div className="mt-2 space-y-1.5">
@@ -198,7 +205,7 @@ export function SubstanceManager({ open, onClose }: { open: boolean; onClose: ()
                   <SubstanceSeal name={s.name} color={s.color} size="sm" />
                   <span className="flex-1 text-sm text-ink-muted truncate">{s.name}</span>
                   <button onClick={() => restore(s)} className="press inline-flex items-center gap-1 text-xs text-primary">
-                    <RotateCcw size={13} /> wiederherstellen
+                    <RotateCcw size={13} /> {t('settings.substances.restore')}
                   </button>
                 </div>
               ))}

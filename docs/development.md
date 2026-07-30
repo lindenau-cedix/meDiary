@@ -1,89 +1,88 @@
-# meDiary — Entwicklung & Verifikation
+# meDiary — Development & Verification
 
-> Teil der meDiary-Projektdoku — Übersicht & Index in [CLAUDE.md](../CLAUDE.md).
+> Part of the meDiary project docs — overview & index in [CLAUDE.md](../CLAUDE.md).
 
-## Schnellstart & Kommandos
+## Quickstart & commands
 
 ```bash
-npm run install:all    # server/ und web/ installieren
-npm --prefix server run seed     # 6 Substanzen + 2 Plan-Versionen + Einnahmen
-npm run dev            # API :4000, Web :5173 (Proxy /api → 4000)
+npm run install:all    # install server/ and web/
+npm --prefix server run seed     # 6 substances + 2 plan versions + intakes
+npm run dev            # API :4000, web :5173 (proxy /api → 4000)
 ```
 
-Weitere Kommandos (kein Linter konfiguriert, kein Test-Runner — Verifikation
-siehe Rezepte unten):
+Additional commands (no linter configured, no test runner — verification
+see recipes below):
 
 ```bash
 npm --prefix server run build    # tsc → server/dist
-npm run start                    # node dist/index.js (vorher build)
+npm run start                    # node dist/index.js (build first)
 npm run build:web                # tsc --noEmit + vite build → web/dist
-npm run build                    # Web + Server bauen
-npm --prefix server run import               # Importer Dry-Run (liest import/)
-npm --prefix server run import -- --commit   # schreibt in die DB (--reset-imported ersetzt Importiertes)
-npm run cap:android              # Capacitor: android/ anlegen + syncen (in web/: cap:sync, cap:open)
+npm run build                    # build web + server
+npm --prefix server run import               # importer dry run (reads import/)
+npm --prefix server run import -- --commit   # writes to the DB (--reset-imported replaces imported data)
+npm run cap:android              # Capacitor: create android/ + sync (in web/: cap:sync, cap:open)
 ```
 
-Server-Konfiguration über Env/`.env` (`server/src/config.ts`): `PORT` (4000),
-`DB_PATH`, `DEFAULTS_PATH`, `WEB_DIST`. Defaults (wenn keine Env gesetzt):
+Server configuration via env / `.env` (`server/src/config.ts`): `PORT` (4000),
+`DB_PATH`, `DEFAULTS_PATH`, `WEB_DIST`. Defaults (when no env is set):
 - `DB_PATH` → `~/.local/share/mediary/data/mediary.db`
 - `DEFAULTS_PATH` → `~/.local/share/mediary/DEFAULTS.md`
-- `WEB_DIST` → wird nicht gesetzt (API läuft solo)
+- `WEB_DIST` → not set (API runs solo)
 
-**`.env`-Datei**: Vorlage in `.env.example`. Docker Compose liest `.env`
-optional ein; für lokale Node-Starts lädt der Server zusätzlich `server/.env`
-über `dotenv`. `.env` ist in `.gitignore`.
+**`.env` file:** template in `.env.example`. Docker Compose reads `.env`
+optionally; for local Node starts the server additionally loads `server/.env`
+via `dotenv`. `.env` is in `.gitignore`.
 
-**Docker-Deployment:**
+**Docker deployment:**
 ```bash
 docker compose up -d --build
 docker compose logs -f mediary
 ```
 
-Die produktive DB liegt im Repo-Root unter `./data/mediary.db`. Dieses
-Verzeichnis ist das Live-Datenverzeichnis und darf nicht für Tests benutzt
-werden.
+The production DB lives under `./data/mediary.db` in the repo root. This
+directory is the live data directory and must not be used for tests.
 
-## Verifikations-Rezepte (was man nach Änderungen prüfen sollte)
+## Verification recipes (what to check after changes)
 
-Nach jeder Änderung an Server oder Import-Logik:
+After every change to server or import logic:
 
 ```bash
-# 1. Bauen + Typcheck
-cd server && npx tsc --noEmit        # muss exit 0
-cd ../web && npx tsc --noEmit        # muss exit 0
+# 1. Build + typecheck
+cd server && npx tsc --noEmit        # must exit 0
+cd ../web && npx tsc --noEmit        # must exit 0
 
-# 2. E2E-Smoke gegen eine Scratch-DB in /tmp — niemals gegen ./data im
-#    Projekt-Root (Docker-Volume mit Live-Daten) oder server/data testen!
+# 2. E2E smoke against a scratch DB in /tmp — never against ./data in the
+#    project root (Docker volume with live data) or server/data!
 cd ../server && rm -rf /tmp/mediary-test && mkdir -p /tmp/mediary-test
 PORT=4011 DB_PATH=/tmp/mediary-test/mediary.db DEFAULTS_PATH=../DEFAULTS.md node_modules/.bin/tsx src/seed.ts
 PORT=4011 DB_PATH=/tmp/mediary-test/mediary.db DEFAULTS_PATH=../DEFAULTS.md node_modules/.bin/tsx src/index.ts &
 
-# DEFAULTS-Compliance:
+# DEFAULTS compliance:
 curl -sS http://localhost:4011/api/defaults/check | jq
 
-# Autovivifikation: ein Intake mit neuem Namen anlegen
+# Auto-vivification: create an intake with a new name
 curl -sS -X POST http://localhost:4011/api/intakes -H 'Content-Type: application/json' \
   -d '{"substanceName":"Mirtazapin","amount":"15 mg"}'
-# → createdSubstance: true, neue Substanz im /api/substances-Listing
+# → createdSubstance: true, new substance in /api/substances listing
 
-# DEFAULTS wirkt:
+# DEFAULTS takes effect:
 curl -sS -X POST http://localhost:4011/api/intakes -H 'Content-Type: application/json' \
-  -d '{"substanceId":<id-von-cbd-öl>}'
-# → notes wird aus DEFAULTS.md übernommen
+  -d '{"substanceId":<id-of-cbd-öl>}'
+# → notes are applied from DEFAULTS.md
 
-# Rückwirkende/zukünftige Plan-Version:
+# Retroactive / future plan version:
 curl -sS -X PUT http://localhost:4011/api/plan -H 'Content-Type: application/json' \
-  -d '{"effectiveFrom":"<gestern>","note":"rückwirkend","items":[{"substanceName":"Lithium","strength":"600 mg"}]}'
-# → sofort aktueller Plan; mit effectiveFrom in der Zukunft stattdessen:
-#   GET /api/plan → alte Version + upcoming[], GET /api/plan/at?date=<zukunft> → neue Version
+  -d '{"effectiveFrom":"<yesterday>","note":"retroactive","items":[{"substanceName":"Lithium","strength":"600 mg"}]}'
+# → immediately current plan; with effectiveFrom in the future instead:
+#   GET /api/plan → old version + upcoming[], GET /api/plan/at?date=<future> → new version
 
-# Freitext-Import (Server dafür mit CF_ACCESS_DISABLED=true starten):
+# Free-text import (start the server with CF_ACCESS_DISABLED=true for this):
 curl -sS -X POST http://localhost:4011/api/intakes/text -H 'Content-Type: application/json' \
   -d '{"text":"11.06.2026 08:30: Elvanse 30mg (nüchtern), Lithium 300 mg und Vitamin D 20000 IE\njetzt: Theanin"}'
-# → 201, verified:true, entries[] mit frisch aus der DB gelesenen Einträgen;
-#   dryRun:true im Body parst nur. Ohne CF_ACCESS_DISABLED/-Konfig → 503,
-#   mit CF_ACCESS_TEAM_DOMAIN+CF_ACCESS_AUD aber ohne/mit ungültigem JWT → 401.
+# → 201, verified:true, entries[] with entries freshly read from the DB;
+#   dryRun:true in the body only parses. Without CF_ACCESS_DISABLED / config → 503,
+#   with CF_ACCESS_TEAM_DOMAIN+CF_ACCESS_AUD but without/with invalid JWT → 401.
 
-# 3. Frontend-Bau
-cd ../web && node_modules/.bin/vite build   # dist/ entsteht
+# 3. Frontend build
+cd ../web && node_modules/.bin/vite build   # dist/ is created
 ```

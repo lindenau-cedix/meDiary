@@ -25,7 +25,7 @@ export const qk = {
   ingredients: () => ['ingredients'] as const,
 };
 
-// ---------- Substanzen ----------
+// ---------- Substances ----------
 export function useSubstances(includeArchived = false) {
   return useQuery({
     queryKey: qk.substances(includeArchived),
@@ -52,7 +52,7 @@ export function useSubstanceMutations() {
   };
 }
 
-// ---------- Einnahmen ----------
+// ---------- Intakes ----------
 export function useIntakes(params?: { from?: string; to?: string; substanceId?: number; limit?: number }) {
   return useQuery({ queryKey: qk.intakes(params), queryFn: () => api.intakes.list(params) });
 }
@@ -65,7 +65,7 @@ export function useIntakeMutations() {
       mutationFn: (b: IntakeInput) => api.intakes.create(b),
       onSuccess: (res) => {
         invalidate();
-        // Eine Begleitsubstanz (DEFAULTS "Mit:") kann eine neue Kachel angelegt haben
+        // A companion substance (DEFAULTS "Mit:") may have created a new tile.
         if (res.createdSubstance || res.companions?.some((c) => c.createdSubstance)) {
           qc.invalidateQueries({ queryKey: ['substances'] });
           qc.invalidateQueries({ queryKey: qk.compliance() });
@@ -77,7 +77,7 @@ export function useIntakeMutations() {
       onSuccess: invalidate,
     }),
     remove: useMutation({ mutationFn: (id: number) => api.intakes.remove(id), onSuccess: invalidate }),
-    // Mehrere Substanzen auf einmal (gleicher Zeitpunkt, je eigene Menge/Notiz).
+    // Multiple substances at once (same timestamp, each with its own amount/note).
     batch: useMutation({
       mutationFn: (b: { takenAt?: string; companions?: boolean; entries: IntakeBatchEntryInput[] }) =>
         api.intakes.batch(b),
@@ -89,12 +89,12 @@ export function useIntakeMutations() {
         }
       },
     }),
-    // Sammel-Eintrag aller Plan-Substanzen eines Slots ("Morgendmedis"/"Nachtmedis").
+    // Collective entry of all plan substances for a slot ("Morning meds"/"Night meds").
     planBatch: useMutation({
       mutationFn: (b: { slot: PlanSlot; takenAt?: string }) => api.intakes.planBatch(b),
       onSuccess: (res) => {
         invalidate();
-        // Eine Plan-Substanz ohne eigene Kachel kann neu angelegt worden sein.
+        // A plan substance without its own tile may have been created.
         if (res.entries.some((e) => e.createdSubstance)) {
           qc.invalidateQueries({ queryKey: ['substances'] });
           qc.invalidateQueries({ queryKey: qk.compliance() });
@@ -123,8 +123,9 @@ export function usePlan() {
 export function usePlanVersions() {
   return useQuery({ queryKey: qk.planVersions(), queryFn: () => api.plan.versions() });
 }
-/** Alle Plan-Versionen inklusive Items — für die zeitpunktgenaue „planmäßig"-
- *  Bewertung im Verlauf (jede Einnahme gegen die damals wirksame Version). */
+/** All plan versions including their items — for the time-accurate
+ *  "as planned" assessment in the history (each intake is matched against
+ *  the version effective at that point in time). */
 export function usePlanVersionsWithItems() {
   return useQuery({
     queryKey: qk.planVersionsWithItems(),
@@ -176,7 +177,7 @@ export function useSaveDefaults() {
     },
   });
 }
-/** Strukturierte Sections speichern (PUT /api/defaults/sections). */
+/** Save structured sections (PUT /api/defaults/sections). */
 export function useSaveDefaultsSections() {
   const qc = useQueryClient();
   return useMutation({
@@ -187,7 +188,7 @@ export function useSaveDefaultsSections() {
     },
   });
 }
-/** DEFAULTS-Compliance: welche Substanzen haben (k)einen Eintrag in DEFAULTS.md. */
+/** DEFAULTS compliance: which substances do (not) have an entry in DEFAULTS.md. */
 export function useCompliance(enabled = true) {
   return useQuery({ queryKey: qk.compliance(), queryFn: () => api.defaults.check(), enabled });
 }
@@ -195,7 +196,7 @@ export function useMetrics() {
   return useQuery({ queryKey: qk.metrics(), queryFn: () => api.metrics(), staleTime: Infinity });
 }
 
-// ---------- Tagebuch ----------
+// ---------- Diary ----------
 export function useDiaryNotes(params?: { from?: string; to?: string }) {
   return useQuery({ queryKey: qk.diaryNotes(params), queryFn: () => api.diary.notes(params) });
 }
@@ -218,12 +219,12 @@ export function useSaveDiary() {
   });
 }
 
-// ---------- Träume (nächtliche Auswertung) ----------
+// ---------- Dreams (nightly summary) ----------
 export function useDreams(params?: { from?: string; to?: string; limit?: number }) {
   return useQuery({ queryKey: qk.dreams(params), queryFn: () => api.dreams.list(params), staleTime: 30_000 });
 }
 
-// ---------- Traum-Zustellung (WhatsApp-Delivery-Log) ----------
+// ---------- Dream delivery (WhatsApp delivery log) ----------
 export function useDeliveries(params?: { dreamDate?: string; limit?: number }) {
   return useQuery({
     queryKey: qk.deliveries(params),
@@ -248,9 +249,9 @@ export function useWhatsappQr(enabled: boolean) {
   });
 }
 /**
- * Liste der WhatsApp-Empfänger. Wird vom Panel nur abgefragt, wenn der
- * Admin-Schalter aktiv ist — Nicht-Admins lösen damit nie eine
- * CF-Access-401-Welle aus.
+ * List of WhatsApp recipients. The panel only fetches when the admin
+ * toggle is enabled — non-admins therefore never trigger a wave of
+ * CF-Access 401s.
  */
 export function useWhatsappTargets(enabled: boolean) {
   return useQuery({
@@ -260,7 +261,7 @@ export function useWhatsappTargets(enabled: boolean) {
     staleTime: 30_000,
   });
 }
-/** Neuen Empfänger anlegen; invalidiert die Liste nach Erfolg. */
+/** Add a new recipient; invalidates the list on success. */
 export function useAddWhatsappTarget() {
   const qc = useQueryClient();
   return useMutation({
@@ -280,7 +281,7 @@ export function useRedeliverDream() {
   });
 }
 
-// ---------- Wirkstoff-Profile (KI, Statistik „Wirkstoff-Bilanz") ----------
+// ---------- Ingredient profiles (AI, "Compound balance" stats) ----------
 export function useIngredients() {
   return useQuery({ queryKey: qk.ingredients(), queryFn: () => api.ingredients.get(), staleTime: 60_000 });
 }
@@ -289,15 +290,15 @@ export function useAnalyzeIngredients() {
   return useMutation({
     mutationFn: (body: { scope?: 'missing' | 'all' } = {}) => api.ingredients.analyze(body),
     onSuccess: (res) => {
-      // Server liefert den frischen Zustand gleich mit → Cache direkt setzen,
-      // zusätzlich invalidieren für Konsistenz.
+      // Server returns the fresh state in the response — set the cache
+      // directly and additionally invalidate for consistency.
       qc.setQueryData(qk.ingredients(), res.state);
       qc.invalidateQueries({ queryKey: qk.ingredients() });
     },
   });
 }
 
-// ---------- Daten-Konsole (Chat with your data) ----------
+// ---------- Data console (Chat with your data) ----------
 export function useChatStatus() {
   return useQuery({ queryKey: ['chat', 'status'], queryFn: () => api.chat.status(), staleTime: 60_000 });
 }
@@ -310,9 +311,9 @@ export function useChangeSets(enabled = true) {
   });
 }
 /**
- * Anwenden/Undo/Verwerfen eines Change-Sets. Da die Konsole Einnahmen &
- * Substanzen verändert, wird nach Erfolg breit invalidiert (gesamte App), damit
- * Verlauf/Heute/Plan/Werte den neuen Stand zeigen.
+ * Apply / undo / discard a change set. Because the console mutates intakes
+ * and substances, we invalidate broadly on success so history/today/plan/
+ * trends all pick up the new state.
  */
 export function useChangeSetActions() {
   const qc = useQueryClient();

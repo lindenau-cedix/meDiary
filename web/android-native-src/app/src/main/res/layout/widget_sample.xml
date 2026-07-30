@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  RemoteViews-Layout für die 1×1-Kachel. RemoteViews unterstützt nur
-  eine eingeschränkte View-Auswahl (TextView, ImageView, FrameLayout,
-  LinearLayout, …). Die Hintergrundfarbe wird zur Laufzeit per
-  `setInt(R.id.widget_root, "setBackgroundColor", …)` gesetzt; die
-  rounded-corner-Form liegt in `widget_background.xml`.
+  RemoteViews layout for the 1×1 tile. RemoteViews supports only a limited
+  set of views (TextView, ImageView, FrameLayout, LinearLayout, and so on).
+  The background color is set at runtime with
+  `setInt(R.id.widget_root, "setBackgroundColor", …)`; the rounded-corner
+  shape is defined in `widget_background.xml`.
 
-  Zwei TextViews übereinander: Substanzname (bold, 11sp) und Menge
-  (9sp, leicht transparent). `maxLines=1` + `ellipsize=end` für sehr
-  lange Substanznamen.
+  Two stacked TextViews: substance name (bold, 11sp) and amount (9sp,
+  slightly transparent). `maxLines=1` + `ellipsize=end` handles very long
+  substance names.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"

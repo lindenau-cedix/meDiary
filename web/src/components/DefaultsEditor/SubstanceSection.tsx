@@ -5,20 +5,22 @@ import { Badge } from '../ui/feedback';
 import { cx } from '../../lib/cx';
 import { CompanionRow, CompanionAddButton } from './CompanionRow';
 import { haptics } from '../../lib/haptics';
+import { useT } from '../../lib/i18n';
 import type { DefaultsSection, DefaultsSectionCompanion } from '../../lib/types';
 
 interface SubstanceSectionProps {
   section: DefaultsSection;
-  /** Aktuelle Section-Schlüssel im Compliance-Bericht (gematchter `nameKey`-Style-Key). */
+  /** Current section key in the compliance report (matched `nameKey`-style key). */
   complianceKey?: string;
-  /** Substanz taucht im Compliance-Bericht unter "missing" auf? */
+  /** Does this substance appear under "missing" in the compliance report? */
   isMissing?: boolean;
   onChange: (next: DefaultsSection) => void;
   onRemove: () => void;
 }
 
-/** Formular für eine Substanz-Sektion: Name + Menge + Notiz + Mit:-Liste + Löschen. */
+/** Form for one substance section: name + amount + note + companion list + delete. */
 export function SubstanceSection({ section, complianceKey, isMissing, onChange, onRemove }: SubstanceSectionProps) {
+  const t = useT();
   const hasAny =
     !!section.amount ||
     !!section.note ||
@@ -40,7 +42,7 @@ export function SubstanceSection({ section, complianceKey, isMissing, onChange, 
   };
   const onDelete = () => {
     haptics.warning();
-    if (window.confirm(`Sektion "${section.name}" wirklich entfernen?`)) {
+    if (window.confirm(t('defaults.confirm.removeSection', { name: section.name }))) {
       onRemove();
     }
   };
@@ -58,11 +60,11 @@ export function SubstanceSection({ section, complianceKey, isMissing, onChange, 
           <FileText size={16} />
         </div>
         <div className="flex-1 min-w-0">
-          <Field label="Substanzname">
+          <Field label={t('defaults.field.substanceName')}>
             <TextInput
               value={section.name}
               onChange={(e) => onChange({ ...section, name: e.target.value })}
-              placeholder="z. B. Modafinil"
+              placeholder={t('defaults.field.substanceNamePlaceholder')}
               spellCheck={false}
               autoCapitalize="off"
             />
@@ -74,8 +76,8 @@ export function SubstanceSection({ section, complianceKey, isMissing, onChange, 
           size="md"
           icon={<Trash2 size={16} />}
           onClick={onDelete}
-          aria-label="Sektion löschen"
-          title="Sektion löschen"
+          aria-label={t('defaults.action.deleteAria')}
+          title={t('defaults.action.deleteTitle')}
         />
       </header>
 
@@ -83,30 +85,30 @@ export function SubstanceSection({ section, complianceKey, isMissing, onChange, 
         <div className="flex items-center gap-2 rounded-2xl bg-warn/10 px-3 py-2 text-xs text-warn">
           <AlertTriangle size={14} className="shrink-0" />
           <span>
-            Diese Substanz hat aktuell keinen Eintrag in DEFAULTS.md — beim Speichern wird die Liste ergänzt.
+            {t('defaults.compliance.missingWarning')}
           </span>
         </div>
       )}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Menge" hint="Optional. Wird beim Eintragen übernommen, wenn nicht selbst angegeben.">
+        <Field label={t('defaults.field.amount')} hint={t('defaults.field.amountHint')}>
           <TextInput
             value={section.amount ?? ''}
             onChange={(e) => onChange({ ...section, amount: e.target.value || null })}
-            placeholder="z. B. 100 mg"
+            placeholder={t('defaults.field.amountPlaceholder')}
             spellCheck={false}
           />
         </Field>
         <Field
-          label="Notiz"
-          hint="Optional. Wird beim Eintragen übernommen, wenn nicht selbst angegeben."
+          label={t('defaults.field.note')}
+          hint={t('defaults.field.amountHint')}
           className="sm:row-span-2"
         >
           <TextArea
             rows={3}
             value={section.note ?? ''}
             onChange={(e) => onChange({ ...section, note: e.target.value || null })}
-            placeholder="z. B. morgens, vor dem Frühstück"
+            placeholder={t('defaults.field.notePlaceholder')}
             spellCheck={false}
           />
         </Field>
@@ -114,8 +116,9 @@ export function SubstanceSection({ section, complianceKey, isMissing, onChange, 
 
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-xs text-ink-muted">
-          <span className="font-semibold uppercase tracking-wide">Mit:</span>
-          <span>Begleitstoffe, die automatisch miterfasst werden</span>
+          {/* "Mit:" is a parser token — never translated. */}
+          <span className="font-semibold uppercase tracking-wide">{t('defaults.companions.heading')}</span>
+          <span>{t('defaults.companions.subheading')}</span>
         </div>
         {section.companions.length > 0 && (
           <div className="space-y-2">
@@ -136,14 +139,14 @@ export function SubstanceSection({ section, complianceKey, isMissing, onChange, 
         <details className="rounded-2xl bg-surface2/40 ring-1 ring-line px-3 py-2 text-xs text-ink-muted">
           <summary className="cursor-pointer font-medium text-ink">
             <Badge tone="warn" className="mr-2 inline-flex">
-              NACH-/Vorbehalt
+              {t('defaults.prePost.badge')}
             </Badge>
-            Verlustfreie Kommentarzeilen ({section.preLines.length + section.postLines.length})
+            {t('defaults.prePost.summary', { count: section.preLines.length + section.postLines.length })}
           </summary>
           <div className="mt-2 space-y-2">
             {section.preLines.length > 0 && (
               <div>
-                <p className="text-[10px] uppercase tracking-wide text-ink-faint">Vor den Feldern</p>
+                <p className="text-[10px] uppercase tracking-wide text-ink-faint">{t('defaults.prePost.before')}</p>
                 <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap">
                   {section.preLines.join('\n')}
                 </pre>
@@ -151,14 +154,14 @@ export function SubstanceSection({ section, complianceKey, isMissing, onChange, 
             )}
             {section.postLines.length > 0 && (
               <div>
-                <p className="text-[10px] uppercase tracking-wide text-ink-faint">Nach den Feldern</p>
+                <p className="text-[10px] uppercase tracking-wide text-ink-faint">{t('defaults.prePost.after')}</p>
                 <pre className="font-mono text-[12px] leading-relaxed whitespace-pre-wrap">
                   {section.postLines.join('\n')}
                 </pre>
               </div>
             )}
             <p className="text-ink-faint text-[11px]">
-              Diese Zeilen werden im Raw-Editor unter „Erweitert" angezeigt und beim Speichern 1:1 übernommen.
+              {t('defaults.prePost.hint')}
             </p>
           </div>
         </details>

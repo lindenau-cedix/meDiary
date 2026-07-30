@@ -10,7 +10,9 @@ import { useToast } from '../components/Toaster';
 import { VBars, HBars, Punchcard, DaypartChart, DualAxis, type HBarItem, type PunchSelection } from '../components/charts';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
-import { METRICS } from '../lib/metrics';
+import { metricList } from '../lib/metrics';
+import { daypartList } from '../lib/plan';
+import { useT, type MessageKey } from '../lib/i18n';
 import { dateNDaysAgo, todayStr, formatDayLabel, formatDayShort, colorForName } from '../lib/format';
 import {
   useIntakes,
@@ -28,7 +30,7 @@ import {
   dailyDoseSeries,
   daypartDistribution,
   pearson,
-  correlationLabel,
+  correlationBucket,
   compoundReports,
   equivalentFor,
   formatNum,
@@ -39,7 +41,7 @@ import {
 } from '../lib/analytics';
 import type { Intake } from '../lib/types';
 
-/** Wirkstoff-spezifische Farben (Fallback: stabile Ableitung aus dem Schlüssel). */
+/** Compound-specific colours (fallback: stable derivation from the key). */
 const COMPOUND_COLORS: Record<string, string> = {
   caffeine: '#9C6B43',
   alcohol: '#7A5EA6',
@@ -55,16 +57,17 @@ function compoundColor(key: string): string {
 }
 
 const RANGES = [
-  { days: 7, label: '7 T' },
-  { days: 30, label: '30 T' },
-  { days: 90, label: '90 T' },
-  { days: 180, label: '180 T' },
+  { days: 7, label: '7 d' },
+  { days: 30, label: '30 d' },
+  { days: 90, label: '90 d' },
+  { days: 180, label: '180 d' },
 ];
 
-/** Stabiler Leer-Index für Einnahmen ohne wirksame Plan-Version. */
+/** Stable empty index for intakes that have no effective plan version. */
 const EMPTY_INDEX: Map<string, PlanDoseEntry> = new Map();
 
 export function StatistikScreen() {
+  const t = useT();
   const [range, setRange] = useState(30);
   const from = dateNDaysAgo(range + 1);
 
@@ -73,10 +76,20 @@ export function StatistikScreen() {
   const { data: assessments = [] } = useAssessments(from, todayStr());
   const { data: planVersions = [] } = usePlanVersionsWithItems();
 
+  // Labels that depend on the active locale — call them in render so a
+  // language switch produces fresh strings.
+  const metrics = useMemo(() => metricList(), []);
+  const dayparts = useMemo(() => daypartList(), []);
+  const daypartLabel = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const d of dayparts) m[d.key] = d.label;
+    return m;
+  }, [dayparts]);
+
   const days = useMemo(() => dayAxis(range), [range]);
   const daySet = useMemo(() => new Set(days), [days]);
-  // Auf das sichtbare Konsum-Tag-Fenster begrenzen (der Fetch holt bewusst
-  // einen Tag mehr, um die 03:30-Grenze abzudecken).
+  // Confine to the visible consumption-day window (the fetch deliberately
+  // covers one extra day to bridge the 03:30 boundary).
   const rangeIntakes = useMemo(() => intakes.filter((i) => daySet.has(i.date)), [intakes, daySet]);
   const byDate = useMemo(() => {
     const m = new Map<string, Intake[]>();
@@ -92,8 +105,8 @@ export function StatistikScreen() {
   const punch = useMemo(() => punchcard(rangeIntakes, substances, days), [rangeIntakes, substances, days]);
   const daypart = useMemo(() => daypartDistribution(rangeIntakes), [rangeIntakes]);
 
-  // ── Plan-Treue: jede Einnahme gegen die zu ihrem Zeitpunkt wirksame Version
-  // (Muster aus HistoryScreen). ──
+  // ── Plan adherence: every intake against the plan version effective at
+  // its time (pattern from HistoryScreen). ──
   const indexByVersion = useMemo(() => {
     const m = new Map<number, Map<string, PlanDoseEntry>>();
     for (const v of planVersions) m.set(v.versionId, planDoseIndex({ items: v.items }));
@@ -130,7 +143,7 @@ export function StatistikScreen() {
     return { daily, overall: allTotal ? planTotal / allTotal : null, hasPlan: planVersions.length > 0 };
   }, [days, byDate, indexForIntake, planVersions.length]);
 
-  // ── Auswahl-States ──
+  // ── Selection state ──
   const [selKey, setSelKey] = useState<string>('');
   const doseStat = rank.find((r) => r.key === selKey) ?? rank[0] ?? null;
   const [doseSel, setDoseSel] = useState<number | null>(null);
@@ -144,11 +157,11 @@ export function StatistikScreen() {
   const [punchSel, setPunchSel] = useState<PunchSelection | null>(null);
   const [punchExpanded, setPunchExpanded] = useState(false);
 
-  // ── Wohlbefinden-Korrelation ──
+  // ── Wellbeing correlation ──
   const [wellKey, setWellKey] = useState<string>('');
   const wellStat = rank.find((r) => r.key === wellKey) ?? rank[0] ?? null;
   const [metricKey, setMetricKey] = useState<string>('sleep_quality');
-  const metric = METRICS.find((m) => m.key === metricKey) ?? METRICS[0];
+  const metric = metrics.find((m) => m.key === metricKey) ?? metrics[0];
   const assessmentByDate = useMemo(() => new Map(assessments.map((a) => [a.date, a])), [assessments]);
 
   const wellData = useMemo(() => {
@@ -157,7 +170,7 @@ export function StatistikScreen() {
     const series = dailyDoseSeries(own, days);
     const dose = series.days.map((d) => d.value);
     const metricVals = days.map((d) => assessmentByDate.get(d)?.scores[metric.key] ?? null);
-    // Korrelation über Tage MIT Skalenwert (Dosis 0 an Nicht-Einnahme-Tagen ist real).
+    // Correlation across days WITH a score (dose 0 on no-intake days is real).
     const xs: number[] = [];
     const ys: number[] = [];
     metricVals.forEach((mv, i) => {
@@ -169,7 +182,7 @@ export function StatistikScreen() {
     return { series, dose, metricVals, r: pearson(xs, ys), pairs: xs.length };
   }, [wellStat, rangeIntakes, days, assessmentByDate, metric.key]);
 
-  // ── Wirkstoff-Bilanz (KI-Profile) ──
+  // ── Active-ingredient balance (AI profiles) ──
   const { data: ingredients } = useIngredients();
   const analyze = useAnalyzeIngredients();
   const toast = useToast();
@@ -186,17 +199,17 @@ export function StatistikScreen() {
     try {
       const res = await analyze.mutateAsync({ scope });
       haptics.success();
-      toast.show({
-        message: 'KI-Analyse fertig',
-        detail: `${res.analyzed} analysiert${res.errors.length ? ` · ${res.errors.length} Fehler` : ''}`,
-      });
+      const detail = res.errors.length
+        ? `${t('stats.toast.analysisDetail', { count: res.analyzed })}${t('stats.toast.analysisErrors', { count: res.errors.length })}`
+        : t('stats.toast.analysisDetail', { count: res.analyzed });
+      toast.show({ message: t('stats.toast.analysisDone'), detail });
     } catch (e) {
       haptics.warning();
-      toast.show({ message: 'Analyse fehlgeschlagen', detail: (e as Error).message });
+      toast.show({ message: t('stats.toast.analysisFailed'), detail: (e as Error).message });
     }
   };
 
-  // ── KPI-Werte ──
+  // ── KPI values ──
   const busiest = DAYPART_DEFS.reduce((a, b) => (daypart.counts[b.key] > daypart.counts[a.key] ? b : a), DAYPART_DEFS[0]);
 
   const rankItems: HBarItem[] = rank.slice(0, 12).map((s) => ({
@@ -204,7 +217,7 @@ export function StatistikScreen() {
     label: s.name,
     value: s.count,
     valueLabel: `${s.count}×`,
-    sub: `an ${s.daysUsed} ${s.daysUsed === 1 ? 'Tag' : 'Tagen'}`,
+    sub: s.daysUsed === 1 ? `1 ${t('stats.day.one')}` : t('stats.day.many', { count: s.daysUsed }),
     color: s.color,
     leading: <SubstanceSeal name={s.name} color={s.color} size="sm" />,
   }));
@@ -224,11 +237,13 @@ export function StatistikScreen() {
       })()
     : null;
 
+  const intakeAria = (name: string, count: number) => t('stats.chart.intakesAria', { name, count });
+
   return (
     <>
       <PageHeader
-        title="Statistik"
-        eyebrow={`${rangeIntakes.length} Einnahmen · ${rank.length} Substanzen · ${range} Tage`}
+        title={t('nav.stats')}
+        eyebrow={t('stats.header.eyebrow', { intakes: rangeIntakes.length, substances: rank.length, days: range })}
       />
 
       <RangeTabs range={range} onChange={setRange} />
@@ -238,30 +253,38 @@ export function StatistikScreen() {
       ) : rangeIntakes.length === 0 ? (
         <EmptyState
           icon={<BarChart3 size={26} />}
-          title="Noch keine Auswertung"
-          description="Sobald Einnahmen im gewählten Zeitraum erfasst sind, erscheinen hier die Konsum-Grafiken."
+          title={t('stats.empty.title')}
+          description={t('stats.empty.description')}
         />
       ) : (
         <div className="space-y-4 mt-5">
-          {/* 1) KPI-Band */}
+          {/* 1) KPI band */}
           <div className="grid grid-cols-2 gap-2.5">
-            <KpiTile label="Einnahmen" value={String(rangeIntakes.length)} sub={`Ø ${formatNum(rangeIntakes.length / range)} / Tag`} />
-            <KpiTile label="Substanzen" value={String(rank.length)} sub="aktiv im Zeitraum" />
             <KpiTile
-              label="Plan-Treue"
-              value={adherence.overall != null ? `${Math.round(adherence.overall * 100)}%` : '–'}
-              sub={adherence.hasPlan ? 'planmäßige Einnahmen' : 'kein Plan hinterlegt'}
+              label={t('stats.kpi.intakes')}
+              value={String(rangeIntakes.length)}
+              sub={t('stats.kpi.averagePerDay', { value: formatNum(rangeIntakes.length / range) })}
             />
-            <KpiTile label="Aktivste Zeit" value={busiest.label} sub={`${busiest.range} Uhr`} />
+            <KpiTile label={t('stats.kpi.substances')} value={String(rank.length)} sub={t('stats.kpi.activeInRange')} />
+            <KpiTile
+              label={t('stats.kpi.adherence')}
+              value={adherence.overall != null ? `${Math.round(adherence.overall * 100)}%` : '–'}
+              sub={adherence.hasPlan ? t('stats.kpi.plannedIntakes') : t('stats.kpi.noPlan')}
+            />
+            <KpiTile
+              label={t('stats.kpi.busiestTime')}
+              value={daypartLabel[busiest.key] ?? busiest.key}
+              sub={t('stats.hourSuffix', { range: busiest.range })}
+            />
           </div>
 
-          {/* 2) Konsum-Kalender */}
+          {/* 2) Consumption calendar */}
           <Module
             icon={<CalendarRange size={16} />}
-            title="Konsum-Kalender"
-            subtitle="Wann wurde was konsumiert — Deckkraft = Einnahmen/Tag (relativ zur eigenen Spitze)"
+            title={t('stats.calendar.title')}
+            subtitle={t('stats.calendar.subtitle')}
           >
-            <Punchcard rows={punchRows} days={days} selected={punchSel} onSelect={setPunchSel} />
+            <Punchcard rows={punchRows} days={days} selected={punchSel} onSelect={setPunchSel} intakeAria={intakeAria} />
             {punchDetail && (
               <div className="mt-3 flex items-center gap-2 rounded-2xl bg-surface2 px-3 py-2">
                 <SubstanceSeal name={punchDetail.name} color={punchDetail.color} size="sm" />
@@ -274,7 +297,7 @@ export function StatistikScreen() {
                       · {punchDetail.count}× {punchDetail.label && `· ${punchDetail.label}`}
                     </span>
                   ) : (
-                    <span className="text-ink-faint"> · keine Einnahme</span>
+                    <span className="text-ink-faint"> · {t('stats.calendar.noIntake')}</span>
                   )}
                 </div>
               </div>
@@ -287,16 +310,18 @@ export function StatistikScreen() {
                 }}
                 className="press mt-3 text-[13px] font-medium text-primary"
               >
-                {punchExpanded ? 'weniger anzeigen' : `${punch.length - 10} weitere anzeigen`}
+                {punchExpanded
+                  ? t('stats.calendar.less')
+                  : t('stats.calendar.more', { count: punch.length - 10 })}
               </button>
             )}
           </Module>
 
-          {/* 3) Menge über Zeit */}
+          {/* 3) Amount over time */}
           <Module
             icon={<BarChart3 size={16} />}
-            title="Menge über Zeit"
-            subtitle="Tages-Dosis der gewählten Substanz — Mengen werden nie über Substanzen hinweg summiert"
+            title={t('stats.amount.title')}
+            subtitle={t('stats.amount.subtitle')}
           >
             <SubstanceChips items={rank} activeKey={doseStat?.key} onPick={(k) => { setSelKey(k); setDoseSel(null); }} />
             {doseStat && doseSeries && (
@@ -310,13 +335,15 @@ export function StatistikScreen() {
                     </p>
                     <p className="text-[12px] text-ink-muted mt-1">
                       {doseSeries.mode === 'dose'
-                        ? `gesamt · Ø ${formatNum(doseSeries.avgPerActiveDay)} ${unitLabel(doseSeries.unit)} / aktivem Tag`
-                        : `Einnahmen · Ø ${formatNum(doseSeries.avgPerActiveDay)} / aktivem Tag`}
+                        ? t('stats.amount.totalAverageDose', {
+                            value: `${formatNum(doseSeries.avgPerActiveDay)} ${unitLabel(doseSeries.unit)}`,
+                          })
+                        : t('stats.amount.totalAverageCount', { value: formatNum(doseSeries.avgPerActiveDay) })}
                     </p>
                   </div>
                   {doseSeries.mode === 'count' && (
                     <span className="shrink-0 text-[11px] text-ink-faint text-right max-w-[10rem] leading-snug">
-                      Mengen nicht durchgängig erfassbar — zeige Anzahl
+                      {t('stats.amount.countFallback')}
                     </span>
                   )}
                 </div>
@@ -336,7 +363,7 @@ export function StatistikScreen() {
                       ? `${formatNum(doseSeries.days[doseSel].value)} ${unitLabel(doseSeries.unit)}`
                       : `${doseSeries.days[doseSel].count}×`}
                     {doseSeries.mode === 'dose' && doseSeries.days[doseSel].count > 1 && (
-                      <span className="text-ink-faint"> ({doseSeries.days[doseSel].count} Einnahmen)</span>
+                      <span className="text-ink-faint"> ({doseSeries.days[doseSel].count}×)</span>
                     )}
                   </p>
                 )}
@@ -344,18 +371,17 @@ export function StatistikScreen() {
             )}
           </Module>
 
-          {/* 3b) Wirkstoff-Bilanz (KI) */}
+          {/* 3b) Active-ingredient balance (AI) */}
           <Module
             icon={<FlaskConical size={16} />}
-            title="Wirkstoff-Bilanz"
-            subtitle="KI-Schätzung: Gesamtkonsum eines Wirkstoffs über ALLE Quellen (z. B. Koffein aus Energy-Drink, Cola & Kaffee)"
+            title={t('stats.ingredients.title')}
+            subtitle={t('stats.ingredients.subtitle')}
           >
             {!ingredients ? (
-              <p className="text-[13px] text-ink-faint">Lädt …</p>
+              <p className="text-[13px] text-ink-faint">{t('state.loading')}</p>
             ) : !ingredients.available ? (
               <p className="text-[13px] text-ink-muted leading-snug">
-                KI-Analyse ist nicht konfiguriert (<span className="tabular">MINIMAX_API_KEY</span> fehlt). Ohne
-                Schlüssel können keine Wirkstoff-Profile geschätzt werden.
+                {t('stats.ingredients.unavailable', { key: 'MINIMAX_API_KEY' })}
               </p>
             ) : (
               <>
@@ -384,15 +410,22 @@ export function StatistikScreen() {
                           {formatMass(report.totalMg)}
                         </p>
                         <p className="text-[12px] text-ink-muted mt-1">
-                          {report.label} gesamt · Ø {formatMass(report.avgPerActiveDay)} / aktivem Tag
+                          {t('stats.ingredients.totalAverage', {
+                            label: report.label,
+                            value: formatMass(report.avgPerActiveDay),
+                          })}
                         </p>
                         {(() => {
                           const eq = equivalentFor(report.compound, report.totalMg);
-                          return eq ? (
-                            <p className="text-[12px] text-ink-faint mt-0.5">
-                              ≈ {formatNum(eq.value)} {eq.unit}
-                            </p>
-                          ) : null;
+                          if (!eq) return null;
+                          const key = (
+                            eq.count === 1
+                              ? `stats.equivalent.${eq.kind}.one`
+                              : `stats.equivalent.${eq.kind}.many`
+                          ) as MessageKey;
+                          return (
+                            <p className="text-[12px] text-ink-faint mt-0.5">{t(key, { value: formatNum(eq.count) })}</p>
+                          );
                         })()}
                       </div>
                       <div
@@ -403,7 +436,7 @@ export function StatistikScreen() {
                       </div>
                     </div>
 
-                    {/* Tages-Verlauf */}
+                    {/* Daily course */}
                     <div className="mt-3">
                       <VBars
                         values={report.perDay}
@@ -422,10 +455,10 @@ export function StatistikScreen() {
                       )}
                     </div>
 
-                    {/* Quellen-Aufschlüsselung */}
+                    {/* Source breakdown */}
                     {report.bySource.length > 0 && (
                       <div className="mt-4">
-                        <SectionLabel className="mb-2">Quellen</SectionLabel>
+                        <SectionLabel className="mb-2">{t('stats.ingredients.sources')}</SectionLabel>
                         <HBars
                           items={report.bySource.map((s): HBarItem => ({
                             key: s.key,
@@ -442,18 +475,19 @@ export function StatistikScreen() {
 
                     {report.unquantified > 0 && (
                       <p className="mt-3 text-[11px] text-ink-faint leading-snug">
-                        {report.unquantified} Einnahme{report.unquantified === 1 ? '' : 'n'} ohne verwertbare Menge
-                        nicht einberechnet.
+                        {report.unquantified === 1
+                          ? t('stats.ingredients.unquantified.one', { count: report.unquantified })
+                          : t('stats.ingredients.unquantified.many', { count: report.unquantified })}
                       </p>
                     )}
 
-                    {/* Transparenz: So rechnet die KI */}
+                    {/* Transparency: how the AI calculates this */}
                     <button
                       onClick={() => { haptics.select(); setProfilesOpen((v) => !v); }}
                       className="press mt-3 flex items-center gap-1.5 text-[12px] font-medium text-ink-muted"
                       aria-expanded={profilesOpen}
                     >
-                      So rechnet die KI
+                      {t('stats.ingredients.explanation')}
                       <ChevronDown size={14} className={cx('transition-transform', profilesOpen && 'rotate-180')} />
                     </button>
                     {profilesOpen && (
@@ -465,55 +499,48 @@ export function StatistikScreen() {
                           return (
                             <p key={s.key} className="text-[11px] text-ink-faint leading-snug">
                               <span className="text-ink-muted font-medium">{s.name}</span> · {prof.serving.label || `1 ${prof.serving.unit}`} ·{' '}
-                              {formatNum(ing.mgPerServing)} mg {report.label}/Portion
+                              {t('stats.ingredients.serving', { value: formatNum(ing.mgPerServing), label: report.label })}
                             </p>
                           );
                         })}
                         <p className="text-[11px] text-ink-faint leading-snug pt-1">
-                          Schätzwerte der KI ({ingredients.model}) — keine Laborwerte. Mengen werden aus der
-                          protokollierten Portion hochgerechnet.
+                          {t('stats.ingredients.disclaimer', { model: ingredients.model })}
                         </p>
                       </div>
                     )}
                   </div>
                 ) : Object.keys(ingredients.profiles).length > 0 ? (
-                  <p className="mt-3 text-[13px] text-ink-muted">
-                    In den analysierten Substanzen wurden keine quantifizierbaren Wirkstoffe für diesen Zeitraum
-                    gefunden.
-                  </p>
+                  <p className="mt-3 text-[13px] text-ink-muted">{t('stats.ingredients.noneInRange')}</p>
                 ) : (
-                  <p className="mt-3 text-[13px] text-ink-muted leading-snug">
-                    Noch keine Wirkstoff-Profile. Lass die KI deine Substanzen analysieren, um z. B. dein
-                    Gesamt-Koffein über alle Quellen zu sehen.
-                  </p>
+                  <p className="mt-3 text-[13px] text-ink-muted leading-snug">{t('stats.ingredients.noProfiles')}</p>
                 )}
               </>
             )}
           </Module>
 
-          {/* 4) Rangliste */}
-          <Module icon={<BarChart3 size={16} />} title="Top-Substanzen" subtitle="Häufigkeit im Zeitraum">
+          {/* 4) Ranking */}
+          <Module icon={<BarChart3 size={16} />} title={t('stats.ranking.title')} subtitle={t('stats.ranking.subtitle')}>
             <HBars items={rankItems} />
           </Module>
 
-          {/* 5) Tageszeit-Muster */}
-          <Module icon={<Clock size={16} />} title="Tageszeit-Muster" subtitle="Wann am Tag wird konsumiert">
-            <DaypartChart dist={daypart} />
+          {/* 5) Time-of-day pattern */}
+          <Module icon={<Clock size={16} />} title={t('stats.daypart.title')} subtitle={t('stats.daypart.subtitle')}>
+            <DaypartChart dist={daypart} labels={daypartLabel} />
           </Module>
 
-          {/* 6) Plan-Treue über Zeit */}
+          {/* 6) Plan adherence over time */}
           {adherence.hasPlan && (
             <Module
               icon={<Sparkles size={16} />}
-              title="Plan-Treue"
-              subtitle="Anteil planmäßiger Einnahmen je Tag (Substanz & Dosis stimmen mit dem wirksamen Plan überein)"
+              title={t('stats.adherence.title')}
+              subtitle={t('stats.adherence.subtitle')}
             >
               <div className="flex items-center gap-4">
                 <div className="w-24 shrink-0">
                   <p className="font-display text-3xl leading-none text-ink tabular">
                     {adherence.overall != null ? `${Math.round(adherence.overall * 100)}%` : '–'}
                   </p>
-                  <p className="text-[12px] text-ink-muted mt-1">im Schnitt</p>
+                  <p className="text-[12px] text-ink-muted mt-1">{t('stats.adherence.average')}</p>
                 </div>
                 <div className="flex-1 min-w-0">
                   <TrendChart
@@ -527,15 +554,15 @@ export function StatistikScreen() {
             </Module>
           )}
 
-          {/* 7) Substanz × Wohlbefinden */}
+          {/* 7) Substance × wellbeing */}
           <Module
             icon={<Info size={16} />}
-            title="Substanz × Wohlbefinden"
-            subtitle="Tages-Dosis gegen eine 11-Skalen-Dimension"
+            title={t('stats.wellbeing.title')}
+            subtitle={t('stats.wellbeing.subtitle')}
           >
             <SubstanceChips items={rank} activeKey={wellStat?.key} onPick={setWellKey} />
             <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1 mt-2 pb-1">
-              {METRICS.map((m) => (
+              {metrics.map((m) => (
                 <button
                   key={m.key}
                   onClick={() => { haptics.select(); setMetricKey(m.key); }}
@@ -553,11 +580,11 @@ export function StatistikScreen() {
 
             {wellStat && wellData && (
               <div className="mt-3">
-                {/* Legende */}
+                {/* Legend */}
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-2 text-[11px] text-ink-muted">
                   <span className="inline-flex items-center gap-1.5">
                     <span className="inline-block w-3 h-2.5 rounded-sm" style={{ backgroundColor: wellStat.color, opacity: 0.4 }} />
-                    {wellStat.name} (Dosis)
+                    {t('stats.wellbeing.dose', { name: wellStat.name })}
                   </span>
                   <span className="inline-flex items-center gap-1.5">
                     <span className="inline-block w-3.5 h-0.5 rounded-full bg-ink/60" />
@@ -577,17 +604,14 @@ export function StatistikScreen() {
                     <>
                       <p className="text-sm text-ink">
                         <span className="font-display text-xl tabular mr-1.5">r = {formatNum(wellData.r)}</span>
-                        {correlationLabel(wellData.r)}
+                        {t(`stats.wellbeing.correlation.${correlationBucket(wellData.r)}` as MessageKey)}
                       </p>
                       <p className="text-[11px] text-ink-faint mt-1 leading-snug">
-                        über {wellData.pairs} Tage mit Tagesbild. <strong>Korrelation ≠ Kausalität</strong> —
-                        ein statistischer Zusammenhang ist kein Beweis für Ursache und Wirkung.
+                        {t('stats.wellbeing.correlation.note', { count: wellData.pairs })}
                       </p>
                     </>
                   ) : (
-                    <p className="text-[13px] text-ink-muted">
-                      Zu wenige gemeinsame Tage (Dosis + Tagesbild) für eine belastbare Korrelation.
-                    </p>
+                    <p className="text-[13px] text-ink-muted">{t('stats.wellbeing.tooFew')}</p>
                   )}
                 </div>
               </div>
@@ -599,7 +623,7 @@ export function StatistikScreen() {
   );
 }
 
-// ───────────────────────── Bausteine ─────────────────────────
+// ───────────────────────── Building blocks ─────────────────────────
 
 function RangeTabs({ range, onChange }: { range: number; onChange: (n: number) => void }) {
   return (
@@ -683,7 +707,7 @@ function SubstanceChips({
   );
 }
 
-/** Status + KI-Analyse-Auslöser der Wirkstoff-Bilanz. */
+/** Status + AI-analysis trigger for the active-ingredient balance. */
 function AnalyzeBar({
   analyzed,
   total,
@@ -701,15 +725,16 @@ function AnalyzeBar({
   onAnalyze: () => void;
   onReanalyzeAll: () => void;
 }) {
+  const t = useT();
   if (analyzed === 0) {
     return (
       <div className="rounded-2xl bg-primary-soft/40 ring-1 ring-primary/15 p-3.5 flex items-center gap-3">
         <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-medium text-ink">KI-Analyse starten</p>
-          <p className="text-[12px] text-ink-muted truncate">{total} Substanzen · Modell {model}</p>
+          <p className="text-[13px] font-medium text-ink">{t('stats.ingredients.start')}</p>
+          <p className="text-[12px] text-ink-muted truncate">{t('stats.ingredients.substancesModel', { count: total, model })}</p>
         </div>
         <Button size="sm" icon={<Sparkles size={16} />} loading={pendingRun} onClick={onAnalyze}>
-          Analysieren
+          {t('stats.ingredients.analyze')}
         </Button>
       </div>
     );
@@ -718,24 +743,25 @@ function AnalyzeBar({
     <div className="flex items-center gap-3">
       <div className="flex-1 min-w-0">
         <p className="text-[12px] text-ink-muted tabular">
-          {analyzed}/{total} analysiert{pending > 0 ? ` · ${pending} offen/veraltet` : ''}
+          {t('stats.ingredients.analyzed', { analyzed, total })}
+          {pending > 0 ? t('stats.ingredients.pending', { count: pending }) : ''}
         </p>
-        <p className="text-[11px] text-ink-faint truncate">Modell {model}</p>
+        <p className="text-[11px] text-ink-faint truncate">{t('stats.ingredients.model', { model })}</p>
       </div>
       {pending > 0 ? (
         <Button size="sm" icon={<RefreshCw size={15} />} loading={pendingRun} onClick={onAnalyze}>
-          {pending} aktualisieren
+          {t('stats.ingredients.update', { count: pending })}
         </Button>
       ) : (
         <Button size="sm" variant="ghost" icon={<RefreshCw size={15} />} loading={pendingRun} onClick={onReanalyzeAll}>
-          Neu
+          {t('stats.ingredients.new')}
         </Button>
       )}
     </div>
   );
 }
 
-/** Wirkstoff-Auswahl (nach Gesamt-mg sortiert), je Wirkstoff eingefärbt. */
+/** Active-ingredient picker (sorted by total mg), coloured per compound. */
 function CompoundChips({
   reports,
   activeKey,
@@ -769,7 +795,7 @@ function CompoundChips({
   );
 }
 
-/** Start · Mitte · Ende der Tages-Achse (für die vertikalen Balken-Charts). */
+/** Start · middle · end of the day axis (for the vertical bar charts). */
 function AxisTicks({ days }: { days: string[] }) {
   const n = days.length;
   if (n < 2) return null;

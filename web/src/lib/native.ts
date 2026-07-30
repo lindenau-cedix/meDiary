@@ -1,6 +1,6 @@
 import { Capacitor } from '@capacitor/core';
 
-/** Native Initialisierung (nur in der APK aktiv). Auf Web ein No-Op. */
+/** Native initialisation (only active in the APK). On the web: no-op. */
 export async function initNative(resolvedTheme: 'light' | 'dark') {
   if (!Capacitor.isNativePlatform()) return;
   try {
@@ -8,12 +8,12 @@ export async function initNative(resolvedTheme: 'light' | 'dark') {
     await StatusBar.setOverlaysWebView({ overlay: true });
     await StatusBar.setStyle({ style: resolvedTheme === 'dark' ? Style.Dark : Style.Light });
   } catch {
-    /* status-bar plugin evtl. nicht vorhanden */
+    /* status-bar plugin may not be present */
   }
   try {
     const { Keyboard, KeyboardResize } = await import('@capacitor/keyboard');
     await Keyboard.setResizeMode({ mode: KeyboardResize.Native });
   } catch {
-    /* keyboard plugin evtl. nicht vorhanden */
+    /* keyboard plugin may not be present */
   }
 }

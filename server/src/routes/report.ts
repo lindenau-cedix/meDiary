@@ -8,51 +8,53 @@ import { serializeReport } from '../lib/serialize.js';
 export const reportRouter = Router();
 
 /**
- * „Tagesbericht" des Hermes-Agents (was der Agent an einem Konsum-Tag getan
- * hat — Coding-Sessions, Cron-Läufe, Deploys, Fehler, subagent-Spawns …).
+ * "Daily report" of the Hermes agent (what the agent did on a consumption
+ * day — coding sessions, cron runs, deploys, errors, sub-agent spawns …).
  *
- * Geschrieben vom 03:30-Berlin-Cron per POST /api/report/new. Wird vom
- * nächtlichen „Träumen" als zusätzliche Kontext-Sektion gelesen (siehe
+ * Written by the 03:30 Berlin cron via POST /api/report/new. Read by the
+ * nightly "dreaming" as an additional context section (see
  * `gatherDreamContext` in `lib/dreams.ts`).
  *
- * Datums-Modell: Der Bericht gehört zum **Konsum-Tag**, der um 03:30 endet —
- * derselbe Tag, über den 42 Minuten später geträumt wird. POST ohne `date`
- * schreibt daher per Default auf `dreamTargetDate(now)` (Konsum-Vortag), genau
- * wie der Traum-Generator um 04:20 — Konsistenz zwischen beiden Cron-Jobs.
+ * Date model: the report belongs to the **consumption day**, which ends at
+ * 03:30 — the same day that is dreamed about 42 minutes later. POST without
+ * `date` therefore defaults to `dreamTargetDate(now)` (the consumption
+ * previous day), exactly like the dream generator at 04:20 — keeping both
+ * cron jobs consistent.
  *
- * Der Endpoint ist offen (privates Deployment, wie der Rest der Lese-API).
- * Schreibender Cron läuft auf demselben Host; falls künftig ein externer
- * Sender ins Spiel kommt, ist die Auth-Stelle dieselbe wie bei
- * POST /api/intakes/text (Cloudflare Access → CF_ACCESS_DISABLED).
+ * The endpoint is open (private deployment, like the rest of the read API).
+ * The writing cron runs on the same host; if an external sender joins in the
+ * future, the auth gate is the same as for POST /api/intakes/text
+ * (Cloudflare Access → CF_ACCESS_DISABLED).
  */
 
-// Obergrenze für den Freitext. 64 KiB reichen für mehrere tausend Zeilen
-// Markdown und schützt vor Missbrauch / versehentlichem Riesenupload.
+// Upper limit for the free-text payload. 64 KiB is enough for several
+// thousand lines of Markdown and protects against abuse / accidental
+// giant uploads.
 const MAX_REPORT_LEN = 64 * 1024;
 
 const reportSchema = z.object({
   /**
-   * Konsum-Tag, zu dem der Bericht gehört (YYYY-MM-DD). Default =
-   * Konsum-Vortag (`dreamTargetDate(now)`), also genau der Tag, über den
-   * gleich geträumt wird. Auslöser-Cron um 03:30 muss nichts mitsenden.
+   * Consumption day the report belongs to (YYYY-MM-DD). Default = previous
+   * consumption day (`dreamTargetDate(now)`), i.e. exactly the day the
+   * dream is about. The 03:30 trigger cron does not need to send a date.
    */
   date: z
     .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, 'date muss YYYY-MM-DD sein')
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be YYYY-MM-DD')
     .optional(),
-  /** Freitext-Bericht (Markdown oder Plain). Nicht leer, max. 64 KiB. */
-  report: z.string().min(1, 'report darf nicht leer sein').max(MAX_REPORT_LEN),
-  /** Optionaler Marker, wer den Bericht eingeliefert hat (z. B. "hermes-cron-0330"). */
+  /** Free-text report (Markdown or plain). Not empty, max 64 KiB. */
+  report: z.string().min(1, 'report must not be empty').max(MAX_REPORT_LEN),
+  /** Optional marker for who submitted the report (e.g. "hermes-cron-0330"). */
   source: z.string().max(120).optional(),
 });
 
 /**
- * Tagesbericht anlegen / überschreiben. Idempotent: derselbe `date`
- * überschreibt den vorherigen Eintrag (updated_at wird hochgezogen).
+ * Create / overwrite the daily report. Idempotent: the same `date`
+ * overwrites the previous entry (updated_at is bumped).
  *
  * Body: `{ date?: "YYYY-MM-DD", report: string, source?: string }`.
  *  - 200 + `{ exists: true, date, report, source, createdAt, updatedAt }`
- *  - 400 bei ungültigem Payload / leerem Report / fehlgeschlagener Validierung
+ *  - 400 on invalid payload / empty report / validation failure
  */
 reportRouter.post('/new', (req, res) => {
   const parsed = reportSchema.safeParse(req.body ?? {});
@@ -68,7 +70,7 @@ reportRouter.post('/new', (req, res) => {
   res.json({ ...serializeReport(row), exists: true });
 });
 
-/** Einzelner Tagesbericht (immer 200, `exists:false` wenn leer). */
+/** Single daily report (always 200, `exists:false` when empty). */
 reportRouter.get('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
   const row = reportFor(date);
@@ -77,9 +79,8 @@ reportRouter.get('/:date', (req, res) => {
 });
 
 /**
- * Liste der Tagesberichte (neueste zuerst). `?from=&to=&limit=`. Nützlich für
- * das Frontend, wenn man eine Wochen-/Monatsansicht der Agent-Aktivität
- * rendern will.
+ * List of daily reports (newest first). `?from=&to=&limit=`. Useful for the
+ * frontend when rendering a weekly/monthly view of agent activity.
  */
 reportRouter.get('/', (req, res) => {
   const from = typeof req.query.from === 'string' ? req.query.from : undefined;
@@ -90,9 +91,9 @@ reportRouter.get('/', (req, res) => {
   res.json({ reports });
 });
 
-/** Tagesbericht löschen (204 / 404). */
+/** Delete a daily report (204 / 404). */
 reportRouter.delete('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
-  if (!deleteReport(date)) return res.status(404).json({ error: 'Kein Bericht für diesen Tag' });
+  if (!deleteReport(date)) return res.status(404).json({ error: 'No report for this day' });
   res.status(204).end();
 });

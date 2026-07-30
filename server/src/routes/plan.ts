@@ -201,7 +201,7 @@ planRouter.put('/', (req, res) => {
         .regex(/^\d{4}-\d{2}-\d{2}(T\d{2}:\d{2})?$/, 'effectiveFrom muss YYYY-MM-DD oder YYYY-MM-DDTHH:mm sein')
         .refine(
           (d) => !Number.isNaN(new Date(d.length === 10 ? `${d}T12:00:00` : d).getTime()),
-          'Ungültiges Datum',
+          'Invalid date',
         )
         .nullish(),
     })

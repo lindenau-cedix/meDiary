@@ -14,26 +14,27 @@ import { serializeHabit } from '../lib/serialize.js';
 export const habitRouter = Router();
 
 /**
- * Tagesweise "Gewohnheitsdaten" — aktuell nur die tägliche **Wachzeit**:
- * das ist der Zeitraum vom Aufwachen bis zum Einschlafen, gemischt aus
- * Einnahme-Ereignissen und einem Webhook, den der lokale Client (Cron um
- * 03:30 Europe/Berlin) per `POST /api/habit/uptime` meldet.
+ * Daily "habit" data — currently only the daily **waking time**:
+ * the time span from waking up to falling asleep, composed of intake
+ * events and a webhook the local client (cron at 03:30 Europe/Berlin)
+ * sends via `POST /api/habit/uptime`.
  *
- * Schema: siehe `daily_habits` in `server/src/db.ts`.
- *   - date (PRIMARY KEY, YYYY-MM-DD) — **immer** der Vortag aus Sicht
- *     des Webhook-Aufrufs (Konsum-Tag `today - 1`).
- *   - wake_first_unix (REAL, nullable) — Unix-Sek des ersten Wach-Moments
- *     des Tages. Algorithmus: jüngste Einnahme des Vortages, deren
- *     Konsum-Tag = Vortag UND die zwischen 03:30 und `first_user_interaction_24h_unix`
- *     liegt — wenn vorhanden, deren Unix-Zeit; sonst `first_user_interaction_24h_unix`.
- *   - wake_last_unix  (REAL, nullable) — Unix-Sek des letzten Wach-Moments:
- *     max(jüngste Einnahme des Vortages, `last_user_interaction_unix`).
+ * Schema: see `daily_habits` in `server/src/db.ts`.
+ *   - date (PRIMARY KEY, YYYY-MM-DD) — **always** the previous day from
+ *     the webhook call's perspective (consumption day `today - 1`).
+ *   - wake_first_unix (REAL, nullable) — Unix seconds of the first waking
+ *     moment of the day. Algorithm: most recent intake of the previous day
+ *     whose consumption day = previous day AND that lies between 03:30 and
+ *     `first_user_interaction_24h_unix` — if present, that Unix time;
+ *     otherwise `first_user_interaction_24h_unix`.
+ *   - wake_last_unix  (REAL, nullable) — Unix seconds of the last waking
+ *     moment: max(most recent intake of the previous day, `last_user_interaction_unix`).
  *
- * Die Webhook-Daten bezeichnen KEINE Bildschirmzeit mehr, sondern werden
- * als Indikator für "noch wach" gewertet: `first_user_interaction_24h_unix`
- * ist der früheste Hinweis darauf, dass der Mensch an jenem Tag wach war
- * (am PC); `last_user_interaction_unix` der späteste. In Kombination mit
- * den Einnahme-Zeitpunkten ergeben sie die ungefähre Wachspanne.
+ * The webhook data no longer measures screen time but is treated as an
+ * indicator of "still awake": `first_user_interaction_24h_unix` is the
+ * earliest hint that the person was awake (at the PC) that day;
+ * `last_user_interaction_unix` is the latest. Combined with intake
+ * timestamps they approximate the waking window.
  */
 
 const uptimeSchema = z.object({
@@ -42,19 +43,19 @@ const uptimeSchema = z.object({
 });
 
 /**
- * Berechnet den Konsum-Vortag (Bezug: Konsum-Tag `now` minus 1 Kalendertag).
- * Der Webhook wird typischerweise um 03:30 ausgelöst — zu diesem Zeitpunkt
- * IST der Konsum-Tag des Vortags gerade zu Ende gegangen, und der "neue"
- * Konsum-Tag hat noch nicht begonnen. Wir wählen den Vortag hartcodiert,
- * unabhängig vom tatsächlichen `last_user_interaction_unix` (das vermeidet
- * Fehlzuordnungen, wenn der Client zu anderer Zeit läuft).
+ * Computes the previous consumption day (reference: consumption day `now`
+ * minus 1 calendar day). The webhook typically fires at 03:30 — at that
+ * point the consumption day of the previous day has JUST ended and the
+ * "new" consumption day has not yet begun. We pick the previous day
+ * hardcoded, independent of the actual `last_user_interaction_unix` (this
+ * avoids misattribution if the client runs at a different time).
  */
 function yesterdayConsumptionDay(): string {
-  // Konsum-Tag "heute" bestimmen (lokale Wand­uhr, 03:30-Grenze).
+  // Determine "today's" consumption day (local wall clock, 03:30 boundary).
   const todayIso = nowLocalISO(); // "YYYY-MM-DDTHH:mm:ss"
   const todayConsumption = dateOf(
-    // consumptionDay() aus time.ts inlined (es ist die einzige Stelle, die
-    // Konsum-Tag-Berechnung benötigt — bewusst keine zirkuläre Importorgie).
+    // consumptionDay() from time.ts inlined (the only spot that needs
+    // consumption-day calculation — deliberately no circular import orgy).
     (() => {
       const day = todayIso.slice(0, 10);
       const minutes =
@@ -67,29 +68,30 @@ function yesterdayConsumptionDay(): string {
       return todayIso;
     })(),
   );
-  // minus 1 Kalendertag (Datumstechnisch, unabhängig von Tagesgrenze).
+  // minus 1 calendar day (date-wise, independent of the day boundary).
   const d = new Date(`${todayConsumption}T12:00:00`);
   d.setDate(d.getDate() - 1);
   return toLocalISO(d).slice(0, 10);
 }
 
 /**
- * Meldet die täglichen Wachzeit-Daten für den **Vortag** (aus Sicht des
- * Webhook-Aufrufs). Body: `{ last_user_interaction_unix,
- * first_user_interaction_24h_unix }` (Unix-Sekunden, float erlaubt).
+ * Reports the daily waking-time data for the **previous day** (from the
+ * webhook call's perspective). Body: `{ last_user_interaction_unix,
+ * first_user_interaction_24h_unix }` (Unix seconds, float allowed).
  *
- * Algorithmus (siehe AGENTS.md „Habit/Wachzeit"):
- *   1. Ziel-Datum = Konsum-Vortag (heute - 1).
- *   2. Einnahmen-`first` = spätester Einnahme-Zeitpunkt am Vortag, dessen
- *      Konsum-Tag = Vortag UND der zwischen 03:30 (Wand­uhr am Vortag) und
- *      `first_user_interaction_24h_unix` liegt. Existiert keiner → null.
- *   3. Einnahmen-`last` = spätester Einnahme-Zeitpunkt am Vortag
- *      (Konsum-Tag = Vortag), oder null.
- *   4. `wake_first_unix` = (2) gefunden → dessen Unix; sonst
+ * Algorithm (see AGENTS.md "Habit/Waking time"):
+ *   1. Target date = previous consumption day (today - 1).
+ *   2. Intake `first` = latest intake timestamp on the previous day whose
+ *      consumption day = previous day AND that lies between 03:30 (wall
+ *      clock on the previous day) and `first_user_interaction_24h_unix`.
+ *      If none → null.
+ *   3. Intake `last` = latest intake timestamp on the previous day
+ *      (consumption day = previous day), or null.
+ *   4. `wake_first_unix` = (2) found → its Unix; otherwise
  *      `first_user_interaction_24h_unix`.
  *   5. `wake_last_unix` = max((3) Unix, `last_user_interaction_unix`).
  *
- * Antwort: gespeicherter Habit-Datensatz + Debug-Felder.
+ * Response: stored habit record + debug fields.
  */
 habitRouter.post('/uptime', (req, res) => {
   const parsed = uptimeSchema.safeParse(req.body);
@@ -99,49 +101,49 @@ habitRouter.post('/uptime', (req, res) => {
   if (first > last) {
     return res
       .status(400)
-      .json({ error: 'first_user_interaction_24h_unix muss <= last_user_interaction_unix sein.' });
+      .json({ error: 'first_user_interaction_24h_unix must be <= last_user_interaction_unix.' });
   }
 
   const now = nowUnix();
-  // Plausi-Checks (großzügig, damit ein Cron um 03:30 und manuelle
-  // Nachreichungen gleichermaßen durchgehen):
-  //  - `last` (kurz vor dem Cron) muss nahe an `now` sein: ±15 min
-  //    (Clock-Skew + Scheduler-Verzögerung; vorher 10 min — minimal
-  //    erweitert, damit auch ein paar Sekunden verzögerte Aufrufe nicht
-  //    abgelehnt werden).
-  //  - `first` (24h-Backlog-Punkt) darf bis zu ~25 h vor `now` liegen,
-  //    damit ein echtes 24h-Fenster, das die 03:30-Tagesgrenze umspannt,
-  //    nicht still abgelehnt wird.
+  // Plausibility checks (generous, so a 03:30 cron and manual catch-ups both
+  // pass):
+  //  - `last` (shortly before the cron) must be close to `now`: ±15 min
+  //    (clock skew + scheduler delay; previously 10 min — slightly widened
+  //    so a few seconds of delay do not get rejected).
+  //  - `first` (24h-backlog point) may be up to ~25 h before `now`, so a
+  //    genuine 24h window spanning the 03:30 day boundary is not silently
+  //    rejected.
   const SLACK_LAST = 15 * 60;
   const MAX_BACK_FIRST = 25 * 3600;
   if (last > now + SLACK_LAST) {
-    return res.status(400).json({ error: 'last_user_interaction_unix liegt in der Zukunft.' });
+    return res.status(400).json({ error: 'last_user_interaction_unix is in the future.' });
   }
   if (first < now - MAX_BACK_FIRST - SLACK_LAST) {
     return res
       .status(400)
-      .json({ error: 'first_user_interaction_24h_unix liegt mehr als 25h vor jetzt.' });
+      .json({ error: 'first_user_interaction_24h_unix is more than 25h in the past.' });
   }
 
-  // Ziel-Datum: Konsum-Vortag (Webhook = "Bericht für den gerade beendeten Tag").
+  // Target date: previous consumption day (webhook = "report for the day that just ended").
   const targetDate = yesterdayConsumptionDay();
 
-  // Einnahmen am Ziel-Tag laden. Wir suchen im Wand­uhr-Bereich, der genau
-  // dem Konsum-Tag `targetDate` entspricht: [targetDate 03:30, target+1 03:29:59].
-  // Genau diese Einnahmen haben `consumptionDay(taken_at) === targetDate`.
+  // Load intakes for the target day. We search in the wall-clock range that
+  // corresponds exactly to the consumption day `targetDate`:
+  // [targetDate 03:30, target+1 03:29:59].
+  // Precisely these intakes have `consumptionDay(taken_at) === targetDate`.
   const targetNext = new Date(`${targetDate}T12:00:00`);
   targetNext.setDate(targetNext.getDate() + 1);
   const targetNextStr = toLocalISO(targetNext).slice(0, 10);
   const dayStart = `${targetDate}T03:30:00`;
   const dayEnd = `${targetNextStr}T03:29:59`;
 
-  // UNIX-Vergleich statt String-Vergleich: `first` und `last` sind Sekunden.
-  // Wir brauchen `taken_at` als Unix, also den lokalen ISO-String in Sekunden
-  // seit 1970-01-01 00:00:00 LOKAL umrechnen. Hilfsfunktion lokal:
+  // UNIX comparison instead of string comparison: `first` and `last` are
+  // seconds. We need `taken_at` as Unix, so convert the local ISO string
+  // to seconds since 1970-01-01 00:00:00 LOCAL. Local helper:
   const localIsoToUnix = (s: string): number => {
-    // "YYYY-MM-DDTHH:mm:ss" -> Date (lokal) -> Sekunden seit Epoch (geteilt durch 1000)
-    // Wir nutzen new Date(s) — das interpretiert ISO-8601 ohne TZ als LOKAL
-    // (in V8 genau das Verhalten, das wir hier brauchen).
+    // "YYYY-MM-DDTHH:mm:ss" -> Date (local) -> seconds since epoch (divided by 1000).
+    // We use new Date(s) — it interprets ISO-8601 without TZ as LOCAL
+    // (exactly the behaviour we want here in V8).
     return new Date(s).getTime() / 1000;
   };
 
@@ -153,34 +155,33 @@ habitRouter.post('/uptime', (req, res) => {
     )
     .all(dayStart, dayEnd) as { taken_at: string }[];
 
-  // Einnahme-Zeitpunkte als Unix-Sekundenliste.
+  // Intake timestamps as a Unix-seconds list.
   const intakeUnixes = rows.map((r) => localIsoToUnix(r.taken_at));
 
-  // `intakeFirst`: späteste Einnahme, die NACH 03:30 (Tagesbeginn) und
-  // VOR `first` liegt. Das ist semantisch: "eine Medikamenten-Einnahme am
-  // Vortag, BEVOR die erste PC-Interaktion gemeldet wurde" — der späteste
-  // Hinweis darauf, dass der Mensch an diesem Tag bereits wach und aktiv
-  // war. Wenn keine solche Einnahme existiert (alle Einnahmen liegen nach
-  // `first`, oder es gibt keine) → null, und `first` wird übernommen.
-  // Achtung: NICHT [first, last] — das wäre der falsche Bereich. Wir
-  // suchen im Intervall [03:30, first).
+  // `intakeFirst`: latest intake that lies AFTER 03:30 (day start) AND
+  // BEFORE `first`. Semantically: "a medication intake on the previous day,
+  // BEFORE the first PC interaction was reported" — the latest hint that
+  // the person was already awake and active that day. If no such intake
+  // exists (all intakes after `first`, or none at all) → null, and `first`
+  // is used.
+  // Note: NOT [first, last] — that would be the wrong range. We search
+  // the interval [03:30, first).
   const dayStartUnix = localIsoToUnix(dayStart);
   const intakeFirst = (() => {
     let candidate: number | null = null;
     for (const u of intakeUnixes) {
-      // Einnahmen sind aufsteigend; sobald wir >= first sind, können wir
-      // abbrechen.
+      // Intakes are sorted ascending; once we are >= first we can stop.
       if (u >= first) break;
-      // muss nach 03:30 liegen (= nach Tagesbeginn)
+      // must be after 03:30 (= after day start)
       if (u >= dayStartUnix) candidate = u;
     }
     return candidate;
   })();
 
-  // `intakeLast`: späteste Einnahme des Tages (unabhängig von `first`/`last`).
+  // `intakeLast`: latest intake of the day (independent of `first`/`last`).
   const intakeLast = intakeUnixes.length > 0 ? intakeUnixes[intakeUnixes.length - 1] : null;
 
-  // Endgültige Wachzeit-Grenzen.
+  // Final waking-time boundaries.
   const wakeFirstUnix = intakeFirst != null ? intakeFirst : first;
   const wakeLastUnix = Math.max(intakeLast ?? -Infinity, last);
 
@@ -199,8 +200,8 @@ habitRouter.post('/uptime', (req, res) => {
   const row = db.prepare(`SELECT * FROM daily_habits WHERE date = ?`).get(targetDate) as HabitRow;
   res.status(200).json({
     ...serializeHabit(row),
-    // Debug-Felder — nützlich beim Smoke-Test des Crons und für die
-    // Selbst-Diagnose des Algorithmus; bewusst kleines Payload.
+    // Debug fields — useful when smoke-testing the cron and for the
+    // algorithm's self-diagnostics; deliberately small payload.
     firstLocal: isoFirst,
     lastLocal: isoLast,
     firstDay: consumptionDayFromUnix(first),
@@ -212,8 +213,8 @@ habitRouter.post('/uptime', (req, res) => {
 });
 
 /**
- * Liste der Habit-Tage (Range). `?from=&to=` (YYYY-MM-DD) grenzen ein.
- * Ohne Filter: alle vorhandenen Tage (aufsteigend nach Datum).
+ * List of habit days (range). `?from=&to=` (YYYY-MM-DD) bound the range.
+ * Without filters: all existing days (ascending by date).
  */
 habitRouter.get('/', (req, res) => {
   const where: string[] = [];
@@ -234,7 +235,7 @@ habitRouter.get('/', (req, res) => {
   res.json(rows.map(serializeHabit));
 });
 
-/** Einzelner Tag. Liefert 200 mit exists=false, wenn nichts gespeichert ist. */
+/** Single day. Returns 200 with exists=false if nothing is stored. */
 habitRouter.get('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
   const row = db.prepare(`SELECT * FROM daily_habits WHERE date = ?`).get(date) as HabitRow | undefined;
@@ -249,13 +250,13 @@ habitRouter.get('/:date', (req, res) => {
   res.json({ ...serializeHabit(row), exists: true });
 });
 
-/** Tag löschen (z. B. wenn der User die Aufzeichnung verwirft). */
+/** Delete a day (e.g. when the user discards the recording). */
 habitRouter.delete('/:date', (req, res) => {
   const date = req.params.date.slice(0, 10);
   const info = db.prepare(`DELETE FROM daily_habits WHERE date = ?`).run(date);
-  if (info.changes === 0) return res.status(404).json({ error: 'Kein Habit-Datensatz für diesen Tag' });
+  if (info.changes === 0) return res.status(404).json({ error: 'No habit record for this day' });
   res.status(204).end();
 });
 
-// (re-export für Tests / Konsumenten, die das aktuelle "Ziel"-Datum sehen wollen)
+// (re-exported for tests / consumers that want to see the current "target" date)
 export { dateOf, toLocalISO };

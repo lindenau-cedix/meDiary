@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { List, Moon, Sun, ChevronDown, Bot } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader';
@@ -8,18 +8,21 @@ import { SentDreamsLog } from '../components/SentDreamsLog';
 import { cx } from '../lib/cx';
 import { haptics } from '../lib/haptics';
 import { formatDayLabel } from '../lib/format';
-import { useDiaryNotes, useMetrics } from '../lib/queries';
+import { useDiaryNotes } from '../lib/queries';
+import { metricShort } from '../lib/metrics';
+import { useT } from '../lib/i18n';
 import type { DiaryNoteDay } from '../lib/types';
 
 type Mode = 'info' | 'traum';
 
 export function DiaryScreen() {
+  const t = useT();
   const [params, setParams] = useSearchParams();
   const initial: Mode = params.get('view') === 'traum' ? 'traum' : 'info';
   const [mode, setMode] = useState<Mode>(initial);
 
-  // Der Startup-Dialog navigiert mit ?view=traum hierher — auch wenn der Tab
-  // schon offen ist, soll dann der Traum-Untertab erscheinen.
+  // The startup dialog navigates here with ?view=traum — the dream subtab
+  // must open even if the tab is already active.
   useEffect(() => {
     const v = params.get('view');
     if (v === 'traum') setMode('traum');
@@ -29,7 +32,7 @@ export function DiaryScreen() {
   const change = (m: Mode) => {
     haptics.select();
     setMode(m);
-    // URL-Param aufräumen, damit ein Reload nicht im falschen Tab landet.
+    // Clean up the URL param so a reload does not land on the wrong tab.
     if (params.has('view')) {
       params.delete('view');
       setParams(params, { replace: true });
@@ -39,8 +42,8 @@ export function DiaryScreen() {
   return (
     <>
       <PageHeader
-        title="Tagebuch"
-        eyebrow={mode === 'traum' ? 'nächtliche Auswertung' : 'aus deinen Notizen'}
+        title={t('diary.title')}
+        eyebrow={mode === 'traum' ? t('diary.eyebrow.dreams') : t('diary.eyebrow.info')}
         action={<ModeToggle mode={mode} onChange={change} />}
       />
       {mode === 'info' ? <ShortDiary /> : <SentDreamsLog />}
@@ -49,12 +52,13 @@ export function DiaryScreen() {
 }
 
 function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => void }) {
+  const t = useT();
   return (
     <div className="flex rounded-2xl bg-surface2 p-0.5 ring-1 ring-line">
       {(
         [
-          { key: 'info', label: 'Info', Icon: List },
-          { key: 'traum', label: 'Traum', Icon: Moon },
+          { key: 'info', label: t('diary.tab.info'), Icon: List },
+          { key: 'traum', label: t('diary.tab.dreams'), Icon: Moon },
         ] as const
       ).map(({ key, label, Icon }) => (
         <button
@@ -72,25 +76,24 @@ function ModeToggle({ mode, onChange }: { mode: Mode; onChange: (m: Mode) => voi
   );
 }
 
-/** "HH:MM" aus einem Unix-Sekunden-Timestamp (lokale Zeit). */
+/** "HH:MM" from a Unix-seconds timestamp (local time). */
 function fmtUnixClock(unix: number): string {
   const d = new Date(unix * 1000);
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-/** "12.5 h" — kompakte Stundenformatierung, eine Nachkommastelle. */
+/** "12.5 h" — compact hour formatting, one decimal place. */
 function fmtHours(unixDelta: number): string {
   const h = Math.max(0, unixDelta / 3600);
   return `${h.toFixed(1)} h`;
 }
 
-// ───────────────────────── Info: Liste der Notizen (Roh-Log) ─────────────────────────
+// ───────────────────────── Info: list of notes (raw log) ─────────────────────────
 
 function ShortDiary() {
+  const t = useT();
   const { data, isLoading } = useDiaryNotes();
-  const { data: metrics = [] } = useMetrics();
-  const shortLabel = useMemo(() => new Map(metrics.map((m) => [m.key, m.short])), [metrics]);
 
   if (isLoading) return <LoadingScreen />;
   const days = data?.days ?? [];
@@ -98,8 +101,8 @@ function ShortDiary() {
     return (
       <EmptyState
         icon={<List size={26} />}
-        title="Noch keine Notizen"
-        description="Notizen aus Einnahmen und Tagesbildern erscheinen hier — chronologisch nach Tagen."
+        title={t('diary.empty.title')}
+        description={t('diary.empty.description')}
       />
     );
   }
@@ -128,12 +131,12 @@ function ShortDiary() {
             {day.assessment && (
               <div className="px-3.5 py-2.5 bg-surface2/40">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-accent flex items-center gap-1 mb-1">
-                  <Moon size={12} /> Tagesbild
+                  <Moon size={12} /> {t('diary.assessment')}
                 </p>
                 {Object.keys(day.assessment.scores).length > 0 && (
                   <p className="text-[13px] text-ink-muted leading-snug">
                     {Object.entries(day.assessment.scores)
-                      .map(([k, v]) => `${shortLabel.get(k) ?? k} ${v}`)
+                      .map(([k, v]) => `${metricShort(k)} ${v}`)
                       .join(' · ')}
                   </p>
                 )}
@@ -146,17 +149,17 @@ function ShortDiary() {
               (day.habit.wakeFirstUnix != null || day.habit.wakeLastUnix != null) && (
                 <div className="px-3.5 py-2.5 bg-surface2/40">
                   <p className="text-[11px] font-semibold uppercase tracking-wide text-accent flex items-center gap-1 mb-1">
-                    <Sun size={12} /> Wachzeit
+                    <Sun size={12} /> {t('diary.wake')}
                   </p>
                   <p className="text-[13px] text-ink-muted leading-snug">
                     {(() => {
                       const first = day.habit!.wakeFirstUnix;
                       const last = day.habit!.wakeLastUnix;
                       if (first != null && last != null) {
-                        return `${fmtUnixClock(first)} – ${fmtUnixClock(last)} · ${fmtHours(last - first)} wach`;
+                        return `${fmtUnixClock(first)} – ${fmtUnixClock(last)} · ${fmtHours(last - first)} ${t('diary.wakeUnit')}`;
                       }
-                      if (last != null) return `zuletzt wach ${fmtUnixClock(last)}`;
-                      if (first != null) return `zuerst wach ${fmtUnixClock(first)}`;
+                      if (last != null) return `${t('diary.wakeLast')} ${fmtUnixClock(last)}`;
+                      if (first != null) return `${t('diary.wakeFirst')} ${fmtUnixClock(first)}`;
                       return null;
                     })()}
                   </p>
@@ -170,18 +173,19 @@ function ShortDiary() {
   );
 }
 
-/** Zeichengrenze für Vorschau/Weiterlesen — gleich wie Traum-Karten. */
+/** Character threshold for preview/read-more — matches the dream cards. */
 const REPORT_COLLAPSE_AT = 600;
 
 function DiaryReportBlock({ report }: { report: NonNullable<DiaryNoteDay['report']> }) {
-  // `long` aus dem aktuellen Inhalt ableiten (nicht nur beim Mount) — sonst
-  // kann ein Refetch die Karte in einem veralteten Zustand „klemmen" lassen.
+  const t = useT();
+  // Derive `long` from the current content (not just on mount) — otherwise
+  // a refetch could leave the card "stuck" in a stale state.
   const long = report.report.length > REPORT_COLLAPSE_AT;
   const [expanded, setExpanded] = useState(false);
   const open = !long || expanded;
-  // Whitespace normalisieren: mehrfach aufeinanderfolgende Leerzeilen werden
-  // zu einer einzigen zusammen­gezogen, damit eingerückte Mehrzeiler im
-  // Vorschau-Clip nicht „ausgefranst" wirken.
+  // Normalise whitespace: collapse three or more consecutive blank lines into
+  // a single blank line so indented multi-line bodies do not look ragged inside
+  // the preview clip.
   const normalized = report.report.replace(/\n{3,}/g, '\n\n').trim();
 
   return (
@@ -210,7 +214,7 @@ function DiaryReportBlock({ report }: { report: NonNullable<DiaryNoteDay['report
           }}
           className="press mt-1.5 inline-flex items-center gap-1 text-[13px] font-semibold text-primary"
         >
-          {expanded ? 'Weniger' : 'Weiterlesen'}
+          {expanded ? t('action.less') : t('action.more')}
           <ChevronDown size={15} className={cx('transition-transform', expanded && 'rotate-180')} />
         </button>
       )}

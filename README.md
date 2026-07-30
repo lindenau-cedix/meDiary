@@ -1,180 +1,183 @@
 # meDiary
 
-Ein sorgfältig gestaltetes **Medikations-Tagebuch** mit HTTP-API, SQLite-Datenbank
-und einem touch-first Frontend für **PC, iPad und Android (als APK)**.
+A carefully crafted **medication diary** with HTTP API, SQLite database, and a
+touch-first frontend for **PC, iPad, and Android (as an APK)**.
 
-meDiary erfasst Einnahmezeitpunkte mit einem Tipp, führt einen **versionierten
-Medikationsplan** (inkl. „was war vor X Tagen anders?"), übernimmt automatisch
-hinterlegte Standard-Notizen aus einer `DEFAULTS.md` und fragt nach Einnahme der
-**Nachtmedikation** ein **Tagesbild** aus 11 klinischen Skalen (1–10) ab.
+meDiary records intake events with a single tap, maintains a **versioned
+medication plan** (including "what was different X days ago?"), auto-applies
+default notes from a `DEFAULTS.md`, and — after the night medication is taken
+— prompts you for an **11-scale daily assessment** (1–10).
+
+The UI is available in German and English, auto-detected from the browser with
+a switcher in Settings; German remains the fallback.
 
 ```
 meDiary/
-├── server/   → HTTP-API (Express + TypeScript + SQLite)
-└── web/      → Frontend (React + Vite + Tailwind, Capacitor-fähig)
+├── server/   → HTTP API (Express + TypeScript + SQLite)
+└── web/      → Frontend (React + Vite + Tailwind, Capacitor-ready)
 ```
 
 ---
 
-## Funktionsumfang
+## Features
 
-| Anforderung | Umsetzung |
+| Requirement | Implementation |
 |---|---|
-| HTTP-API schreibt/liest aus Datenbank | Express-API + SQLite (`better-sqlite3`) |
-| Medikationsplan **mit Verlauf** | Versionierte Snapshots, Stichtags-Abfrage & Diff |
-| Einnahmen (Zeitpunkt, Substanz, Menge, Notizen) | `intakes`-Endpunkte, Verlaufsansicht |
-| `DEFAULTS.md` für Standard-Notizen | Parser mit mtime-Cache, automatische Übernahme |
-| Eigene Substanz-Liste zum Antippen | Substanz-Verwaltung (Farbe, Dosis, Nachtmed) |
-| Datum/Uhrzeit auf **jetzt** vorbelegt | Composer mit „Jetzt"-Reset |
-| Plan im Frontend einstellbar | Voll editierbarer Plan-Editor (neue Version) |
-| Einnahmen darstellen | Verlauf, nach Tagen gruppiert, filterbar |
-| Nachtmed → 11 Skalen 1–10 abfragen | Automatisch ausgelöstes Tagesbild-Sheet |
-| **Tagesbericht des Hermes-Agents** | `POST /api/report/new` (03:30-Cron-Upsert pro Konsum-Tag); erscheint im **Tagebuch-Info-Subtab** und im **Traum-Kontext** (sodass M3 Coding/Cron/Deploys des Tages kennt) |
-| Sehr gutes, nicht „billiges" Design | Eigenes „Apotheken"-Designsystem, Light/Dark |
-| PC / iPad / Android, leicht & schnell | Responsives Touch-UI, Safe-Areas, Haptik, APK |
+| HTTP API reads/writes the database | Express API + SQLite (`better-sqlite3`) |
+| Medication plan **with history** | Versioned snapshots, as-of queries, and diff |
+| Intakes (timestamp, substance, amount, notes) | `intakes` endpoints, history view |
+| `DEFAULTS.md` for default notes | Parser with mtime cache, automatic application |
+| Tappable custom substance list | Substance management (color, dose, night med) |
+| Date/time pre-filled to **now** | Composer with "Now" reset |
+| Plan editable in the frontend | Fully editable plan editor (new version) |
+| Intakes view | History grouped by day, filterable |
+| Night med → 11 scales 1–10 | Automatically triggered assessment sheet |
+| **Hermes agent daily report** | `POST /api/report/new` (03:30 cron upsert per consumption day); appears in the **diary info sub-tab** and in the **dream context** (so M3 knows about coding/cron/deploys of the day) |
+| Top-quality, not "cheap" design | Custom "pharmacy" design system, light/dark |
+| PC / iPad / Android, light & fast | Responsive touch UI, safe areas, haptics, APK |
 
-Die 11 Tages-Skalen (Reihenfolge gemäß `import/konsum_tagebuch_skalen.md`):
-**Schlafqualität, Müdigkeit/Erschöpfung, Stabilität, Psychotisch/Realitätsferne,
-Stimmung, Leistung/Funktion im Alltag, Angst/innere Anspannung, Craving/Suchtdruck,
-Überstimulation/Getriebenheit, Sedierung/Benommenheit, Schmerz/körperliche Beschwerden.**
+The 11 daily scales (order matches `import/konsum_tagebuch_skalen.md`):
+**sleep quality, fatigue/exhaustion, stability, psychotic/detached-from-reality,
+mood, daily functioning, anxiety/internal tension, craving/addiction pressure,
+overstimulation/feeling driven, sedation/drowsiness, pain/physical complaints.**
 
 ---
 
-## Schnellstart
+## Quickstart
 
-**Voraussetzungen:** Node.js ≥ 18 (getestet mit 22).
+**Requirements:** Node.js ≥ 18 (tested with 22).
 
 ```bash
-# 1) Abhängigkeiten installieren (Server + Web)
+# 1) Install dependencies (server + web)
 npm run install:all
-# (optional) Bequemlichkeit im Wurzelordner:
+# (optional) Convenience helper in the root folder:
 npm install
 
-# 2) Beispiel-Daten anlegen (Substanzen, 2 Planversionen, Einnahmen, Tagesbilder)
+# 2) Seed example data (substances, 2 plan versions, intakes, daily assessments)
 npm run seed
 
-# 3) API + Frontend gemeinsam starten
+# 3) Start API + frontend together
 npm run dev
 ```
 
-- API: <http://localhost:4000>  ·  Frontend (Dev): <http://localhost:5173>
-- Der Dev-Server proxyt `/api` automatisch auf die API.
+- API: <http://localhost:4000> · Frontend (dev): <http://localhost:5173>
+- The dev server proxies `/api` to the API automatically.
 
-Server und Web lassen sich auch einzeln starten:
+Server and web can also be started individually:
 
 ```bash
-npm run dev:server     # nur API
-npm run dev:web        # nur Frontend
+npm run dev:server     # API only
+npm run dev:web        # frontend only
 ```
 
-> Läuft die API auf einem anderen Port, beim Web-Dev-Start setzen:
+> If the API runs on a different port, set this when starting the web dev server:
 > `VITE_API_PROXY=http://localhost:4123 npm run dev:web`
 
-### Konfiguration (Server)
+### Server configuration
 
-`server/.env` (siehe `server/.env.example`):
+`server/.env` (see `server/.env.example`):
 
 ```
 PORT=4000
 DB_PATH=./data/mediary.db
-DEFAULTS_PATH=../DEFAULTS.md   # DEFAULTS.md im Projekt-Wurzelverzeichnis
-WEB_DIST=          # optional: Pfad zu web/dist, um das Frontend mit auszuliefern
+DEFAULTS_PATH=../DEFAULTS.md   # DEFAULTS.md in the project root
+WEB_DIST=          # optional: path to web/dist to serve the frontend from
 ```
 
 ---
 
-## Produktion (Docker Compose)
+## Production (Docker Compose)
 
 ```bash
 docker compose up -d --build
 ```
 
-Ein Container liefert API **und** Frontend auf Port 4000 aus. Die SQLite-DB,
-`DEFAULTS.md` und die generierte Tagebuch-Datei liegen im Repo-Root unter
-`./data`. Der Container läuft mit `restart: unless-stopped`.
+One container serves both the API **and** the frontend on port 4000. The
+SQLite DB, `DEFAULTS.md`, and the generated diary file live in the repo root
+under `./data`. The container runs with `restart: unless-stopped`.
 
 ```bash
-docker compose exec mediary node dist/seed.js   # optional: Demodaten
-docker compose logs -f                 # Logs
+docker compose exec mediary node dist/seed.js   # optional: demo data
+docker compose logs -f                 # logs
 ```
 
-App: <http://localhost:4000> · API: `…/api/health`. **Backup** = `./data` sichern,
-z. B. `sqlite3 ./data/mediary.db ".backup ./data/backup-$(date +%F).db"`.
+App: <http://localhost:4000> · API: `…/api/health`. **Backup** = back up `./data`,
+e.g. `sqlite3 ./data/mediary.db ".backup ./data/backup-$(date +%F).db"`.
 
-**Von überall (HTTPS):** [Caddy](https://caddyserver.com) davor stellen — eine
-`Caddyfile` mit `deine-domain.de { reverse_proxy mediary:4000 }`, beide Dienste
-im selben `docker-compose.yml`, und `mediary` aus den `ports` nehmen (nur intern).
+**Expose publicly (HTTPS):** put [Caddy](https://caddyserver.com) in front — a
+`Caddyfile` with `your-domain.de { reverse_proxy mediary:4000 }`, both services
+in the same `docker-compose.yml`, and remove `mediary` from `ports` (internal only).
 
-### Lokale Produktion Ohne Docker
+### Local production without Docker
 
 ```bash
 npm run build
 WEB_DIST=../web/dist DB_PATH=../data/mediary-local.db DEFAULTS_PATH=../DEFAULTS.md npm run start
 ```
 
-Danach ist die komplette App unter <http://localhost:4000> erreichbar.
+After that the complete app is reachable at <http://localhost:4000>.
 
-### Android-APK an den Server koppeln
+### Pairing the Android APK with the server
 
-Egal ob Docker oder lokaler LAN-Server: in der App **Einstellungen → Server** die
-Adresse eintragen — `http://<LAN-IP>:4000` im Heimnetz (Klartext ist erlaubt)
-bzw. `https://deine-domain.de` von außen.
+Whether Docker or a local LAN server: in the app open **Settings → Server** and
+enter the address — `http://<LAN-IP>:4000` on the home network (plaintext is
+allowed) or `https://your-domain.de` from outside.
 
 ---
 
-## Daten importieren (`import/`-Ordner)
+## Importing data (`import/` folder)
 
-Der Importer nutzt die **kuratierten Markdown-Logs als Hauptquelle** (sie sind sauberer
-als `entries.jsonl`: exakte Uhrzeiten, klare Substanznamen, Korrekturen bereits
-eingearbeitet) und füllt mit `entries.jsonl` nur die Lücken:
+The importer uses the **curated Markdown logs as its primary source** (they're
+cleaner than `entries.jsonl`: exact timestamps, clear substance names, corrections
+already incorporated) and only fills gaps with `entries.jsonl`:
 
-| Quelle | liefert |
+| Source | Provides |
 |---|---|
-| `medikations_akutverlauf.md` | Akut-/Bedarfseinnahmen (primär, getimt) |
-| `medikationsplan_verlauf.md` | versionierter Plan (Voll-Snapshots + Deltas, chronologisch) |
-| `konsum_tagebuch_skalen.md` | Tagesbilder (11 Skalen; 10- oder 11-Werte-Zeilen) |
-| `entries.jsonl` | **Lückenfüller**: planmäßige Einnahmen + alles, was die Markdown-Logs nicht abdecken (z. B. der 09.06.); Korrekturen |
+| `medikations_akutverlauf.md` | Acute / as-needed intakes (primary, timed) |
+| `medikationsplan_verlauf.md` | Versioned plan (full snapshots + deltas, chronological) |
+| `konsum_tagebuch_skalen.md` | Daily assessments (11 scales; 10- or 11-value lines) |
+| `entries.jsonl` | **Gap filler**: scheduled intakes + everything the Markdown logs don't cover (e.g. 09.06); corrections |
 
-Bei Überschneidung **gewinnt Markdown**: ein jsonl-Eintrag wird übersprungen, wenn
-dieselbe (Tag, Uhrzeit) bzw. – bei fehlender Uhrzeit – dasselbe (Tag, Substanz) bereits
-aus Markdown vorliegt. Tagessummen/Kontextzeilen und fehlgeloggte Klartext-Korrekturen
-werden gefiltert. **Idempotent** über `source_event_id`; **Dry-Run ist Standard** —
-es wird erst mit `--commit` geschrieben.
+On overlap **Markdown wins**: a jsonl entry is skipped if the same
+(day, time) — or, when no time, the same (day, substance) — already comes from
+Markdown. Daily totals/context lines and mislogged plaintext corrections are
+filtered out. **Idempotent** via `source_event_id`; **dry-run is the default** —
+only `--commit` writes.
 
-**Lokal (Node):**
+**Locally (Node):**
 ```bash
-npm --prefix server run import                 # Dry-Run: zeigt nur, was käme
-npm --prefix server run import -- --commit     # tatsächlich schreiben
-# sauberer Neu-Import: --commit --reset-imported
+npm --prefix server run import                 # dry run: shows only what would be written
+npm --prefix server run import -- --commit     # actually write
+# for a clean reimport: --commit --reset-imported
 ```
 
-**Docker (Live-System):** den Ordner in einen Einmal-Container mounten — schreibt in
-dieselbe DB (`/data`-Volume). Vorher Image bauen (`docker compose build`).
+**Docker (live system):** mount the folder into a one-off container — it writes to
+the same DB (`/data` volume). Build the image first (`docker compose build`).
 ```bash
-# Dry-Run:
+# Dry run:
 docker compose run --rm -v "$PWD/import:/import:ro" -e IMPORT_DIR=/import \
   mediary node dist/import.js
-# Schreiben (Server kurz stoppen vermeidet DB-Lock):
+# Writing (stopping the server briefly avoids DB locks):
 docker compose stop mediary
 docker compose run --rm -v "$PWD/import:/import:ro" -e IMPORT_DIR=/import \
   mediary node dist/import.js --commit
 docker compose start mediary
 ```
 
-> Hinweis: Substanznamen werden bestmöglich gekürzt, der **vollständige Originaltext
-> steht jeweils in der Notiz**. Die 11 App-Skalen entsprechen jetzt exakt der
-> `konsum_tagebuch_skalen.md`. Der 09.06. liegt in `entries.jsonl` unsauber vor
-> (finale Timeline + ältere Korrektur-Nachrichten als Einnahmen) — kurz im Verlauf
-> gegenlesen.
+> Note: substance names are abbreviated as best as possible, with the **full
+> original text kept in the note**. The 11 app scales now exactly match
+> `konsum_tagebuch_skalen.md`. 09.06 is in `entries.jsonl` in messy form
+> (final timeline + older correction messages as intakes) — quickly cross-check
+> in the history.
 
 ---
 
 ## `DEFAULTS.md`
 
-Standard-**Notizen und -Mengen** pro Substanz. Werden beim Anlegen einer Einnahme
-automatisch übernommen, wenn Menge bzw. Notiz nicht selbst angegeben wurden — die
-konkrete Eingabe hat immer Vorrang. Die API liest die Datei **bei jedem
-Schreibvorgang frisch** (kein Cache).
+Default **notes and amounts** per substance. When a new intake is recorded
+these are automatically applied if the amount or note was not explicitly given —
+the explicit input always wins. The API reads the file **fresh on every write**
+(no cache).
 
 ```markdown
 ## CBD-Joints
@@ -189,127 +192,123 @@ Menge: 400 mg
 Mit: Lemon Balm | 100 mg | als 5:1-Extrakt
 ```
 
-`Menge:` (alias `Dosis:`) → Standard-Menge, `Notiz:` (alias `Hinweis:`) →
-Standard-Notiz; reiner Fließtext unter der Überschrift zählt ebenfalls als Notiz.
-Die Datei liegt im **Projekt-Wurzelverzeichnis** (`DEFAULTS.md`) und ist auch in den
-**Einstellungen** des Frontends bearbeitbar.
+`Menge:` (alias `Dosis:`) → default amount, `Notiz:` (alias `Hinweis:`) →
+default note; plain prose under the heading also counts as a note. The file
+lives at the **project root** (`DEFAULTS.md`) and can also be edited from the
+frontend's **Settings** screen.
 
-### Begleitsubstanzen (`Mit:`)
+### Companion substances (`Mit:`)
 
-`Mit: <Name> | <Menge> | <Notiz>` (alias `Zusammen mit:`) erfasst beim Eintragen
-der Substanz **automatisch eine zweite Einnahme** für die genannte
-Begleitsubstanz — gleicher Zeitpunkt, Menge/Notiz optional (ohne Angabe gelten
-die Defaults der Begleitsubstanz: eigener DEFAULTS-Eintrag).
-Mehrere `Mit:`-Zeilen sind möglich. `Mit:`-Angaben der Begleitsubstanz werden
-**nicht weiterverfolgt** (eine Ebene, keine Zyklen); Selbstbezüge werden
-übersprungen. Die Begleitsubstanz wird bei Bedarf als QuickPick angelegt, ihr
-Eintrag bekommt `source_event_id = companion:<id-des-auslösenden-Eintrags>`.
-Ist die Begleitsubstanz eine Nachtmedikation, wird das Tagesbild genauso
-ausgelöst. Gilt nur für `POST /api/intakes` (nicht für Importer/XLSX/PATCH);
-`{"companions": false}` im Request schaltet es ab. Die Antwort enthält die
-angelegten Einträge unter `companions[]`, der Composer zeigt eine Vorschau
-(„Automatisch dazu: …") und „Rückgängig" im Toast entfernt Haupt- und
-Begleit-Einträge gemeinsam.
+`Mit: <Name> | <Menge> | <Notiz>` (alias `Zusammen mit:`) automatically records a
+**second intake** for the named companion substance when the main intake is
+saved — same timestamp, amount/note optional (defaults come from the companion
+substance's own DEFAULTS entry: its own DEFAULTS row). Multiple `Mit:` lines
+are allowed. `Mit:` entries **on the companion** are not followed (one level
+only, no cycles); self-references are skipped. The companion is auto-created
+as a QuickPick if needed; its entry gets
+`source_event_id = companion:<id-of-the-triggering-entry>`. If the companion is
+a night medication, the daily assessment is also triggered. Applies only to
+`POST /api/intakes` (not for the importer/XLSX/PATCH); `{"companions": false}`
+in the request disables it. The response includes the created entries under
+`companions[]`; the composer shows a preview ("Auto-added: …") and the undo
+toast removes main and companion entries together.
 
-> Programmatische Regeln aus früheren Notizen sind in den Code gewandert: die
-> **Tagesgrenze des Konsum-Tags (03:30 Europe/Berlin)** liegt in
-> `server/src/lib/time.ts` (`DAY_BOUNDARY`) und bestimmt, welchem Tag das Tagesbild
-> einer Nachtmedikation zugeordnet wird (Einnahmen 00:00–03:29 → Vortag).
+> Programmatic rules from older notes have moved into the code: the
+> **consumption day boundary (03:30 Europe/Berlin)** lives in
+> `server/src/lib/time.ts` (`DAY_BOUNDARY`) and determines which day the daily
+> assessment of a night medication is assigned to (intakes 00:00–03:29 → previous day).
 
-### Automatische Substanz-QuickPicks
+### Automatic substance QuickPicks
 
-Jede Substanz, die jemals per `POST /api/intakes` mit `substanceName` erfasst
-wurde (z. B. aus dem WhatsApp-Importer oder einer externen App), wird
-**automatisch als Kachel** in der Substanz-Liste angelegt. Dafür sorgt
-`server/src/lib/substances.ts → findOrCreateSubstance()`. Beim **Serverstart**
-läuft zusätzlich `backfillSubstancesFromIntakes()`, das bestehende Einnahmen
-ohne `substance_id` rückwirkend verknüpft; der Importer macht das nach
-`--commit` ebenfalls in einem Schritt. Das Matching ist Unicode-aware
-(`toLocaleLowerCase('de')`), damit `CBD-Öl` und `cbd-öl` zusammenfinden.
+Every substance that has ever been recorded via `POST /api/intakes` with
+`substanceName` (e.g. from the WhatsApp importer or an external app) is
+**automatically created as a tile** in the substance list. This is handled by
+`server/src/lib/substances.ts → findOrCreateSubstance()`. At **server startup**
+`backfillSubstancesFromIntakes()` also runs, retroactively linking existing
+intakes without a `substance_id`; the importer does the same in one step after
+`--commit`. Matching is Unicode-aware (`toLocaleLowerCase('de')`), so
+`CBD-Öl` and `cbd-öl` end up together.
 
-### DEFAULTS-Compliance-Check
+### DEFAULTS compliance check
 
-`GET /api/defaults/check` vergleicht **jede Substanz** (aus `substances` und
-aus `intakes`) gegen die Einträge in `DEFAULTS.md` und liefert eine Aufteilung
-in `compliant` (hat Eintrag) und `missing` (kein Eintrag). Das Frontend
-nutzt das auf zwei Arten:
+`GET /api/defaults/check` compares **every substance** (from `substances` and
+from `intakes`) against the entries in `DEFAULTS.md` and returns a split into
+`compliant` (has an entry) and `missing` (no entry). The frontend uses this in
+two places:
 
-- Auf dem **Heute-Bildschirm** zeigt eine Warnkarte oben an, wie viele
-  Substanzen ohne DEFAULTS-Eintrag sind; betroffene Kacheln bekommen ein
-  kleines Warn-Icon.
-- In den **Einstellungen → Prüfung: DEFAULTS.md** gibt es eine Liste aller
-  „missing"-Substanzen mit Einnahme-Zähler und einem **„Eintrag"-Button**,
-  der im DEFAULTS-Editor sofort einen neuen Abschnitt `## <Name>` mit
-  leerer `Notiz:`-Zeile anlegt und den Cursor dorthin springen lässt.
+- On the **Today screen** a warning card at the top shows how many substances
+  are missing a DEFAULTS entry; affected tiles get a small warning icon.
+- In **Settings → Check: DEFAULTS.md** there's a list of all "missing"
+  substances with an intake counter and an **"Add entry"** button that creates
+  a new `## <Name>` section in the DEFAULTS editor with an empty `Notiz:` line
+  and jumps the cursor there.
 
-So wird das Pflegen von `DEFAULTS.md` zum Bestandteil des üblichen
-Eintragens, statt eine separate Pflicht-Übung zu sein.
+This turns maintaining `DEFAULTS.md` into part of the normal entry workflow
+instead of a separate chore.
 
 ---
 
-## Nächtliches „Träumen" (Tages-Auswertung per MiniMax M3)
+## Nightly "Dreaming" (daily assessment via MiniMax M3)
 
-Jede Nacht um **04:20** schickt der Server den Tageskontext (Plan, Einnahmen,
-Wachzeit, Notizen, 11 Skalen) an **MiniMax M3** und speichert die Auswertung als
-„Traum" pro Tag. Ohne API-Key bleibt alles beim Alten — der Scheduler startet
-einfach nicht, die Anzeige funktioniert weiter.
+Every night at **04:20** the server sends the day's context (plan, intakes,
+wake time, notes, 11 scales) to **MiniMax M3** and saves the result as a
+"dream" per day. Without an API key nothing changes — the scheduler simply
+doesn't start, the display continues to work.
 
-### Auf einer bestehenden (älteren) Instanz aktivieren
+### Enabling on an existing (older) instance
 
-1. **Neuen Code ziehen** (`git pull`).
-2. **API-Key in `.env`** (Projekt-Wurzel) eintragen:
+1. **Pull the new code** (`git pull`).
+2. **Add the API key to `.env`** (project root):
    ```
    MINIMAX_API_KEY=sk-...
    # optional:
-   DREAM_TRIGGER_TOKEN=<langes-zufälliges-geheimnis>   # für externen/Cron-Trigger
-   DREAM_TIME=04:20                                     # Uhrzeit des Laufs (lokal)
+   DREAM_TRIGGER_TOKEN=<long-random-secret>   # for external/cron trigger
+   DREAM_TIME=04:20                            # run time (local)
    ```
-3. **Neu bauen/starten:** `docker compose up -d --build`. Der Server legt die
-   `dreams`-Tabelle beim Start **idempotent** an (keine manuelle Migration nötig).
+3. **Rebuild/start:** `docker compose up -d --build`. The server creates the
+   `dreams` table on startup **idempotently** (no manual migration needed).
 
-Das war's. Beim nächsten 04:20-Lauf entsteht der erste Traum; verpasste Tage
-(z. B. weil der Rechner nachts aus war) holt ein **Catch-up beim Serverstart**
-für die letzten 7 Tage automatisch nach.
+That's it. The next 04:20 run produces the first dream; missed days (e.g.
+because the machine was off at night) are caught up automatically by a
+**server-startup catch-up** for the last 7 days.
 
-### Sofort testen (ohne auf 04:20 zu warten)
+### Test immediately (without waiting for 04:20)
 
 ```bash
-npm --prefix server run dream -- --force            # Konsum-Vortag, vorhandenen überschreiben
-npm --prefix server run dream -- --date=2026-06-16  # bestimmter Tag
+npm --prefix server run dream -- --force            # previous consumption day, overwrite existing
+npm --prefix server run dream -- --date=2026-06-16  # specific day
 ```
 
-> Der Schlüssel wird **ausschließlich serverseitig** verwendet, nie im Frontend.
-> Der manuelle HTTP-Trigger `POST /api/dreams/generate` ist fail-closed: er
-> verlangt den `DREAM_TRIGGER_TOKEN` (Header `X-Dream-Token`) — hinter einem
-> Reverse-Proxy/Tunnel zählt „localhost" **nicht** als Authentifizierung.
-> Die vollständige Variablen-Liste steht in `.env.example`.
+> The key is used **server-side only**, never in the frontend. The manual HTTP
+> trigger `POST /api/dreams/generate` is fail-closed: it requires the
+> `DREAM_TRIGGER_TOKEN` (header `X-Dream-Token`) — behind a reverse
+> proxy/tunnel "localhost" does **not** count as authentication. The complete
+> variable list is in `.env.example`.
 
-### Tagesbericht des Hermes-Agents → Traum + Info-Subtab
+### Hermes agent daily report → dream + info sub-tab
 
-Zusätzlich zu den 11 Skalen und Notizen kennt das nächtliche „Träumen" einen
-**Tagesbericht des Hermes-Agents**: was am Tag mit dem Agent gemacht wurde
-(Coding-Sessions, Cron-Läufe, Deploys, Fehler, …). Der Bericht wird vom
-**03:30-Berlin-Cron** per `POST /api/report/new` eingeliefert und fließt an
-drei Stellen:
+In addition to the 11 scales and notes, the nightly "dreaming" knows about a
+**Hermes agent daily report**: what the agent did during the day (coding
+sessions, cron runs, deploys, errors, …). The report is delivered by the
+**03:30 Berlin cron** via `POST /api/report/new` and flows to three places:
 
-1. **Traum-Kontext** — `gatherDreamContext` zieht den Bericht des Ziel-Tags
-   **und** die jüngsten 7 Berichte (`reportsBefore`) als eigene Sektionen
-   in den Traum-Prompt. M3 kann so Muster zwischen Agent-Aktivität und
-   Tagesbefinden herstellen.
-2. **Tagebuch-Info-Subtab** — der Bericht erscheint als eigene
-   „Hermes-Agent"-Sektion (Lucide-Icon `Bot`, mit optionaler Quellenangabe).
-   Lange Berichte (> 600 Zeichen) klappen hinter „Weiterlesen" zusammen —
-   gleiche Schwelle wie die Traum-Karten. Tage mit NUR einem Bericht (keine
-   Einnahmen / kein Tagesbild / keine Wachzeit) erscheinen ebenfalls.
-3. **KI-Tagebuch-Prompt** — `buildDayPrompt` reicht den Bericht an die
-   schreibende KI weiter, sodass die generierten Volltexte auch die
-   Agent-Aktivität einbeziehen können.
+1. **Dream context** — `gatherDreamContext` pulls the target day's report
+   **and** the most recent 7 reports (`reportsBefore`) as their own sections
+   into the dream prompt. M3 can thus recognise patterns between agent
+   activity and the day's well-being.
+2. **Diary info sub-tab** — the report appears as its own "Hermes agent"
+   section (Lucide icon `Bot`, with optional source marker). Long reports
+   (> 600 characters) collapse behind a "Read more" — same threshold as the
+   dream cards. Days with ONLY a report (no intakes / no assessment / no
+   wake time) also show up.
+3. **AI diary prompt** — `buildDayPrompt` passes the report on to the writing
+   AI, so the generated full texts can also incorporate agent activity.
 
-Default-`date` = `dreamTargetDate(now)` (Konsum-Vortag) — der 03:30-Cron muss
-also nichts mitsenden und landet exakt auf dem Tag, über den 42 Minuten
-später geträumt wird.
+Default `date` = `dreamTargetDate(now)` (previous consumption day) — the 03:30
+cron doesn't need to send anything and lands exactly on the day the dream is
+produced for 42 minutes later.
 
-**Cron-Beispiel (in der Hermes-Host-Crontab):**
+**Cron example (in the Hermes host crontab):**
 
 ```bash
 curl -fsS -X POST "${MEDIARY_URL}/api/report/new" \
@@ -317,97 +316,98 @@ curl -fsS -X POST "${MEDIARY_URL}/api/report/new" \
   -d "{\"report\":\"$(cat /var/log/hermes/daily-report.md)\",\"source\":\"hermes-cron-0330\"}"
 ```
 
-**Manuell eintragen (z. B. ein verlorengegangener Tag):**
+**Manual entry (e.g. a missed day):**
 
 ```bash
 curl -sS -X POST "${MEDIARY_URL}/api/report/new" \
   -H 'Content-Type: application/json' \
-  -d '{"date":"2026-07-02","report":"Coding-Session: built X, fixed Y.","source":"manual"}'
+  -d '{"date":"2026-07-02","report":"Coding session: built X, fixed Y.","source":"manual"}'
 ```
 
 ---
 
-## API-Referenz (Auszug)
+## API reference (excerpt)
 
-| Methode | Pfad | Zweck |
+| Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/health` | Status |
-| `GET` | `/api/metrics` | Definition der 11 Skalen |
-| `GET/POST` | `/api/substances` | Substanzen lesen / anlegen |
-| `PATCH/DELETE` | `/api/substances/:id` | ändern / archivieren (`?hard=true` löscht) |
-| `GET/POST` | `/api/intakes` | Einnahmen lesen / anlegen (DEFAULTS-Logik) |
-| `PATCH/DELETE` | `/api/intakes/:id` | ändern / löschen |
-| `GET` | `/api/plan` | aktueller Plan |
-| `GET` | `/api/plan/at?date=…` \| `?days=N` | Plan zum Stichtag |
-| `GET` | `/api/plan/diff?days=N` | Änderungen ggü. „vor N Tagen" |
-| `GET` | `/api/plan/versions` | Versions-Verlauf |
-| `PUT` | `/api/plan` | neue Plan-Version speichern |
-| `GET` | `/api/assessments?from=&to=` | Tagesbilder (für Trends) |
-| `GET/PUT/DELETE` | `/api/assessments/:date` | Tagesbild lesen / speichern / löschen |
-| `GET/PUT` | `/api/defaults` | DEFAULTS.md lesen / schreiben |
-| `GET` | `/api/defaults/check` | DEFAULTS-Compliance-Bericht (alle Substanzen mit/ohne Eintrag) |
-| `GET` | `/api/diary/notes?from=&to=` | Kurzversion: Notizen je Konsum-Tag (Einnahme-Notizen + Tagesbild + Wachzeit + **Hermes-Agent-Tagesbericht**) |
-| `GET` | `/api/diary` | Zustand des KI-Voll-Tagebuchs |
-| `POST` | `/api/diary/generate` | KI-Volltext generieren |
-| `PUT` | `/api/diary` | Tagebuch-Datei manuell überschreiben |
-| `GET` | `/api/habit?from=&to=` | Tägliche Wachzeit (Liste) |
-| `POST` | `/api/habit/uptime` | Wachzeit melden |
-| `GET` | `/api/dreams?from=&to=&limit=` | Träume (nächtliche Auswertungen) |
-| `POST` | `/api/dreams/generate` | Traum manuell generieren (`X-Dream-Token`) |
-| `POST` | `/api/report/new` | **Tagesbericht des Hermes-Agents** einliefern (`{ date?, report, source? }`); idempotenter Upsert pro Konsum-Tag (Default-`date` = Konsum-Vortag). Fließt in den Traum-Kontext und in den Tagebuch-Info-Subtab. |
-| `GET` | `/api/report?from=&to=&limit=` | Tagesberichte-Liste |
-| `GET` | `/api/report/:date` | Einzelner Tagesbericht |
-| `DELETE` | `/api/report/:date` | Tagesbericht löschen |
-| `GET` | `/api/chat/status` | Daten-Konsole: Verfügbarkeit |
-| `POST` | `/api/chat/message` | **SSE** — Natürlichsprache-Anfrage (CF-Access, rate-limitiert) |
+| `GET` | `/api/metrics` | Definition of the 11 scales |
+| `GET/POST` | `/api/substances` | List/create substances |
+| `PATCH/DELETE` | `/api/substances/:id` | Edit / archive (`?hard=true` deletes) |
+| `GET/POST` | `/api/intakes` | Read / create intakes (DEFAULTS logic) |
+| `PATCH/DELETE` | `/api/intakes/:id` | Edit / delete |
+| `GET` | `/api/plan` | Current plan |
+| `GET` | `/api/plan/at?date=…` \| `?days=N` | Plan as of date |
+| `GET` | `/api/plan/diff?days=N` | Diff vs. "N days ago" |
+| `GET` | `/api/plan/versions` | Version history |
+| `PUT` | `/api/plan` | Save a new plan version |
+| `GET` | `/api/assessments?from=&to=` | Daily assessments (for trends) |
+| `GET/PUT/DELETE` | `/api/assessments/:date` | Read / save / delete assessment |
+| `GET/PUT` | `/api/defaults` | Read / write DEFAULTS.md |
+| `GET` | `/api/defaults/check` | DEFAULTS compliance report (all substances with/without entry) |
+| `GET` | `/api/diary/notes?from=&to=` | Short version: notes per consumption day (intake notes + assessment + wake time + **Hermes agent daily report**) |
+| `GET` | `/api/diary` | State of the AI full diary |
+| `POST` | `/api/diary/generate` | Generate AI full text |
+| `PUT` | `/api/diary` | Manually overwrite the diary file |
+| `GET` | `/api/habit?from=&to=` | Daily wake time (list) |
+| `POST` | `/api/habit/uptime` | Report wake time |
+| `GET` | `/api/dreams?from=&to=&limit=` | Dreams (nightly assessments) |
+| `POST` | `/api/dreams/generate` | Manually generate a dream (`X-Dream-Token`) |
+| `POST` | `/api/report/new` | **Hermes agent daily report** submit (`{ date?, report, source? }`); idempotent upsert per consumption day (default `date` = previous consumption day). Flows into the dream context and the diary info sub-tab. |
+| `GET` | `/api/report?from=&to=&limit=` | Daily report list |
+| `GET` | `/api/report/:date` | Single daily report |
+| `DELETE` | `/api/report/:date` | Delete daily report |
+| `GET` | `/api/chat/status` | Data console: availability |
+| `POST` | `/api/chat/message` | **SSE** — natural-language request (CF-Access, rate-limited) |
 
-`POST /api/intakes` liefert zusätzlich `{ nightMed, assessmentDate, assessmentExists }` —
-darüber öffnet das Frontend bei Nachtmedikation automatisch das Tagesbild.
+`POST /api/intakes` returns additional `{ nightMed, assessmentDate, assessmentExists }` —
+the frontend uses this to open the assessment sheet automatically after a night
+medication.
 
 ---
 
-## Android-APK (Capacitor)
+## Android APK (Capacitor)
 
-Das Frontend ist Capacitor-fähig. Voraussetzung für den Build: **Android Studio /
-Android SDK** und ein JDK (17+).
+The frontend is Capacitor-ready. Build prerequisites: **Android Studio /
+Android SDK** and a JDK (17+).
 
 ```bash
 cd web
-npm run build            # Web-Assets bauen (web/dist)
-npx cap add android      # einmalig: Android-Projekt anlegen
-npx cap sync android     # Assets + Plugins synchronisieren
-npx cap open android     # in Android Studio öffnen → APK bauen/Run
+npm run build            # build web assets (web/dist)
+npx cap add android      # one-time: create the Android project
+npx cap sync android     # sync assets + plugins
+npx cap open android     # open in Android Studio → build/run APK
 
-# alternativ direkt per Gradle:
+# or directly via Gradle:
 cd android && ./gradlew assembleDebug
 # → android/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-In der App unter **Einstellungen → Server** die Adresse der API eintragen
-(z. B. `http://192.168.1.20:4000`). HTTP im Heimnetz ist über die
-Capacitor-Konfiguration (`cleartext`) bereits erlaubt.
+In the app open **Settings → Server** and enter the API address
+(e.g. `http://192.168.1.20:4000`). Plaintext HTTP on the home network is
+already allowed via the Capacitor configuration (`cleartext`).
 
 ---
 
 ## Design
 
-- **Typografie:** *Fraunces* (Display) + *Hanken Grotesk* (UI) — lokal gebündelt,
-  funktioniert offline in der APK.
-- **Palette:** warme „Apotheken"-Töne, vollwertiger **Light- und Dark-Mode**
-  (native Datums-/Zeit-Picker passen sich via `color-scheme` an).
-- **Touch-first:** große Flächen, Safe-Area-Insets, Haptik, „Long-Press =
-  Soforteintrag", schwebende Bestätigung, Wisch-zu-schließen-Sheets.
-- Werte-Trends als handgezeichnete SVG-Charts (keine generische Chart-Lib).
+- **Typography:** *Fraunces* (display) + *Hanken Grotesk* (UI) — bundled
+  locally, works offline in the APK.
+- **Palette:** warm "pharmacy" tones, full-featured **light and dark mode**
+  (native date/time pickers adapt via `color-scheme`).
+- **Touch-first:** large hit targets, safe-area insets, haptics, "long-press =
+  instant entry", floating confirmation, swipe-to-close sheets.
+- Value trends rendered as hand-drawn SVG charts (no generic charting library).
 
 ---
 
-## Datenmodell (SQLite)
+## Data model (SQLite)
 
-- `substances` — antippbare Liste (Farbe, `is_night_med`; Standard-Menge liegt in `DEFAULTS.md`, nicht in der DB)
-- `intakes` — Einnahmen (Zeitpunkt, Substanz-Snapshot, Menge, Notizen)
-- `plan_versions` / `plan_items` — versionierter Plan (Morgens/Mittags/Abends/Nachts)
-- `daily_assessments` — Tagesbild je Datum (11 Skalen als JSON)
-- `daily_habits` — tägliche Wachzeit (`wake_first_unix`, `wake_last_unix`)
-- `daily_reports` — **Tagesbericht des Hermes-Agents** pro Konsum-Tag (`report` Freitext, `source` Marker) — eingeliefert per `POST /api/report/new`, fließt in Traum + Info-Subtab + KI-Tagebuch ein
-- `dreams` — nächtliche KI-Auswertung pro Tag
-- `chat_change_sets` — Audit-Log der Daten-Konsole
+- `substances` — tappable list (color, `is_night_med`; default amount lives in `DEFAULTS.md`, not in the DB)
+- `intakes` — intakes (timestamp, substance snapshot, amount, notes)
+- `plan_versions` / `plan_items` — versioned plan (morning/noon/evening/night)
+- `daily_assessments` — daily assessment per date (11 scales as JSON)
+- `daily_habits` — daily wake time (`wake_first_unix`, `wake_last_unix`)
+- `daily_reports` — **Hermes agent daily report** per consumption day (`report` free text, `source` marker) — submitted via `POST /api/report/new`, flows into dream + info sub-tab + AI diary
+- `dreams` — nightly AI assessment per day
+- `chat_change_sets` — audit log of the data console

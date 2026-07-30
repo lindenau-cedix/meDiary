@@ -15,7 +15,7 @@ const HIST_H = 56;
  * Nachts) als sofort lesbare Headline, darunter ein feines 24-Stunden-
  * Histogramm (Balken in der Farbe ihres Tagesabschnitts).
  */
-export function DaypartChart({ dist }: { dist: DaypartDistribution }) {
+export function DaypartChart({ dist, labels }: { dist: DaypartDistribution; labels: Record<Daypart, string> }) {
   const total = Math.max(dist.total, 1);
   const histMax = Math.max(1, ...dist.hours);
 
@@ -30,7 +30,7 @@ export function DaypartChart({ dist }: { dist: DaypartDistribution }) {
             <div
               key={d.key}
               style={{ width: `${share * 100}%`, backgroundColor: DAYPART_COLORS[d.key] }}
-              title={`${d.label}: ${dist.counts[d.key]}`}
+              title={`${labels[d.key]}: ${dist.counts[d.key]}`}
             />
           );
         })}
@@ -45,13 +45,13 @@ export function DaypartChart({ dist }: { dist: DaypartDistribution }) {
             <div key={d.key} className="min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="size-2 rounded-full shrink-0" style={{ backgroundColor: DAYPART_COLORS[d.key] }} />
-                <span className="text-[12px] font-medium text-ink truncate">{d.label}</span>
+                <span className="text-[12px] font-medium text-ink truncate">{labels[d.key]}</span>
               </div>
               <p className="font-display text-lg leading-tight text-ink tabular mt-0.5">
                 {count}
                 <span className="text-[11px] font-sans text-ink-faint ml-1">{pct}%</span>
               </p>
-              <p className="text-[10px] text-ink-faint tabular">{d.range} Uhr</p>
+              <p className="text-[10px] text-ink-faint tabular">{d.range}</p>
             </div>
           );
         })}

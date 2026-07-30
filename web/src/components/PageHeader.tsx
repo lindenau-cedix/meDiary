@@ -1,6 +1,11 @@
 import type { ReactNode } from 'react';
 import { cx } from '../lib/cx';
 
+/**
+ * Page-level header with an optional eyebrow row above the title and an
+ * optional action button on the right. The title and eyebrow are passed
+ * as ReactNodes so callers can slot in their own styled text or icons.
+ */
 export function PageHeader({
   eyebrow,
   title,

@@ -1,20 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Provider-Metadaten für das 1×1-Home-Screen-Widget „meDiary-Sample".
+  Provider metadata for the 1×1 “meDiary Sample” home-screen widget.
 
-  1×1-Zelle heißt: minWidth/minHeight deutlich kleiner als die typische
-  Launcher-Zelle (~70dp), damit der Picker genau eine Zelle belegt. Auf
-  modernen Launchern reicht `targetCellWidth`/`targetCellHeight` = 1 als
-  explizite Größenangabe (Android 12+); `minWidth`/`minHeight` bleibt
-  der Fallback für ältere Launcher.
+  A 1×1 cell means minWidth/minHeight must be considerably smaller than a
+  typical launcher cell (~70dp), so the picker occupies exactly one cell.
+  On modern launchers, `targetCellWidth`/`targetCellHeight` = 1 provides an
+  explicit size (Android 12+); `minWidth`/`minHeight` remains the fallback
+  for older launchers.
 
-  updatePeriodMillis = 0 → keine Auto-Refresh-Schleife. Das Widget
-  rendert nur bei Bedarf (onUpdate nach Add, onAppWidgetOptionsChanged,
-  oder nach Konfig-Änderung über `SampleWidgetProvider.updateAppWidget`).
+  updatePeriodMillis = 0 means there is no automatic refresh loop. The widget
+  renders only when needed (onUpdate after adding, onAppWidgetOptionsChanged,
+  or after a configuration change via `SampleWidgetProvider.updateAppWidget`).
 
-  `configure` startet `SampleWidgetConfigActivity` als ersten Schritt
-  beim Platzieren — das System legt das Widget erst an, NACHDEM die
-  Activity mit RESULT_OK zurückkehrt.
+  `configure` launches `SampleWidgetConfigActivity` as the first placement
+  step—the system creates the widget only AFTER the activity returns RESULT_OK.
 -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:minWidth="40dp"

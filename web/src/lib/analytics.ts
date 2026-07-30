@@ -1,35 +1,37 @@
 /**
- * Analytics — reine Aggregations-/Mathematik-Schicht für den Statistik-Bereich.
+ * Analytics — pure aggregation/mathematics layer for the statistics section.
  *
- * Bewusst frei von React/DOM: nimmt die vom Server gelieferten `Intake[]` /
- * `Substance[]` / `Assessment[]` entgegen und liefert plottbare Zwischenformen
- * (Tages-Buckets, Dosis-Serien, Ranglisten, Tageszeit-Verteilungen,
- * Korrelation). Der `StatistikScreen` ruft das per `useMemo`.
+ * Deliberately free of React/DOM: takes the server-provided `Intake[]` /
+ * `Substance[]` / `Assessment[]` and returns plottable intermediate forms
+ * (daily buckets, dose series, rankings, time-of-day distributions,
+ * correlation). The `StatistikScreen` calls this from `useMemo`.
  *
- * Zeit-Semantik wie im Rest der App: lokale Wanduhrzeit-Strings, Konsum-Tag
- * mit Grenze 03:30 (`intake.date` ist serverseitig bereits aufgelöst; für die
- * Tageszeit-Verteilung zählt hingegen die echte Wanduhr-Stunde aus `takenAt`).
+ * Time semantics match the rest of the app: local wall-clock strings,
+ * consumption day with the 03:30 boundary (`intake.date` is already resolved
+ * server-side; the time-of-day distribution instead uses the real wall-clock
+ * hour from `takenAt`).
  *
- * WICHTIG: Freitext-Mengen ("150 mg", "1 Tablette", "0,5 mg", `null`) werden
- * NIE über Substanzen hinweg summiert — jede Dosis-Summe gilt pro Substanz und
- * pro Einheit. Substanzen ohne parsebare Menge erscheinen count-basiert.
+ * IMPORTANT: free-text amounts ("150 mg", "1 Tablette", "0,5 mg", `null`) are
+ * NEVER summed across substances — every dose sum is per-substance and per-
+ * unit. Substances without a parseable amount appear count-based.
  */
 import type { Intake, Substance, SubstanceProfile, SubstanceServing, SubstanceProfileDTO } from './types';
 import { nameKey } from './plan';
 import { colorForName } from './format';
+import { activeIntlLocale } from './i18n';
 import { hourOf } from './time';
 import { consumptionTodayOffset } from './time';
 
-// ───────────────────────── Mengen-Parsing ─────────────────────────
+// ───────────────────────── Amount parsing ─────────────────────────
 
 export interface ParsedAmount {
-  /** Zahlwert der Menge (bei Bereichen der Mittelwert). */
+  /** Numeric value (mean value for ranges). */
   value: number;
-  /** Einheit, kleingeschrieben & normalisiert ("mg", "ml", "tablette", "%", "" = einheitenlos). */
+  /** Unit, lowercased & normalised ("mg", "ml", "tablette", "%", "" = unit-less). */
   unit: string;
 }
 
-/** Häufige Einheiten-Synonyme/Plurale auf eine kanonische Form ziehen. */
+/** Collapse common unit synonyms/plurals to a canonical form. */
 const UNIT_ALIASES: Record<string, string> = {
   tabletten: 'tablette',
   tbl: 'tablette',
@@ -55,17 +57,17 @@ function normalizeUnit(raw: string): string {
 }
 
 /**
- * Parst eine Freitext-Menge in `{ value, unit }`. Toleriert Dezimal-Komma,
- * fehlende Leerzeichen ("150mg") und Bereiche ("150–300 mg" → 225). Ohne
- * Zahlwert (reine Notiz, leer, `null`) → `null`; die Substanz zählt dann nur
- * count-basiert. Reine Zahl ohne Einheit ("1") → `{ value: 1, unit: '' }`.
+ * Parse a free-text amount into `{ value, unit }`. Tolerates decimal commas,
+ * missing whitespace ("150mg") and ranges ("150–300 mg" → 225). With no
+ * numeric value (pure note, empty, `null`) → `null`; the substance then only
+ * counts as `count`. A bare number with no unit ("1") → `{ value: 1, unit: '' }`.
  */
 export function parseAmount(raw: string | null | undefined): ParsedAmount | null {
   if (!raw) return null;
   const norm = raw
     .trim()
     .toLocaleLowerCase('de')
-    .replace(/[‐-―−]/g, '-') // – — − (Bereich-Striche) → "-"
+    .replace(/[‐-―−]/g, '-') // – — − (range dashes) → "-"
     .replace(/(\d)\s*[.,]\s*(\d)/g, '$1.$2') // "0,5" / "0 . 5" → "0.5"
     .replace(/\s+/g, ' ')
     .trim();
@@ -73,55 +75,55 @@ export function parseAmount(raw: string | null | undefined): ParsedAmount | null
   const nums = norm.match(/\d+(?:\.\d+)?/g);
   if (!nums || nums.length === 0) return null;
 
-  // Bereich "a-b" → Mittelwert; sonst die erste Zahl.
+  // Range "a-b" → mean; otherwise the first number.
   const range = norm.match(/(\d+(?:\.\d+)?)\s*-\s*(\d+(?:\.\d+)?)/);
   const value = range ? (parseFloat(range[1]) + parseFloat(range[2])) / 2 : parseFloat(nums[0]);
   if (!isFinite(value)) return null;
 
-  // Einheit = erstes Buchstaben-/Prozent-Token nach einer Zahl.
+  // Unit = first letter/percent token following a number.
   const unitMatch = norm.match(/\d(?:[\d.]*)\s*([a-zäöüßµ%]+)/);
   const unit = unitMatch ? normalizeUnit(unitMatch[1]) : '';
   return { value, unit };
 }
 
-/** Anzeige einer Einheit (leer → "×" als generischer Stück-Marker). */
+/** Display a unit (empty → "×" as a generic piece-marker). */
 export function unitLabel(unit: string): string {
   return unit === '' ? '×' : unit;
 }
 
-// ───────────────────────── Farb-Resolver ─────────────────────────
+// ───────────────────────── Colour resolver ─────────────────────────
 
-/** Farbe einer Substanz: eigene Farbe > stabile Ableitung aus dem Namen. */
+/** A substance's colour: its own colour > stable derivation from the name. */
 export function substanceColor(name: string, substances: Substance[]): string {
   const key = nameKey(name);
   const s = substances.find((x) => nameKey(x.name) === key);
   return s?.color || colorForName(name);
 }
 
-// ───────────────────────── Tages-Achse ─────────────────────────
+// ───────────────────────── Day axis ─────────────────────────
 
-/** Konsum-Tage des Zeitfensters, ALT → NEU (Länge = `range`). */
+/** Consumption days of the window, OLDEST → NEWEST (length = `range`). */
 export function dayAxis(range: number): string[] {
   const out: string[] = [];
   for (let i = range - 1; i >= 0; i--) out.push(consumptionTodayOffset(i));
   return out;
 }
 
-// ───────────────────────── Rangliste ─────────────────────────
+// ───────────────────────── Ranking ─────────────────────────
 
 export interface SubstanceStat {
-  /** Anzeigename (bevorzugt aus der Substanz-Tabelle). */
+  /** Display name (preferred from the substances table). */
   name: string;
-  /** nameKey (umlaut-bewusst normalisiert) — stabiler Gruppierungsschlüssel. */
+  /** nameKey (umlaut-aware normalisation) — stable grouping key. */
   key: string;
   color: string;
-  /** Einnahmen im Zeitfenster. */
+  /** Intakes in the window. */
   count: number;
-  /** Anzahl Konsum-Tage mit ≥ 1 Einnahme. */
+  /** Number of consumption days with ≥ 1 intake. */
   daysUsed: number;
 }
 
-/** Substanzen nach Aktivität (Einnahmen, dann Tage) absteigend sortiert. */
+/** Substances sorted by activity (intakes, then days) in descending order. */
 export function ranking(intakes: Intake[], substances: Substance[]): SubstanceStat[] {
   const byKey = new Map<string, { name: string; count: number; days: Set<string> }>();
   for (const it of intakes) {
@@ -141,31 +143,31 @@ export function ranking(intakes: Intake[], substances: Substance[]): SubstanceSt
       count: v.count,
       daysUsed: v.days.size,
     }))
-    .sort((a, b) => b.count - a.count || b.daysUsed - a.daysUsed || a.name.localeCompare(b.name, 'de'));
+    .sort((a, b) => b.count - a.count || b.daysUsed - a.daysUsed || a.name.localeCompare(b.name, activeIntlLocale()));
 }
 
-// ───────────────────────── Konsum-Kalender (Punchcard) ─────────────────────────
+// ───────────────────────── Consumption calendar (Punchcard) ─────────────────────────
 
 export interface PunchRow {
   stat: SubstanceStat;
-  /** Intensität 0…1 je Tag, ausgerichtet an `dayAxis` (relativ zur eigenen Spitze). */
+  /** Intensity 0…1 per day, aligned to `dayAxis` (relative to the row's peak). */
   cells: number[];
-  /** Rohanzahl der Einnahmen je Tag (für die Tap-Detailzeile). */
+  /** Raw intake count per day (for the tap-detail row). */
   counts: number[];
-  /** Kurz-Mengenlabel je Tag (z. B. "300 mg", "2×") oder "" wenn leer. */
+  /** Short amount label per day (e.g. "300 mg", "2×") or "" if empty. */
   labels: string[];
 }
 
 /**
- * Substanz × Tag-Matrix. Zeilen = Substanzen (nach Aktivität), Spalten = Tage
- * der `dayAxis`. Zell-Intensität = Einnahmen/Tag, je Zeile auf die eigene
- * Spitze normiert (macht auch selten genutzte Stoffe lesbar).
+ * Substance × day matrix. Rows = substances (by activity), columns = days
+ * of `dayAxis`. Cell intensity = intakes/day, normalised per row to the row's
+ * own peak (so even rarely used substances stay readable).
  */
 export function punchcard(intakes: Intake[], substances: Substance[], days: string[]): PunchRow[] {
   const dayIndex = new Map(days.map((d, i) => [d, i]));
   const stats = ranking(intakes, substances);
 
-  // Rohe Tages-Einnahmen + Mengen je Substanz.
+  // Raw daily intakes + amounts per substance.
   const perKey = new Map<string, { counts: number[]; amounts: number[]; unit: string }>();
   for (const st of stats) perKey.set(st.key, { counts: new Array(days.length).fill(0), amounts: new Array(days.length).fill(0), unit: '' });
 
@@ -183,7 +185,7 @@ export function punchcard(intakes: Intake[], substances: Substance[], days: stri
       unitVotes.set(key, votes);
     }
   }
-  // Dominante Einheit je Substanz + Tagesdosis in dieser Einheit.
+  // Dominant unit per substance + daily dose in that unit.
   for (const st of stats) {
     const votes = unitVotes.get(st.key);
     const unit = votes ? [...votes.entries()].sort((a, b) => b[1] - a[1])[0][0] : '';
@@ -216,7 +218,7 @@ export function punchcard(intakes: Intake[], substances: Substance[], days: stri
   });
 }
 
-// ───────────────────────── Dosis über Zeit (pro Substanz) ─────────────────────────
+// ───────────────────────── Dose over time (per substance) ─────────────────────────
 
 export interface DoseDay {
   date: string;
@@ -225,22 +227,22 @@ export interface DoseDay {
 }
 
 export interface DailyDoseSeries {
-  /** 'dose' = summierte Menge in `unit`; 'count' = Anzahl Einnahmen. */
+  /** 'dose' = summed amount in `unit`; 'count' = intake count. */
   mode: 'dose' | 'count';
   unit: string;
   days: DoseDay[];
   total: number;
-  /** Ø über Tage MIT Einnahme. */
+  /** Average across days WITH an intake. */
   avgPerActiveDay: number;
-  /** Anteil Einnahmen, deren Menge in `unit` parsebar war (nur Info bei 'dose'). */
+  /** Share of intakes whose amount was parseable in `unit` (info only when 'dose'). */
   coverage: number;
 }
 
 /**
- * Tages-Serie einer Substanz. Wenn ≥ 60 % der Einnahmen dieselbe parsebare
- * Einheit tragen → Dosis-Summe in dieser Einheit ('dose'); sonst Fallback auf
- * Anzahl Einnahmen/Tag ('count'). `days` deckt die gesamte Achse ab (0 an
- * Tagen ohne Einnahme), damit der Balkenchart Lücken zeigt.
+ * Daily series for one substance. If ≥ 60 % of the intakes share the same
+ * parseable unit → dose sum in that unit ('dose'); otherwise fallback to
+ * intake count/day ('count'). `days` covers the whole axis (0 on days with
+ * no intake) so the bar chart shows gaps.
  */
 export function dailyDoseSeries(intakesOfSubstance: Intake[], days: string[]): DailyDoseSeries {
   const dayIndex = new Map(days.map((d, i) => [d, i]));
@@ -285,18 +287,22 @@ export function dailyDoseSeries(intakesOfSubstance: Intake[], days: string[]): D
   };
 }
 
-// ───────────────────────── Tageszeit-Muster ─────────────────────────
+// ───────────────────────── Time-of-day pattern ─────────────────────────
 
 export type Daypart = 'morning' | 'noon' | 'evening' | 'night';
 
+/**
+ * Daypart catalog (English labels as the stable fallback; the screen feeds its
+ * own translated labels to `DaypartChart` so this rarely surfaces in the UI).
+ */
 export const DAYPART_DEFS: { key: Daypart; label: string; range: string }[] = [
-  { key: 'morning', label: 'Morgens', range: '5–11' },
-  { key: 'noon', label: 'Mittags', range: '11–15' },
-  { key: 'evening', label: 'Abends', range: '15–21' },
-  { key: 'night', label: 'Nachts', range: '21–5' },
+  { key: 'morning', label: 'Morning', range: '5–11' },
+  { key: 'noon', label: 'Midday', range: '11–15' },
+  { key: 'evening', label: 'Evening', range: '15–21' },
+  { key: 'night', label: 'Night', range: '21–5' },
 ];
 
-/** Tagesabschnitt aus der echten Wanduhr-Stunde von `takenAt`. */
+/** Daypart derived from the real wall-clock hour of `takenAt`. */
 export function daypartOf(takenAt: string): Daypart {
   const h = hourOf(takenAt);
   if (h >= 5 && h < 11) return 'morning';
@@ -307,7 +313,7 @@ export function daypartOf(takenAt: string): Daypart {
 
 export interface DaypartDistribution {
   counts: Record<Daypart, number>;
-  /** 24 Werte (Stunde 0…23) für das feine Histogramm. */
+  /** 24 values (hour 0…23) for the fine-grained histogram. */
   hours: number[];
   total: number;
 }
@@ -323,11 +329,11 @@ export function daypartDistribution(intakes: Intake[]): DaypartDistribution {
   return { counts, hours, total: intakes.length };
 }
 
-// ───────────────────────── Korrelation ─────────────────────────
+// ───────────────────────── Correlation ─────────────────────────
 
 /**
- * Pearson-Korrelationskoeffizient über gepaarte Werte. `null`, wenn < 3 Paare
- * oder eine Reihe keine Varianz hat (dann ist `r` nicht sinnvoll definiert).
+ * Pearson correlation coefficient over paired values. `null` when there are
+ * < 3 pairs or a series has no variance (then `r` isn't meaningfully defined).
  */
 export function pearson(xs: number[], ys: number[]): number | null {
   const n = Math.min(xs.length, ys.length);
@@ -347,37 +353,48 @@ export function pearson(xs: number[], ys: number[]): number | null {
   return cov / Math.sqrt(vx * vy);
 }
 
-/** Klartext-Einordnung eines Korrelationskoeffizienten. */
-export function correlationLabel(r: number): string {
+/**
+ * Classification of a correlation coefficient. Returns a structured key the
+ * UI translates via `stats.wellbeing.correlation.*`; one of the nine buckets
+ * (none / weak/moderate/clear/strong × positive/negative).
+ */
+export type CorrelationBucket =
+  | 'none'
+  | 'weakPositive' | 'weakNegative'
+  | 'moderatePositive' | 'moderateNegative'
+  | 'clearPositive' | 'clearNegative'
+  | 'strongPositive' | 'strongNegative';
+
+export function correlationBucket(r: number): CorrelationBucket {
   const a = Math.abs(r);
-  const strength = a < 0.2 ? 'kein' : a < 0.4 ? 'schwacher' : a < 0.6 ? 'moderater' : a < 0.8 ? 'deutlicher' : 'starker';
-  if (a < 0.2) return 'kein erkennbarer Zusammenhang';
-  const dir = r > 0 ? 'gleichläufiger' : 'gegenläufiger';
-  return `${strength}, ${dir} Zusammenhang`;
+  if (a < 0.2) return 'none';
+  const strength = a < 0.4 ? 'weak' : a < 0.6 ? 'moderate' : a < 0.8 ? 'clear' : 'strong';
+  const dir = r > 0 ? 'Positive' : 'Negative';
+  return `${strength}${dir}` as CorrelationBucket;
 }
 
-// ───────────────────────── Zahl-Formatierung ─────────────────────────
+// ───────────────────────── Number formatting ─────────────────────────
 
-/** Kompakte Zahl: bis 2 Nachkommastellen, ohne überflüssige Nullen. */
+/** Compact number: up to 2 decimal places, no trailing zeros. */
 export function formatNum(n: number): string {
   if (!isFinite(n)) return '–';
   const rounded = Math.round(n * 100) / 100;
   return Number.isInteger(rounded) ? String(rounded) : String(rounded).replace('.', ',');
 }
 
-/** Masse lesbar: mg bis < 1 g, danach in g. */
+/** Human-readable mass: mg below 1 g, g from there on. */
 export function formatMass(mg: number): string {
   if (!isFinite(mg)) return '–';
   if (mg >= 1000) return `${formatNum(mg / 1000)} g`;
   return `${formatNum(mg)} mg`;
 }
 
-// ───────────────────────── Wirkstoff-Bilanz (KI-Profile) ─────────────────────────
-// Deterministische Hochrechnung: Das KI-Profil liefert je Substanz „so viel
-// Wirkstoff pro Portion" + eine Portionsdefinition; hier wird die tatsächlich
-// protokollierte Freitext-Menge in Portionen umgerechnet und mit dem Gehalt
-// multipliziert. Ergebnis wird quellenübergreifend pro Wirkstoff summiert
-// (z. B. Gesamt-Koffein aus Energy-Drink + Cola + Kaffee).
+// ───────────────────────── Active-ingredient balance (AI profiles) ─────────────────────────
+// Deterministic up-scaling: each AI profile carries "so much active ingredient
+// per serving" + a serving definition for one substance; here the actually
+// recorded free-text amount is converted into servings and multiplied by the
+// ingredient content. Results are summed per active ingredient across sources
+// (e.g. total caffeine from energy drinks + cola + coffee).
 
 const MASS_TO_MG: Record<string, number> = { mg: 1, g: 1000, kg: 1_000_000, µg: 0.001, mcg: 0.001, ug: 0.001 };
 const VOL_TO_ML: Record<string, number> = { ml: 1, cl: 10, dl: 100, l: 1000 };
@@ -388,16 +405,16 @@ function isMassUnit(u: string): boolean {
 function isVolUnit(u: string): boolean {
   return u in VOL_TO_ML;
 }
-/** „Zählbare" Einheit (Dose, Glas, Tablette, Tasse …) oder gar keine Einheit. */
+/** "Countable" unit (dose, glass, tablet, cup …) or no unit at all. */
 function isCountUnit(u: string): boolean {
   return u === '' || (!isMassUnit(u) && !isVolUnit(u) && u !== '%');
 }
 
 /**
- * Rechnet eine geparste Menge in „Portionen" der Substanz um (oder null, wenn
- * nicht auflösbar). Präzedenz: gleiche Einheit → gleiche Masse/Volumen-Familie
- * → Volumen/Masse über die physische Portionsgröße (`milliliters`/`grams`) →
- * zählbare Einheit = Anzahl Portionen.
+ * Convert a parsed amount into "servings" of the substance (or null when not
+ * resolvable). Precedence: same unit → same mass/volume family → volume/mass
+ * via the physical serving size (`milliliters`/`grams`) → countable unit =
+ * number of servings.
  */
 export function scaleServings(parsed: ParsedAmount, serving: SubstanceServing): number | null {
   const pu = parsed.unit;
@@ -411,7 +428,7 @@ export function scaleServings(parsed: ParsedAmount, serving: SubstanceServing): 
     return (parsed.value * VOL_TO_ML[pu]) / serving.milliliters;
   if (isMassUnit(pu) && serving.grams && serving.grams > 0)
     return (parsed.value * MASS_TO_MG[pu]) / (serving.grams * 1000);
-  if (isCountUnit(pu)) return parsed.value; // "1 Dose" / "2" / "1 Glas" = N Portionen
+  if (isCountUnit(pu)) return parsed.value; // "1 Dose" / "2" / "1 Glas" = N servings
   return null;
 }
 
@@ -423,9 +440,9 @@ export interface CompoundContribution {
 }
 
 /**
- * Wirkstoff-Beiträge EINER Einnahme laut Profil. `null` = Menge nicht
- * auflösbar (→ „unquantifiziert"); `[]` = auflösbar, aber Profil ohne
- * nennenswerte Wirkstoffe.
+ * Active-ingredient contributions of a SINGLE intake per its profile.
+ * `null` = amount not resolvable (→ "unquantified"); `[]` = resolvable, but
+ * the profile has no notable active ingredients.
  */
 export function applyProfile(intake: Pick<Intake, 'amount'>, profile: SubstanceProfile): CompoundContribution[] | null {
   const parsed = parseAmount(intake.amount);
@@ -451,25 +468,25 @@ export interface CompoundReport {
   compound: string;
   label: string;
   category: string;
-  /** Gesamt-mg im Zeitraum (quellenübergreifend). */
+  /** Total mg in the period (across sources). */
   totalMg: number;
-  /** mg je Tag, ausgerichtet an der Tages-Achse. */
+  /** mg per day, aligned to the day axis. */
   perDay: number[];
-  /** Ø-mg über Tage MIT Beitrag. */
+  /** Average mg across days WITH a contribution. */
   avgPerActiveDay: number;
-  /** Beitrag je Quell-Substanz, absteigend. */
+  /** Contribution per source substance, descending. */
   bySource: CompoundSource[];
-  /** Tage mit ≥ 1 Beitrag. */
+  /** Days with ≥ 1 contribution. */
   daysActive: number;
-  /** Einnahmen quantifizierter Quell-Substanzen, deren Menge NICHT auflösbar war. */
+  /** Intakes of quantified source substances whose amount was NOT resolvable. */
   unquantified: number;
 }
 
 /**
- * Aggregiert alle Einnahmen über die (gecachten) KI-Profile zu Wirkstoff-
- * Berichten. Nur Substanzen MIT Profil tragen bei; nicht auflösbare Mengen
- * werden je betroffenem Wirkstoff als `unquantified` gezählt (ehrlicher Hinweis
- * in der UI). Sortiert nach Gesamt-mg absteigend.
+ * Aggregate every intake across the (cached) AI profiles into active-ingredient
+ * reports. Only substances WITH a profile contribute; non-resolvable amounts
+ * count as `unquantified` per affected ingredient (an honest hint in the UI).
+ * Sorted by total mg descending.
  */
 export function compoundReports(
   intakes: Intake[],
@@ -500,12 +517,12 @@ export function compoundReports(
   for (const it of intakes) {
     const key = nameKey(it.substanceName);
     const dto = profilesByKey[key];
-    if (!dto) continue; // Substanz (noch) nicht analysiert
+    if (!dto) continue; // Substance (not yet) analysed
     const di = dayIndex.get(it.date);
     if (di === undefined) continue;
     const contrib = applyProfile(it, dto.profile);
     if (contrib == null) {
-      // Nicht auflösbar → je Wirkstoff des Profils als unquantifiziert zählen.
+      // Not resolvable → count as unquantified for each ingredient in the profile.
       for (const ing of dto.profile.ingredients) {
         const a = ensure({ compound: ing.compound, label: ing.label, category: ing.category, mg: 0 });
         a.unquantified += 1;
@@ -539,19 +556,25 @@ export function compoundReports(
       };
     })
     .filter((r) => r.totalMg > 0 || r.unquantified > 0)
-    .sort((a, b) => b.totalMg - a.totalMg || a.label.localeCompare(b.label, 'de'));
+    .sort((a, b) => b.totalMg - a.totalMg || a.label.localeCompare(b.label, activeIntlLocale()));
 }
 
-/** Anschauliche Vergleichsgröße für einen Wirkstoff-Betrag (oder null). */
-const EQUIV: Record<string, { mgPerUnit: number; unit: string }> = {
-  caffeine: { mgPerUnit: 80, unit: 'Tassen Kaffee' },
-  alcohol: { mgPerUnit: 12000, unit: 'Standardgläser' }, // 12 g reiner Alkohol / Standardglas
-  sugar: { mgPerUnit: 3000, unit: 'Zuckerwürfel' }, // ~3 g / Würfel
-  nicotine: { mgPerUnit: 1, unit: 'Zigaretten' }, // ~1 mg aufgenommen / Zigarette
+/**
+ * Intuitive comparison quantity for an active-ingredient amount — structured
+ * (kind + count) instead of a German/uniform unit string, so the UI can do
+ * the wording itself (see `stats.equivalent.*`). Returns `null` when no
+ * equivalent exists for the compound or the amount is 0/negative.
+ */
+export type EquivalentKind = 'coffee' | 'alcohol' | 'sugar' | 'nicotine';
+const EQUIV: Record<string, { mgPerUnit: number; kind: EquivalentKind }> = {
+  caffeine: { mgPerUnit: 80, kind: 'coffee' },
+  alcohol: { mgPerUnit: 12000, kind: 'alcohol' }, // 12 g of pure alcohol per standard drink
+  sugar: { mgPerUnit: 3000, kind: 'sugar' }, // ~3 g per sugar cube
+  nicotine: { mgPerUnit: 1, kind: 'nicotine' }, // ~1 mg absorbed per cigarette
 };
 
-export function equivalentFor(compound: string, mg: number): { value: number; unit: string } | null {
+export function equivalentFor(compound: string, mg: number): { kind: EquivalentKind; count: number } | null {
   const e = EQUIV[compound];
   if (!e || mg <= 0) return null;
-  return { value: mg / e.mgPerUnit, unit: e.unit };
+  return { kind: e.kind, count: mg / e.mgPerUnit };
 }

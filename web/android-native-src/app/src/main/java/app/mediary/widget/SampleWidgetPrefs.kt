@@ -3,14 +3,14 @@ package app.mediary.widget
 import android.content.Context
 
 /**
- * SharedPreferences-Schema für die meDiary-Sample-Widgets.
+ * SharedPreferences schema for the meDiary sample widgets.
  *
- * Pro Widget-Instanz (Android-AppWidget-ID) werden fünf Werte gehalten;
- * zusätzlich ein app-globaler apiBase-Schlüssel, den das WebView beim Start
- * spiegelt (siehe `app.mediary.bridge.WidgetBridgePlugin`).
+ * Five values are stored for each widget instance (Android app-widget ID),
+ * plus an app-global apiBase key mirrored by the WebView at startup (see
+ * `app.mediary.bridge.WidgetBridgePlugin`).
  *
- * Datei: `mediary_widgets` (MODE_PRIVATE). Bei App-Daten-Reset gehen alle
- * Widget-Bindungen verloren — der Nutzer legt die Widgets dann neu an.
+ * File: `mediary_widgets` (MODE_PRIVATE). Resetting app data removes all widget
+ * bindings, so the user must add the widgets again afterward.
  */
 object SampleWidgetPrefs {
 
@@ -18,9 +18,9 @@ object SampleWidgetPrefs {
     private const val KEY_API_BASE = "apiBase"
 
     /**
-     * Eine Widget-Bindung. `colorHex` ist die Substanz-Farbe aus
-     * `GET /api/substances`; wenn `null`/leer fällt der Provider auf die
-     * Slot-Farbe aus `colors.xml` zurück.
+     * A widget binding. `colorHex` is the substance color returned by
+     * `GET /api/substances`; if it is null or empty, the provider falls back
+     * to the slot color from `colors.xml`.
      */
     data class Binding(
         val substanceId: Long,
@@ -66,7 +66,7 @@ object SampleWidgetPrefs {
             .apply()
     }
 
-    /** API-Basis-URL — wird vom WebView über `WidgetBridgePlugin.setApiBase` gesetzt. */
+    /** API base URL, set by the WebView via `WidgetBridgePlugin.setApiBase`. */
     fun apiBase(ctx: Context): String? =
         open(ctx).getString(KEY_API_BASE, null)?.takeIf { it.isNotBlank() }
 

@@ -153,7 +153,16 @@ function truncate(s: string, n: number): string {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
-/** Stabiler Hash der Analyse-Eingabe → „stale"-Erkennung bei Eingabe-Änderung. */
+/**
+ * Stabiler Hash der Analyse-Eingabe → „stale"-Erkennung bei Eingabe-Änderung.
+ *
+ * Enthält AUCH `config.aiLanguage`: bei einem Wechsel von `de` → `en` (oder
+ * zurück) ändern sich die `label`-/`summary`-/`serving.label`-Strings im
+ * gecachten Profil strukturell, also gilt der Cache als veraltet. Die
+ * vorhandene `needsAnalysis()` / `stale`-UI macht das transparent — bei
+ * `scope='missing'` werden diese Profile beim nächsten „Analyze"-Klick
+ * einmalig neu berechnet, danach passt der Hash wieder.
+ */
 export function inputHash(input: SubstanceInput): string {
   const payload = JSON.stringify({
     name: input.name,
@@ -161,13 +170,25 @@ export function inputHash(input: SubstanceInput): string {
     note: input.note,
     unit: input.unit,
     examples: [...input.examples].sort(),
+    language: config.aiLanguage,
   });
   return crypto.createHash('sha256').update(payload).digest('hex').slice(0, 16);
 }
 
 // ───────────────────────── Prompt ─────────────────────────
 
-const SYSTEM_PROMPT = `Du bist ein pharmakologischer und ernährungswissenschaftlicher Analyst. Aufgabe: Für jede genannte Substanz (Getränk, Medikament, Nahrungsergänzung, Genussmittel, Droge …) die typischen, gut belegten Wirkstoff-/Inhaltsstoff-Gehalte PRO ÜBLICHER PORTION schätzen — damit eine App den Gesamtkonsum eines Wirkstoffs (z. B. Koffein) über ALLE Quellen hinweg zusammenrechnen kann.
+type IngredientsLang = 'de' | 'en';
+
+/**
+ * Sprachabhängige System-Persona für die Wirkstoff-Analyse. Wird per
+ * `localizedIngredientsSystemPrompt(lang)` ausgewählt; nur die kleinen
+ * Scaffolding-Strings (summary-Doku, Beispiele) werden umgeschaltet. Die
+ * eigentlichen Regeln (compound-Kanonisierung, mg-Konvention, Kategorien)
+ * sind sprachneutral — `compound`-Keys bleiben canonical/stable Englisch
+ * (z. B. `"caffeine"`), und der `category`-Enum bleibt ebenfalls Englisch,
+ * weil der Client (`web/src/lib/analytics.ts`) darauf aggregiert.
+ */
+const SYSTEM_PROMPT_DE = `Du bist ein pharmakologischer und ernährungswissenschaftlicher Analyst. Aufgabe: Für jede genannte Substanz (Getränk, Medikament, Nahrungsergänzung, Genussmittel, Droge …) die typischen, gut belegten Wirkstoff-/Inhaltsstoff-Gehalte PRO ÜBLICHER PORTION schätzen — damit eine App den Gesamtkonsum eines Wirkstoffs (z. B. Koffein) über ALLE Quellen hinweg zusammenrechnen kann.
 
 Antworte AUSSCHLIESSLICH mit einem JSON-Array (kein Fließtext, keine Markdown-Codefences). Ein Objekt pro Eingabe-Substanz, Feld "name" EXAKT wie in der Eingabe. Schema je Objekt:
 {
@@ -198,15 +219,84 @@ Regeln:
 Beispiel-Ausgabe (nur Format):
 [{"name":"Energy Drink","serving":{"label":"1 Dose (250 ml)","value":1,"unit":"dose","milliliters":250,"grams":null},"ingredients":[{"compound":"caffeine","label":"Koffein","category":"stimulant","mgPerServing":80},{"compound":"sugar","label":"Zucker","category":"sugar","mgPerServing":27000},{"compound":"taurine","label":"Taurin","category":"other","mgPerServing":1000}],"summary":"Koffeinhaltiger Energy-Drink, Standarddose 250 ml.","confidence":"high"},{"name":"Cola","serving":{"label":"1 Glas (330 ml)","value":330,"unit":"ml","milliliters":330,"grams":null},"ingredients":[{"compound":"caffeine","label":"Koffein","category":"stimulant","mgPerServing":32},{"compound":"sugar","label":"Zucker","category":"sugar","mgPerServing":35000}],"summary":"Cola-Softdrink mit Koffein und Zucker.","confidence":"high"}]`;
 
-function buildUserPrompt(inputs: SubstanceInput[]): string {
+const SYSTEM_PROMPT_EN = `You are a pharmacology and nutritional-science analyst. Task: for each listed substance (beverage, medication, supplement, stimulant, drug, …) estimate the typical, well-documented active/ingredient content PER COMMON SERVING — so an app can sum the total intake of an active ingredient (e.g. caffeine) across ALL sources.
+
+Reply EXCLUSIVELY with a JSON array (no prose, no Markdown code fences). One object per input substance, "name" field EXACTLY as in the input. Schema per object:
+{
+  "name": string,
+  "serving": {
+    "label": string,          // e.g. "1 can (250 ml)"
+    "value": number,          // number of typical servings in the unit below (default 1)
+    "unit": string,           // unit AS THE USER LOGS IT — prefer the unit of the standard amount ("dose","ml","tablet","mg","cup","glass",…)
+    "milliliters": number|null,// volume of ONE serving in ml (drinks) — null otherwise
+    "grams": number|null       // mass of ONE serving in g (solids) — null otherwise
+  },
+  "ingredients": [
+    { "compound": string, "label": string, "category": string, "mgPerServing": number }
+  ],
+  "summary": string,          // one concise English sentence
+  "confidence": "low"|"medium"|"high"
+}
+
+Rules:
+- "compound": canonical, LOWERCASE English key so the same substances merge across sources. Common keys: caffeine, alcohol, sugar, nicotine, thc, cbd, taurine, theanine, paracetamol, ibuprofen, vitamin_c. For medications use the INN lowercase, e.g. quetiapine, pregabalin, sertraline.
+- "label": English display name (Caffeine, Alcohol, Sugar, Nicotine, THC, CBD, …). If you switch to a non-English UI, translate the label accordingly.
+- "category" from: stimulant, depressant, cannabinoid, analgesic, alcohol, nicotine, sugar, nutrient, medication, other.
+- "mgPerServing": milligrams of the substance in ONE serving. Alcohol as mass of pure ethanol in mg (0.5 l beer at 5% ≈ 20 000 mg). Sugar likewise in mg (1 cube ≈ 3 000 mg).
+- Only list NOTEWORTHY, well-established substances. No quantifiable substance (e.g. water) → "ingredients": [].
+- Estimate TYPICAL values, no false precision. Uncertain → "confidence":"low".
+- Use amount/note/examples to recognise the product and serving size (note "Red Bull" → energy drink 250 ml, ~80 mg caffeine).
+
+Example output (format only):
+[{"name":"Energy Drink","serving":{"label":"1 can (250 ml)","value":1,"unit":"dose","milliliters":250,"grams":null},"ingredients":[{"compound":"caffeine","label":"Caffeine","category":"stimulant","mgPerServing":80},{"compound":"sugar","label":"Sugar","category":"sugar","mgPerServing":27000},{"compound":"taurine","label":"Taurine","category":"other","mgPerServing":1000}],"summary":"Caffeinated energy drink, standard 250 ml can.","confidence":"high"},{"name":"Cola","serving":{"label":"1 glass (330 ml)","value":330,"unit":"ml","milliliters":330,"grams":null},"ingredients":[{"compound":"caffeine","label":"Caffeine","category":"stimulant","mgPerServing":32},{"compound":"sugar","label":"Sugar","category":"sugar","mgPerServing":35000}],"summary":"Cola soft drink with caffeine and sugar.","confidence":"high"}]`;
+
+function localizedIngredientsSystemPrompt(lang: IngredientsLang): string {
+  const base = lang === 'en' ? SYSTEM_PROMPT_EN : SYSTEM_PROMPT_DE;
+  if (lang === 'en') {
+    // Englisch braucht eine Extra-Direktive, weil die Personaregion sonst nicht
+    // zwingend Output-Sprache erzwingt — compound-Keys bleiben englisch (das
+    // ist sowieso kanonisch), aber label/summary werden in die UI-Sprache
+    // übersetzt.
+    return (
+      base +
+      [
+        '',
+        '## Output language (mandatory)',
+        '',
+        'You MUST write every "label" (in ingredients), every "serving.label" and',
+        'every "summary" in the language configured for this deployment (see',
+        'AI_LANGUAGE in the server config). Keep "compound" and "category" in',
+        'English regardless — they are canonical aggregation keys consumed by the',
+        'client and must remain stable across language switches.',
+      ].join('\n')
+    );
+  }
+  return base;
+}
+
+function buildUserPrompt(inputs: SubstanceInput[], lang: IngredientsLang = 'de'): string {
   const lines = inputs.map((s, i) => {
     const parts = [`${i + 1}. "${s.name}"`];
-    parts.push(`Standardmenge: ${s.defaultAmount ?? '—'}`);
-    if (s.unit) parts.push(`Einheit: ${s.unit}`);
-    if (s.note) parts.push(`Notiz: „${s.note}"`);
-    if (s.examples.length) parts.push(`Beispiele: [${s.examples.join(' | ')}]`);
+    if (lang === 'en') {
+      parts.push(`Standard amount: ${s.defaultAmount ?? '—'}`);
+      if (s.unit) parts.push(`Unit: ${s.unit}`);
+      if (s.note) parts.push(`Note: "${s.note}"`);
+      if (s.examples.length) parts.push(`Examples: [${s.examples.join(' | ')}]`);
+    } else {
+      parts.push(`Standardmenge: ${s.defaultAmount ?? '—'}`);
+      if (s.unit) parts.push(`Einheit: ${s.unit}`);
+      if (s.note) parts.push(`Notiz: „${s.note}"`);
+      if (s.examples.length) parts.push(`Beispiele: [${s.examples.join(' | ')}]`);
+    }
     return parts.join(' — ');
   });
+  if (lang === 'en') {
+    return (
+      `Analyse these ${inputs.length} substances. "Standard amount" is the typical logged amount; ` +
+      `prefer that unit for "serving.unit".\n\n${lines.join('\n')}\n\n` +
+      `Reply only with the JSON array (one object per substance, copy "name" exactly).`
+    );
+  }
   return (
     `Analysiere diese ${inputs.length} Substanzen. „Standardmenge" ist die typische protokollierte Menge; ` +
     `richte "serving.unit" bevorzugt danach aus.\n\n${lines.join('\n')}\n\n` +
@@ -336,9 +426,13 @@ export interface AnalyzeResult {
  * `scope='all'` alle neu. In Chunks à CHUNK_SIZE, damit der Prompt nicht zu
  * groß wird; ein fehlgeschlagener Chunk stoppt die übrigen nicht.
  */
-export async function analyzeSubstances(opts: { scope?: 'missing' | 'all' } = {}): Promise<AnalyzeResult> {
+export async function analyzeSubstances(opts: { scope?: 'missing' | 'all'; language?: 'de' | 'en' } = {}): Promise<AnalyzeResult> {
   if (!config.ingredients.apiKey) throw new Error('Kein KI-Schlüssel konfiguriert (MINIMAX_API_KEY).');
   const scope = opts.scope ?? 'missing';
+  // Ausgabesprache kommt aus dem Aufrufer (oder fällt auf config.aiLanguage zurück);
+  // muss MIT inputHash() konsistent sein, sonst markiert eine Sprache-Wechsel-
+  // Aktion die Profile nicht als stale.
+  const language = opts.language ?? config.aiLanguage;
   const inputs = gatherSubstanceInputs();
 
   const todo = scope === 'all' ? inputs : inputs.filter((s) => needsAnalysis(s));
@@ -346,13 +440,14 @@ export async function analyzeSubstances(opts: { scope?: 'missing' | 'all' } = {}
   let analyzed = 0;
 
   const model = config.ingredients.model;
+  const system = localizedIngredientsSystemPrompt(language);
   for (let i = 0; i < todo.length; i += CHUNK_SIZE) {
     const chunk = todo.slice(i, i + CHUNK_SIZE);
     const expected = new Map(chunk.map((s) => [s.key, s.name]));
     try {
       const text = await generateText({
-        system: SYSTEM_PROMPT,
-        prompt: buildUserPrompt(chunk),
+        system,
+        prompt: buildUserPrompt(chunk, language),
         maxTokens: config.ingredients.maxTokens,
         client: config.ingredients,
       });

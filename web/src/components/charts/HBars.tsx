@@ -5,21 +5,21 @@ export interface HBarItem {
   key: string;
   label: string;
   value: number;
-  /** Text am Balkenende (Default: die Zahl selbst). */
+  /** Text at the end of the bar (default: the number itself). */
   valueLabel?: string;
-  /** Kleine Sekundärzeile (z. B. "an 12 Tagen"). */
+  /** Small secondary line (for example, "on 12 days"). */
   sub?: string;
   color: string;
-  /** Führendes Element, z. B. ein `SubstanceSeal`. */
+  /** Leading element, for example a `SubstanceSeal`. */
   leading?: ReactNode;
   onClick?: () => void;
   active?: boolean;
 }
 
 /**
- * Horizontale Rangbalken — bewusst als HTML (nicht SVG): Text, Seals und
- * Sekundärzeilen bleiben so gestochen scharf und barrierefrei. Balkenbreite =
- * `value / max`, direkt am Balken beschriftet (keine Achsen).
+ * Horizontal ranking bars — deliberately HTML rather than SVG: text, seals and
+ * secondary lines stay crisp and accessible that way. Bar width = `value / max`,
+ * labelled directly on the bar (no axes).
  */
 export function HBars({ items, max }: { items: HBarItem[]; max?: number }) {
   const top = Math.max(max ?? 0, ...items.map((i) => i.value), 1);

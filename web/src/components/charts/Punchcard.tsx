@@ -19,11 +19,12 @@ interface Props {
   days: string[];
   selected?: PunchSelection | null;
   onSelect?: (sel: PunchSelection) => void;
+  intakeAria: (name: string, count: number) => string;
 }
 
 const STRIP_H = 20;
 
-export function Punchcard({ rows, days, selected, onSelect }: Props) {
+export function Punchcard({ rows, days, selected, onSelect, intakeAria }: Props) {
   const n = days.length;
   const midIdx = Math.floor((n - 1) / 2);
 
@@ -43,7 +44,7 @@ export function Punchcard({ rows, days, selected, onSelect }: Props) {
               height={STRIP_H}
               preserveAspectRatio="none"
               role="img"
-              aria-label={`${row.stat.name}: ${row.stat.count} Einnahmen`}
+              aria-label={intakeAria(row.stat.name, row.stat.count)}
             >
               {row.cells.map((intensity, i) => {
                 const isSel = selected?.key === row.stat.key && selected?.index === i;
